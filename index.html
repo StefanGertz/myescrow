@@ -1,0 +1,1004 @@
+<!-- --- PART 1 / 3 (HEAD + STYLES) --- -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>
+      MyEscrow - Mobile Demo (Safari Final)
+    </title>
+<style>:root {  --brand:#2563eb; --brand-600:#1d4ed8; --muted:#6b7280;  --card:#ffffff; --radius:14px; --shadow-soft:0 8px 28px rgba(16,24,40,0.08);}html, body {  height:100%; margin:0;  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;  background: linear-gradient(180deg,#eef4ff,#ffffff);  color:#0f172a;  -webkit-tap-highlight-color: transparent;  -webkit-text-size-adjust: 100%;}body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }.app {  min-height:100%;  display:grid;  grid-template-rows:auto 1fr auto;  opacity:1;                    /* Visible by default so no-JS viewers show UI */}.app.visible { opacity:1; }header {  display:flex; align-items:center; justify-content:space-between;  padding:10px 16px;  background:linear-gradient(90deg,var(--brand),var(--brand-600));  color:#fff; position:sticky; top:0; z-index:10;  box-shadow:0 4px 16px rgba(37,99,235,0.25);}.brand { display:flex; align-items:center; gap:10px; cursor:pointer; }.logo-mark {  width:36px; height:36px; border-radius:10px;  display:flex; align-items:center; justify-content:center;  background:linear-gradient(135deg,#2db8ff,#2563eb);  font-size:18px;}.header-actions { display:flex; gap:8px; align-items:center; }.icon-btn { background:rgba(255,255,255,0.18); color:#fff; border:0; padding:8px 10px; border-radius:12px; cursor:pointer; }main { position:relative; min-height:0; }.screen {  position:absolute; inset:0; overflow:auto;  padding:16px;  display:none;                /* Only the active one is shown */  animation:fadeIn .5s ease both;}.screen.active { display:block; }h2 { font-size:21px; margin:0 0 8px; }.lead { color:var(--muted); margin:0 0 14px; }.tiles {  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));  gap:12px; margin-bottom:12px;}.tile {  background:var(--card);  border-radius:var(--radius);  padding:14px;  box-shadow:var(--shadow-soft);  border:1px solid rgba(15,23,42,0.04);}.tx-list { display:flex; flex-direction:column; gap:10px; }.tx-item {  display:flex; justify-content:space-between; align-items:center;  padding:12px; border-radius:12px;  background:#fff; border:1px solid #eef2f7;  box-shadow:0 6px 18px rgba(2,6,23,0.05);}.btn { background:var(--brand); color:#fff; border:0; padding:10px 14px; border-radius:12px; font-weight:600; cursor:pointer; }.ghost { background:#fff; border:1px solid #e5e7eb; padding:8px 12px; border-radius:12px; cursor:pointer; }.toolbar {  display:flex; justify-content:center; align-items:center;  padding:8px 0 calc(env(safe-area-inset-bottom) + 8px);}.bottom-nav {  background:rgba(255,255,255,0.96);  border-radius:999px; padding:6px;  display:flex; gap:6px;  box-shadow:0 12px 32px rgba(2,6,23,0.16);}.bottom-nav button { background:transparent; border:0; padding:10px 14px; border-radius:999px; cursor:pointer; }.bottom-nav button.active { background:linear-gradient(90deg,var(--brand),var(--brand-600)); color:#fff; }.status-badge {  display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; text-transform:capitalize;}.status-pending{background:#f97316;}.status-active{background:#2563eb;}.status-resolved{background:#16a34a;}.status-disputed{background:#dc2626;}.sig-wrap{ background:#fff; border-radius:10px; padding:8px; border:1px solid #e6eef7; }canvas.signature{ width:100%; height:140px; background:#fff; border-radius:8px; touch-action:none; }@keyframes fadeIn { from { opacity:0; transform:translateY(8px);} to { opacity:1; transform:translateY(0);} }/* iOS/mobile compatibility additions */.screen { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }button, input, select, textarea { font-size:16px; }a, button { touch-action: manipulation; }.card { background:var(--card); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow-soft); border:1px solid rgba(15,23,42,0.04); }
+.logo-mark svg { display:none !important; }/* Hide fallback glyphs; icons provided via CSS masks */.icon-btn, .bottom-nav button { font-size:0; }.logo-mark { position:relative; color:transparent; font-size:0; }.logo-mark::after { content:""; position:absolute; inset:0; margin:auto; width:20px; height:20px; background:#fff; -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain; mask-repeat:no-repeat; mask-position:center; mask-size:contain; -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2l7 3v6c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V5l7-3zm-1 12l5-5-1.4-1.4L11 10.2 9.4 8.6 8 10l3 4z' fill='black'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2l7 3v6c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V5l7-3zm-1 12l5-5-1.4-1.4L11 10.2 9.4 8.6 8 10l3 4z' fill='black'/></svg>"); }/* Header icon masks */#homeTop::before, #notifTop::before, #profileTop::before,#bn-dashboard::before, #bn-create::before, #bn-wallet::before, #bn-settings::before { content:""; display:block; width:20px; height:20px; background: currentColor; -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain; mask-repeat:no-repeat; mask-position:center; mask-size:contain; }#homeTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z'/></svg>"); }#notifTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z'/></svg>"); }#profileTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z'/></svg>"); }/* Bottom nav icons */#bn-dashboard::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z'/></svg>"); }#bn-create::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z'/></svg>"); }#bn-wallet::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 7a2 2 0 0 1 2-2h13a3 3 0 0 1 3 3v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm12 3h6v4h-6a2 2 0 0 1 0-4z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 7a2 2 0 0 1 2-2h13a3 3 0 0 1 3 3v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm12 3h6v4h-6a2 2 0 0 1 0-4z'/></svg>"); }#bn-settings::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M4 6h16v2H4V6zm3 5h10v2H7v-2zm-5 5h16v2H2v-2z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M4 6h16v2H4V6zm3 5h10v2H7v-2zm-5 5h16v2H2v-2z'/></svg>"); }/* Open in Safari pill */#iab-open-safari { position:fixed; right:12px; bottom:calc(env(safe-area-inset-bottom) + 74px); background:#111827; color:#fff; border:0; padding:8px 12px; border-radius:999px; box-shadow:0 8px 24px rgba(2,6,23,0.24); z-index:95; display:none; font-size:14px; }</style>
+</head>
+<body>
+  <noscript>
+    <div style="position:fixed;inset:0;background:#0b1220;color:#fff;display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px;text-align:center;">
+      <div style="max-width:520px;line-height:1.45;">
+        <div style="font-weight:800;font-size:20px;margin-bottom:8px;">
+          JavaScript Required
+        </div>
+        <div>
+          This interactive demo needs JavaScript. If you opened it inside an app (e.g., WhatsApp or Mail), tap the share icon and choose "Open in Safari".
+        </div>
+      </div>
+    </div>
+  </noscript>
+  <!-- -PART 2 / 3 — BODY + SCREENS + TOOLBAR- -->
+  <!-- Splash (animated logo) -->
+  <div id="splash" style="position:fixed;inset:0;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;flex-direction:column;color:white;z-index:9999;animation:splashFade 1.6s ease forwards;pointer-events:none;">
+<style>@keyframes splashFade{      0%{opacity:0;transform:translate3d(0,8px,0);}      30%{opacity:1;transform:translate3d(0,0,0);}      70%{opacity:1;}      100%{opacity:0;}    }    .s-pulse{ animation: sp 2.6s ease-in-out infinite; }    @keyframes sp{0%,100%{transform:scale(1);}50%{transform:scale(1.06);}}</style>
+<svg class="s-pulse" viewBox="0 0 24 24" width="84" height="84" aria-hidden="true">
+  <path d="M4 13a4 4 0 0 1 4-4h4l3-3 5 5-3 3v2a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+<div style="height:12px;">
+</div>
+<div style="font-weight:800;font-size:22px;">
+  MyEscrow
+</div>
+</div>
+<div class="app" id="app">
+  <header>
+    <div class="brand" id="brand" role="button" title="Home">
+      <div class="logo-mark" aria-hidden="true">
+      </div>
+      <div class="brand-text">
+        MyEscrow
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" id="homeTop" aria-label="Home">
+        .
+      </button>
+      <button class="icon-btn" id="notifTop" aria-label="Notifications">
+        .
+      </button>
+      <button class="icon-btn" id="profileTop" aria-label="Profile">
+        .
+      </button>
+    </div>
+  </header>
+  <main id="main">
+    <!-- Home / Welcome -->
+    <section id="s-welcome" class="screen active">
+      <h2>
+        Welcome back
+      </h2>
+      <p class="lead">
+        Securely hold funds until both parties confirm delivery. Demo data stays in your browser.
+      </p>
+      <div class="tiles">
+        <div class="tile">
+          <div class="t-title">
+            Wallet
+          </div>
+          <div class="muted">
+            Balance
+          </div>
+          <div style="font-weight:800;font-size:18px;">
+            $
+            <span id="ui-balance">
+              0.00
+            </span>
+          </div>
+          <button class="ghost" data-action="navigate" data-target="s-wallet">
+            Manage
+          </button>
+        </div>
+        <div class="tile">
+          <div class="t-title">
+            Create
+          </div>
+          <div class="muted">
+            New escrow
+          </div>
+          <button class="btn" data-action="navigate" data-target="s-create">
+            Create
+          </button>
+        </div>
+        <div class="tile">
+          <div class="t-title">
+            Recent
+          </div>
+          <div class="muted">
+            Last activity
+          </div>
+          <div id="ui-recent" class="muted">
+            No activity yet
+          </div>
+        </div>
+        <div class="tile">
+          <div class="t-title">
+            Support
+          </div>
+          <div class="muted">
+            Help &amp; docs
+          </div>
+          <button class="ghost" data-action="modal" data-content="<h3>
+            Support
+          </h3>
+          <p class='muted'>
+            For demo support, reach out to the team.
+          </p>
+          ">Contact
+        </button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px">
+        Recent transactions
+      </h3>
+      <div id="tx-list" class="tx-list">
+      </div>
+    </div>
+  </section>
+  <!-- Dashboard -->
+  <section id="s-dashboard" class="screen">
+    <h2>
+      Dashboard
+    </h2>
+    <p class="lead">
+      Overview of your transactions and quick actions.
+    </p>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>
+          Transactions
+        </strong>
+      </div>
+      <div id="dash-txlist" class="tx-list" style="margin-top:12px;">
+      </div>
+    </div>
+  </section>
+  <!-- Create -->
+  <section id="s-create" class="screen">
+    <h2>
+      Create transaction
+    </h2>
+    <p class="lead">
+      Set up an escrow between a buyer and seller.
+    </p>
+    <div class="card">
+      <label class="muted">
+        Buyer
+      </label>
+      <input id="create-buyer" placeholder="Buyer name" autocomplete="off">
+      <label class="muted">
+        Seller
+      </label>
+      <input id="create-seller" placeholder="Seller name" autocomplete="off">
+      <label class="muted">
+        Amount
+      </label>
+      <input id="create-amount" type="number" placeholder="Amount" inputmode="decimal">
+      <label class="muted">
+        Category
+      </label>
+      <select id="create-category">
+        <option>
+          Goods
+        </option>
+        <option>
+          Services
+        </option>
+        <option>
+          Other
+        </option>
+      </select>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="ghost" data-action="navigate" data-target="s-welcome">
+          Cancel
+        </button>
+        <button class="btn" id="create-next">
+          Next - Terms
+        </button>
+      </div>
+    </div>
+  </section>
+  <!-- Agreement & Signature -->
+  <section id="s-agreement" class="screen">
+    <h2>
+      Agreement &amp; Signature
+    </h2>
+    <p class="lead">
+      Review terms and sign to accept.
+    </p>
+    <div class="card">
+      <label class="muted">
+        Agreement (preview)
+      </label>
+      <textarea id="agreement-text" readonly style="height:120px">
+        Standard escrow terms...
+      </textarea>
+      <div style="margin-top:12px">
+        <label class="muted">
+          Sign below
+        </label>
+        <div class="sig-wrap" style="margin-top:8px;">
+          <canvas id="signature-canvas" class="signature">
+          </canvas>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+          <button class="ghost" id="clear-sign">
+            Clear
+          </button>
+          <div class="muted" style="margin-left:auto;">
+            Draw with mouse or touch
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+          <button class="ghost" data-action="navigate" data-target="s-create">
+            Back
+          </button>
+          <button class="btn" id="agreement-next" disabled>
+            Accept &amp; Continue
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- Funding -->
+  <section id="s-funding" class="screen">
+    <h2>
+      Fund escrow
+    </h2>
+    <p class="lead">
+      Add demo funds to your wallet.
+    </p>
+    <div class="card">
+      <div class="muted">
+        Amount
+      </div>
+      <div style="font-weight:800;font-size:18px">
+        $
+        <span id="fund-amount">
+          0.00
+        </span>
+      </div>
+      <label class="muted" style="margin-top:8px">
+        Add to wallet
+      </label>
+      <input id="fund-input" type="number" placeholder="Amount to deposit" inputmode="decimal">
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="ghost" data-action="navigate" data-target="s-agreement">
+          Back
+        </button>
+        <button class="btn" id="fund-confirm">
+          Deposit &amp; Fund
+        </button>
+      </div>
+    </div>
+  </section>
+  <!-- Transaction detail -->
+  <section id="s-transaction" class="screen">
+    <h2 id="tx-title">
+      Transaction
+    </h2>
+    <div class="card">
+      <div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+        <div>
+          <div class="muted">
+            Buyer
+          </div>
+          <div id="tx-buyer" style="font-weight:700">
+          </div>
+          <div class="muted" style="margin-top:8px">
+            Seller
+          </div>
+          <div id="tx-seller" style="font-weight:700">
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="muted">
+            Amount
+          </div>
+          <div id="tx-amount" style="font-weight:700">
+          </div>
+          <div id="tx-status" style="margin-top:8px">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="tx-timeline" style="margin-top:12px">
+    </div>
+  </section>
+  <!-- Wallet -->
+  <section id="s-wallet" class="screen">
+    <h2>
+      Wallet
+    </h2>
+    <p class="lead">
+      Demo wallet to fund/withdraw test transactions.
+    </p>
+    <div class="card">
+      <div class="muted">
+        Available balance
+      </div>
+      <div style="font-weight:800;font-size:18px">
+        $
+        <span id="wallet-balance">
+          0.00
+        </span>
+      </div>
+      <label class="muted" style="margin-top:8px">
+        Top-up (mock)
+      </label>
+      <input id="wallet-topup" type="number" placeholder="Amount to deposit" inputmode="decimal">
+      <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">
+        <button class="btn" id="wallet-deposit">
+          Deposit
+        </button>
+        <button class="ghost" id="wallet-withdraw">
+          Withdraw
+        </button>
+      </div>
+      <h4 style="margin-top:16px;">
+        History
+      </h4>
+      <div id="wallet-history" class="tx-list" style="margin-top:8px;">
+      </div>
+    </div>
+  </section>
+  <!-- Settings -->
+  <section id="s-settings" class="screen">
+    <h2>
+      Settings
+    </h2>
+    <div class="card">
+      <label class="muted">
+        Full name
+      </label>
+      <input id="profile-name" placeholder="Your name" autocomplete="name">
+      <label class="muted">
+        Email
+      </label>
+      <input id="profile-email" placeholder="you@example.com" autocomplete="email">
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="ghost" id="mark-kyc">
+          Mark KYC
+        </button>
+        <button class="btn" id="save-profile">
+          Save
+        </button>
+      </div>
+    </div>
+  </section>
+</main>
+<!-- Bottom toolbar -->
+<div class="toolbar">
+  <nav class="bottom-nav">
+    <button data-action="navigate" data-target="s-dashboard" id="bn-dashboard" class="active" aria-label="Dashboard">
+      .
+    </button>
+    <button data-action="navigate" data-target="s-create" id="bn-create" aria-label="Create">
+      .
+    </button>
+    <button data-action="navigate" data-target="s-wallet" id="bn-wallet" aria-label="Wallet">
+      .
+    </button>
+    <button data-action="navigate" data-target="s-settings" id="bn-settings" aria-label="Settings">
+      .
+    </button>
+  </nav>
+</div>
+<!-- modal & toast -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,0.45);align-items:center;justify-content:center;z-index:90;">
+  <div id="modal-content">
+  </div>
+</div>
+<div id="toast" style="display:none;position:fixed;right:16px;top:18px;background:#111827;color:#fff;padding:10px 14px;border-radius:10px;z-index:100;">
+  msg
+</div>
+</div>
+<!-- In-app browser hint (shown only when detected) -->
+<button id="iab-open-safari" aria-label="Open in Safari">
+  Open in Safari
+</button>
+<script>
+(function(){
+  var hash = window.location.hash || '';
+  var params = {};
+  if (hash) {
+    var clean = hash.replace(/^#/, '');
+    if (clean) {
+      var pieces = clean.split('&');
+      for (var i = 0; i < pieces.length; i++) {
+        var part = pieces[i];
+        if (!part) continue;
+        var kv = part.split('=');
+        var key = decodeURIComponent(kv[0] || '');
+        if (!key) continue;
+        var value = decodeURIComponent(kv[1] || '');
+        if (!(key in params)) {
+          params[key] = value;
+        }
+      }
+    }
+  }
+  window.__initialParams = params;
+})();
+</script>
+<!--PART 3 / 3 — SCRIPT (Safari-safe, all features wired)-->
+<script>
+(function () {
+  function parseParams(source) {
+    const result = {};
+    if (!source) return result;
+    const clean = source.replace(/^[?#]/, '');
+    if (!clean) return result;
+    clean.split('&').forEach(pair => {
+      if (!pair) return;
+      const parts = pair.split('=');
+      const key = decodeURIComponent(parts[0] || '');
+      if (!key) return;
+      const value = decodeURIComponent(parts[1] || '');
+      if (!(key in result)) {
+        result[key] = value;
+      }
+    });
+    return result;
+  }
+
+  const searchParams = parseParams(window.location.search);
+  const hashParams = parseParams(window.location.hash);
+  const externalParams = (typeof window.__initialParams === 'object' && window.__initialParams) || {};
+  const shouldSkipSplash =
+    Object.prototype.hasOwnProperty.call(searchParams, 'nosplash') ||
+    Object.prototype.hasOwnProperty.call(hashParams, 'nosplash') ||
+    Object.prototype.hasOwnProperty.call(externalParams, 'nosplash');
+
+  const STORAGE_KEY = 'myescrow_mobilestable_v4';
+
+  const INITIAL_STATE = {
+    user: { name: 'Demo User', email: 'demo@example.com' },
+    wallet: {
+      balance: 300,
+      history: [
+        { id: 'h1', type: 'deposit', amount: 250, date: new Date(Date.now() - 864e5 * 3).toISOString() },
+        { id: 'h2', type: 'withdraw', amount: 50, date: new Date(Date.now() - 864e5 * 2).toISOString() },
+        { id: 'h3', type: 'deposit', amount: 100, date: new Date(Date.now() - 864e5 * 1).toISOString() }
+      ]
+    },
+    transactions: [
+      { id: 10101, buyer: 'Alice', seller: 'Bob', amount: 500, status: 'pending', timeline: [{ when: new Date(Date.now() - 864e5 * 2).toISOString(), text: 'Created' }] },
+      { id: 10102, buyer: 'John', seller: 'Sarah', amount: 1200, status: 'active', timeline: [{ when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Created' }, { when: new Date(Date.now() - 864e5 * 1.5).toISOString(), text: 'Buyer funded escrow' }] },
+      { id: 10103, buyer: 'Mark', seller: 'Linda', amount: 300, status: 'resolved', timeline: [{ when: new Date(Date.now() - 864e5 * 7).toISOString(), text: 'Created' }, { when: new Date(Date.now() - 864e5 * 5).toISOString(), text: 'Delivered' }, { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Closed' }] },
+      { id: 10104, buyer: 'Chris', seller: 'Dana', amount: 450, status: 'disputed', timeline: [{ when: new Date(Date.now() - 864e5 * 0.5).toISOString(), text: 'Buyer disputed delivery' }] }
+    ]
+  };
+
+  function cloneState(source) {
+    return JSON.parse(JSON.stringify(source));
+  }
+
+  function formatStatus(text) {
+    if (!text) return '';
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function formatCurrency(amount) {
+    const value = Number(amount) || 0;
+    return `$${value.toFixed(2)}`;
+  }
+
+  function eachNode(list, callback) {
+    if (!list || typeof callback !== 'function') return;
+    if (typeof list.forEach === 'function') {
+      list.forEach(callback);
+      return;
+    }
+    for (let i = 0; i < list.length; i += 1) {
+      callback(list[i], i, list);
+    }
+  }
+
+  let storage = null;
+  let memoryStore = null;
+  try {
+    storage = window.localStorage;
+    const probeKey = '__myescrow_probe__';
+    storage.setItem(probeKey, probeKey);
+    storage.removeItem(probeKey);
+  } catch (error) {
+    storage = null;
+    console.warn('Persistent storage unavailable; falling back to in-memory state.', error);
+  }
+
+  let state = cloneState(INITIAL_STATE);
+  let pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650 };
+  let sigCanvas = null;
+  let sigCtx = null;
+  let drawing = false;
+  let signatureDrawn = false;
+
+  function save() {
+    try {
+      if (storage) {
+        storage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } else {
+        memoryStore = cloneState(state);
+      }
+    } catch (error) {
+      console.warn('localStorage unavailable', error);
+      memoryStore = cloneState(state);
+    }
+    renderAll();
+  }
+
+  function load() {
+    try {
+      if (storage) {
+        const raw = storage.getItem(STORAGE_KEY);
+        state = raw ? JSON.parse(raw) : cloneState(INITIAL_STATE);
+      } else {
+        state = memoryStore ? cloneState(memoryStore) : cloneState(INITIAL_STATE);
+      }
+    } catch (error) {
+      console.warn('Unable to load saved state. Resetting to defaults.', error);
+      state = cloneState(INITIAL_STATE);
+    }
+  }
+
+  function navigate(id) {
+    eachNode(document.querySelectorAll('.screen'), screen => screen.classList.remove('active'));
+    const target = document.getElementById(id);
+    if (target) target.classList.add('active');
+
+    eachNode(document.querySelectorAll('.bottom-nav button'), button => button.classList.remove('active'));
+    const navButton = document.querySelector(`.bottom-nav button[data-target="${id}"]`);
+    if (navButton) navButton.classList.add('active');
+  }
+
+  function renderDashboard() {
+    const list = document.getElementById('tx-list');
+    const dash = document.getElementById('dash-txlist');
+    if (!list || !dash) return;
+
+    list.innerHTML = '';
+    dash.innerHTML = '';
+
+    if (!state.transactions.length) {
+      const empty = '<div class="muted">No transactions</div>';
+      list.innerHTML = empty;
+      dash.innerHTML = empty;
+      return;
+    }
+
+    state.transactions.slice(0, 3).forEach(tx => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+      const statusLabel = formatStatus(tx.status);
+      item.innerHTML = `
+        <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}</div>
+        <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
+      `;
+      list.appendChild(item);
+    });
+
+    state.transactions.forEach(tx => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+      const statusLabel = formatStatus(tx.status);
+      item.innerHTML = `
+        <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}</div>
+        <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
+      `;
+      item.addEventListener('click', () => viewTx(tx.id));
+      dash.appendChild(item);
+    });
+
+    const recent = document.getElementById('ui-recent');
+    if (recent) {
+      const first = state.transactions[0];
+      if (first) {
+        const statusLabel = formatStatus(first.status);
+        recent.textContent = `#${first.id} - ${statusLabel} (${formatCurrency(first.amount)})`;
+      } else {
+        recent.textContent = 'No activity yet';
+      }
+    }
+  }
+
+  function viewTx(id) {
+    const tx = state.transactions.find(entry => entry.id === id);
+    if (!tx) return;
+
+    const titleEl = document.getElementById('tx-title');
+    const buyerEl = document.getElementById('tx-buyer');
+    const sellerEl = document.getElementById('tx-seller');
+    const amountEl = document.getElementById('tx-amount');
+    const statusEl = document.getElementById('tx-status');
+    const timelineEl = document.getElementById('tx-timeline');
+
+    const statusLabel = formatStatus(tx.status);
+
+    if (titleEl) titleEl.textContent = `Transaction #${tx.id}`;
+    if (buyerEl) buyerEl.textContent = tx.buyer;
+    if (sellerEl) sellerEl.textContent = tx.seller;
+    if (amountEl) amountEl.textContent = formatCurrency(tx.amount);
+    if (statusEl) statusEl.innerHTML = `<span class="status-badge status-${tx.status}">${statusLabel}</span>`;
+    if (timelineEl) {
+      timelineEl.innerHTML = tx.timeline
+        .map(event => `<div class="muted">${new Date(event.when).toLocaleString()} - ${event.text}</div>`)
+        .join('');
+    }
+
+    state._activeTx = id;
+    navigate('s-transaction');
+  }
+
+  function renderWallet() {
+    const balanceEl = document.getElementById('wallet-balance');
+    const homeBalanceEl = document.getElementById('ui-balance');
+    if (balanceEl) balanceEl.textContent = state.wallet.balance.toFixed(2);
+    if (homeBalanceEl) homeBalanceEl.textContent = state.wallet.balance.toFixed(2);
+
+    const historyEl = document.getElementById('wallet-history');
+    if (!historyEl) return;
+    historyEl.innerHTML = '';
+
+    if (!state.wallet.history.length) {
+      historyEl.innerHTML = '<div class="muted">No wallet activity</div>';
+      return;
+    }
+
+    state.wallet.history.slice().reverse().forEach(entry => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+      const color = entry.type === 'deposit' ? '#16a34a' : '#dc2626';
+      const sign = entry.type === 'deposit' ? '+' : '-';
+      item.innerHTML = `
+        <div>${new Date(entry.date).toLocaleString()} - ${formatStatus(entry.type)}</div>
+        <div style="color:${color};font-weight:600;">${sign}${formatCurrency(entry.amount)}</div>
+      `;
+      historyEl.appendChild(item);
+    });
+  }
+
+  function appendWalletHistory(type, amount) {
+    const entryId = `h${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    state.wallet.history.push({
+      id: entryId,
+      type,
+      amount,
+      date: new Date().toISOString()
+    });
+  }
+
+  function renderAll() {
+    renderDashboard();
+    renderWallet();
+  }
+
+  function startAgreement() {
+    const buyerInput = document.getElementById('create-buyer');
+    const sellerInput = document.getElementById('create-seller');
+    const amountInput = document.getElementById('create-amount');
+    const buyer = buyerInput ? buyerInput.value.trim() : '';
+    const seller = sellerInput ? sellerInput.value.trim() : '';
+    const amount = amountInput ? Number(amountInput.value) : NaN;
+
+    if (!buyer || !seller || !isFinite(amount) || amount <= 0) {
+      alert('Fill buyer, seller, amount');
+      return;
+    }
+
+    pendingCreate = { buyer, seller, amount };
+
+    const agreementText = document.getElementById('agreement-text');
+    if (agreementText) {
+      agreementText.value = `Buyer: ${buyer}\nSeller: ${seller}\nAmount: ${formatCurrency(amount)}`;
+    }
+
+    navigate('s-agreement');
+    initSignature();
+  }
+
+  function initSignature() {
+    sigCanvas = document.getElementById('signature-canvas');
+    if (!sigCanvas) return;
+    sigCtx = sigCanvas.getContext('2d');
+    sigCtx.lineWidth = 2;
+    sigCtx.lineCap = 'round';
+
+    const resizeSignatureCanvas = () => {
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const rect = sigCanvas.getBoundingClientRect();
+      sigCanvas.width = Math.floor(rect.width * ratio);
+      sigCanvas.height = Math.floor(rect.height * ratio);
+      sigCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    };
+
+    resizeSignatureCanvas();
+    window.addEventListener('resize', resizeSignatureCanvas, { passive: true });
+
+    sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
+    signatureDrawn = false;
+    const nextButton = document.getElementById('agreement-next');
+    if (nextButton) nextButton.disabled = true;
+
+    sigCanvas.onmousedown = event => {
+      drawing = true;
+      sigCtx.beginPath();
+      sigCtx.moveTo(event.offsetX, event.offsetY);
+    };
+
+    sigCanvas.onmousemove = event => {
+      if (!drawing) return;
+      sigCtx.lineTo(event.offsetX, event.offsetY);
+      sigCtx.stroke();
+      signatureDrawn = true;
+      if (nextButton) nextButton.disabled = false;
+    };
+
+    sigCanvas.onmouseup = () => {
+      drawing = false;
+    };
+
+    sigCanvas.addEventListener('touchstart', event => {
+      event.preventDefault();
+      const touch = event.touches[0];
+      const rect = sigCanvas.getBoundingClientRect();
+      drawing = true;
+      sigCtx.beginPath();
+      sigCtx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+    }, { passive: false });
+
+    sigCanvas.addEventListener('touchmove', event => {
+      event.preventDefault();
+      if (!drawing) return;
+      const touch = event.touches[0];
+      const rect = sigCanvas.getBoundingClientRect();
+      sigCtx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+      sigCtx.stroke();
+      signatureDrawn = true;
+      if (nextButton) nextButton.disabled = false;
+    }, { passive: false });
+
+    sigCanvas.addEventListener('touchend', () => {
+      drawing = false;
+    }, { passive: false });
+  }
+
+  function ensurePendingDefaults(updateUI) {
+    if (!pendingCreate) {
+      pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650 };
+    }
+    if (updateUI) {
+      const agreementText = document.getElementById('agreement-text');
+      if (agreementText) {
+        agreementText.value = `Buyer: ${pendingCreate.buyer}\nSeller: ${pendingCreate.seller}\nAmount: $${pendingCreate.amount}`;
+      }
+      const fundAmount = document.getElementById('fund-amount');
+      if (fundAmount) {
+        fundAmount.textContent = pendingCreate.amount.toFixed(2);
+      }
+    }
+  }
+
+  function clearSignature() {
+    if (sigCtx && sigCanvas) {
+      sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
+      signatureDrawn = false;
+      const nextButton = document.getElementById('agreement-next');
+      if (nextButton) nextButton.disabled = true;
+    }
+  }
+
+  function toFunding() {
+    if (!signatureDrawn || !pendingCreate) {
+      alert('Sign first');
+      return;
+    }
+    ensurePendingDefaults(true);
+    navigate('s-funding');
+  }
+
+  function depositMock() {
+    const input = document.getElementById('fund-input');
+    const value = input ? Number(input.value) : NaN;
+    if (!isFinite(value) || value <= 0) {
+      alert('Enter valid amount');
+      return;
+    }
+    state.wallet.balance += value;
+    appendWalletHistory('deposit', value);
+
+    if (pendingCreate) {
+      const newId = Math.floor(10000 + Math.random() * 90000);
+      state.transactions.unshift({
+        id: newId,
+        buyer: pendingCreate.buyer,
+        seller: pendingCreate.seller,
+        amount: pendingCreate.amount,
+        status: 'active',
+        timeline: [
+          { when: new Date().toISOString(), text: 'Created' },
+          { when: new Date().toISOString(), text: 'Buyer funded escrow' }
+        ]
+      });
+      pendingCreate = null;
+    }
+
+    save();
+    navigate('s-dashboard');
+  }
+
+  function depositWallet() {
+    const input = document.getElementById('wallet-topup');
+    const value = input ? Number(input.value) : NaN;
+    if (!isFinite(value) || value <= 0) {
+      alert('Enter valid amount');
+      return;
+    }
+    state.wallet.balance += value;
+    appendWalletHistory('deposit', value);
+    if (input) input.value = '';
+    save();
+  }
+
+  function withdrawWallet() {
+    const response = prompt('Withdraw amount');
+    const value = Number(response);
+    if (!isFinite(value) || value <= 0 || value > state.wallet.balance) {
+      alert('Invalid withdrawal');
+      return;
+    }
+    state.wallet.balance -= value;
+    appendWalletHistory('withdraw', value);
+    save();
+  }
+
+  function showModal(html) {
+    const modal = document.getElementById('modal');
+    const modalContent = document.getElementById('modal-content');
+    if (!modal || !modalContent) return;
+    const body = html || '';
+    modalContent.innerHTML = `
+      <div style="background:#fff; padding:16px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.15); max-width:90vw;">
+        ${body}
+        <div style="text-align:right; margin-top:12px;">
+          <button class="ghost" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `;
+    modal.style.display = 'flex';
+    modal.scrollTop = 0;
+  }
+
+  function closeModal() {
+    const modal = document.getElementById('modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  window.closeModal = closeModal;
+
+  function init() {
+    load();
+    renderAll();
+
+    const createNext = document.getElementById('create-next');
+    if (createNext) createNext.addEventListener('click', startAgreement);
+
+    const agreementNext = document.getElementById('agreement-next');
+    if (agreementNext) agreementNext.addEventListener('click', toFunding);
+
+    const clearSign = document.getElementById('clear-sign');
+    if (clearSign) clearSign.addEventListener('click', clearSignature);
+
+    const fundConfirm = document.getElementById('fund-confirm');
+    if (fundConfirm) fundConfirm.addEventListener('click', depositMock);
+
+    const walletDeposit = document.getElementById('wallet-deposit');
+    if (walletDeposit) walletDeposit.addEventListener('click', depositWallet);
+
+    const walletWithdraw = document.getElementById('wallet-withdraw');
+    if (walletWithdraw) walletWithdraw.addEventListener('click', withdrawWallet);
+
+    const brand = document.getElementById('brand');
+    if (brand) brand.addEventListener('click', () => navigate('s-welcome'));
+
+    const homeTop = document.getElementById('homeTop');
+    if (homeTop) homeTop.addEventListener('click', () => navigate('s-welcome'));
+
+    const notifTop = document.getElementById('notifTop');
+    if (notifTop) notifTop.addEventListener('click', () => showModal("<h3>Notifications</h3><p class='muted'>No new notifications.</p>"));
+
+    const profileTop = document.getElementById('profileTop');
+    if (profileTop) profileTop.addEventListener('click', () => navigate('s-settings'));
+
+    eachNode(document.querySelectorAll('[data-action="navigate"]'), el => {
+      el.addEventListener('click', () => {
+        const target = el.getAttribute('data-target');
+        if (target) navigate(target);
+      });
+    });
+
+    eachNode(document.querySelectorAll('[data-action="modal"]'), el => {
+      el.addEventListener('click', () => {
+        const html = el.getAttribute('data-content') || '';
+        showModal(html);
+      });
+    });
+
+    eachNode(document.querySelectorAll('.bottom-nav button'), btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-target');
+        if (target) navigate(target);
+      });
+    });
+
+    const safariHint = document.getElementById('iab-open-safari');
+    if (safariHint) {
+      const ua = navigator.userAgent || '';
+      const isIOS = /iPhone|iPad|iPod/i.test(ua);
+      const isQuickLook = /QuickLook/i.test(ua);
+      const embeddedApp = /(FBAN|FBAV|FB_IAB|Instagram|Twitter|Line|WhatsApp|wv)/i.test(ua);
+      const standaloneBrowser = /Safari|CriOS|FxiOS/i.test(ua) && !embeddedApp;
+      const inApp = isQuickLook || (embeddedApp && !standaloneBrowser);
+      if (isIOS && inApp) {
+        safariHint.style.display = 'inline-flex';
+        safariHint.addEventListener('click', () => {
+          showModal("<h3>Open in Safari</h3><p class='muted'>In your app, tap the share icon and choose <strong>Open in Safari</strong>.</p>");
+        });
+      }
+    }
+
+    const screenParam = searchParams.screen || hashParams.screen || externalParams.screen || null;
+    const txParam = searchParams.tx || hashParams.tx || externalParams.tx || null;
+
+    if (screenParam === 's-agreement' || screenParam === 's-funding') {
+      ensurePendingDefaults(true);
+    }
+
+    if (screenParam === 's-transaction' && txParam) {
+      viewTx(Number(txParam));
+    } else if (screenParam) {
+      navigate(screenParam);
+    }
+
+    if (txParam && screenParam !== 's-transaction') {
+      viewTx(Number(txParam));
+    }
+  }
+
+  window._demoNavigate = navigate;
+  window._demoEnsurePending = ensurePendingDefaults;
+  window._demoViewTx = viewTx;
+
+  function showApp() {
+    const app = document.getElementById('app');
+    const splash = document.getElementById('splash');
+    if (!app) return;
+    app.classList.add('visible');
+    app.style.display = 'grid';
+    app.style.visibility = 'visible';
+    void app.offsetHeight;
+    if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+    const splash = document.getElementById('splash');
+    if (shouldSkipSplash) {
+      if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+      showApp();
+      return;
+    }
+    if (splash) {
+      splash.addEventListener('animationend', showApp, { once: true });
+      setTimeout(showApp, 2800);
+    } else {
+      showApp();
+    }
+  });
+
+  window.addEventListener('pageshow', showApp);
+  window.addEventListener('load', () => setTimeout(showApp, 1500));
+})();
+</script>
+</body>
+</html>
+
