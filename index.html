@@ -947,6 +947,7 @@
 
     const screenParam = searchParams.screen || hashParams.screen || externalParams.screen || null;
     const txParam = searchParams.tx || hashParams.tx || externalParams.tx || null;
+<<<<<<< HEAD
 
     if (screenParam === 's-agreement' || screenParam === 's-funding') {
       ensurePendingDefaults(true);
@@ -995,10 +996,85 @@
     }
   });
 
-  window.addEventListener('pageshow', showApp);
-  window.addEventListener('load', () => setTimeout(showApp, 1500));
+  window.addEventListener('pageshow', event => {
+    if (event.persisted || !document.getElementById('splash')) {
+      showApp();
+    }
+  });
+
+  window.addEventListener('load', () => {
+    if (shouldSkipSplash || !document.getElementById('splash')) {
+      setTimeout(showApp, 1500);
+    }
+  });
 })();
 </script>
 </body>
 </html>
 
+=======
+
+    if (screenParam === 's-agreement' || screenParam === 's-funding') {
+      ensurePendingDefaults(true);
+    }
+
+    if (screenParam === 's-transaction' && txParam) {
+      viewTx(Number(txParam));
+    } else if (screenParam) {
+      navigate(screenParam);
+    }
+
+    if (txParam && screenParam !== 's-transaction') {
+      viewTx(Number(txParam));
+    }
+  }
+
+  window._demoNavigate = navigate;
+  window._demoEnsurePending = ensurePendingDefaults;
+  window._demoViewTx = viewTx;
+
+  function showApp() {
+    const app = document.getElementById('app');
+    const splash = document.getElementById('splash');
+    if (!app) return;
+    app.classList.add('visible');
+    app.style.display = 'grid';
+    app.style.visibility = 'visible';
+    void app.offsetHeight;
+    if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+    const splash = document.getElementById('splash');
+    if (shouldSkipSplash) {
+      if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+      showApp();
+      return;
+    }
+    if (splash) {
+      splash.addEventListener('animationend', showApp, { once: true });
+      setTimeout(showApp, 2800);
+    } else {
+      showApp();
+    }
+  });
+
+  window.addEventListener('pageshow', event => {
+    if (event.persisted || !document.getElementById('splash')) {
+      showApp();
+    }
+  });
+
+  window.addEventListener('load', () => {
+    if (shouldSkipSplash || !document.getElementById('splash')) {
+      setTimeout(showApp, 1500);
+    }
+  });
+})();
+</script>
+</body>
+</html>
+
+>>>>>>> dc7a5a7 (Fix splashscreen lifecycle)
