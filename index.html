@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>
-      MyEscrow - Mobile Demo (Safari Final)
+      MyEscrow - Interactive Wireframe Demo
     </title>
 <style>:root {  --brand:#2563eb; --brand-600:#1d4ed8; --muted:#6b7280;  --card:#ffffff; --radius:14px; --shadow-soft:0 8px 28px rgba(16,24,40,0.08);}html, body {  height:100%; margin:0;  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;  background: linear-gradient(180deg,#eef4ff,#ffffff);  color:#0f172a;  -webkit-tap-highlight-color: transparent;  -webkit-text-size-adjust: 100%;}body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }.app {  min-height:100%;  display:grid;  grid-template-rows:auto 1fr auto;  opacity:1;                    /* Visible by default so no-JS viewers show UI */}.app.visible { opacity:1; }header {  display:flex; align-items:center; justify-content:space-between;  padding:10px 16px;  background:linear-gradient(90deg,var(--brand),var(--brand-600));  color:#fff; position:sticky; top:0; z-index:10;  box-shadow:0 4px 16px rgba(37,99,235,0.25);}.brand { display:flex; align-items:center; gap:10px; cursor:pointer; }.logo-mark {  width:36px; height:36px; border-radius:10px;  display:flex; align-items:center; justify-content:center;  background:linear-gradient(135deg,#2db8ff,#2563eb);  font-size:18px;}.header-actions { display:flex; gap:8px; align-items:center; }.icon-btn { background:rgba(255,255,255,0.18); color:#fff; border:0; padding:8px 10px; border-radius:12px; cursor:pointer; }main { position:relative; min-height:0; }.screen {  position:absolute; inset:0; overflow:auto;  padding:16px;  display:none;                /* Only the active one is shown */  animation:fadeIn .5s ease both;}.screen.active { display:block; }h2 { font-size:21px; margin:0 0 8px; }.lead { color:var(--muted); margin:0 0 14px; }.tiles {  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));  gap:12px; margin-bottom:12px;}.tile {  background:var(--card);  border-radius:var(--radius);  padding:14px;  box-shadow:var(--shadow-soft);  border:1px solid rgba(15,23,42,0.04);}.tx-list { display:flex; flex-direction:column; gap:10px; }.tx-item {  display:flex; justify-content:space-between; align-items:center;  padding:12px; border-radius:12px;  background:#fff; border:1px solid #eef2f7;  box-shadow:0 6px 18px rgba(2,6,23,0.05);}.btn { background:var(--brand); color:#fff; border:0; padding:10px 14px; border-radius:12px; font-weight:600; cursor:pointer; }.ghost { background:#fff; border:1px solid #e5e7eb; padding:8px 12px; border-radius:12px; cursor:pointer; }.toolbar {  display:flex; justify-content:center; align-items:center;  padding:8px 0 calc(env(safe-area-inset-bottom) + 8px);}.bottom-nav {  background:rgba(255,255,255,0.96);  border-radius:999px; padding:6px;  display:flex; gap:6px;  box-shadow:0 12px 32px rgba(2,6,23,0.16);}.bottom-nav button { background:transparent; border:0; padding:10px 14px; border-radius:999px; cursor:pointer; }.bottom-nav button.active { background:linear-gradient(90deg,var(--brand),var(--brand-600)); color:#fff; }.status-badge {  display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; color:#fff; text-transform:capitalize;}.status-pending{background:#f97316;}.status-active{background:#2563eb;}.status-resolved{background:#16a34a;}.status-disputed{background:#dc2626;}.sig-wrap{ background:#fff; border-radius:10px; padding:8px; border:1px solid #e6eef7; }canvas.signature{ width:100%; height:140px; background:#fff; border-radius:8px; touch-action:none; }@keyframes fadeIn { from { opacity:0; transform:translateY(8px);} to { opacity:1; transform:translateY(0);} }/* iOS/mobile compatibility additions */.screen { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }button, input, select, textarea { font-size:16px; }a, button { touch-action: manipulation; }.card { background:var(--card); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow-soft); border:1px solid rgba(15,23,42,0.04); }
 .logo-mark svg { display:none !important; }/* Hide fallback glyphs; icons provided via CSS masks */.icon-btn, .bottom-nav button { font-size:0; }.logo-mark { position:relative; color:transparent; font-size:0; }.logo-mark::after { content:""; position:absolute; inset:0; margin:auto; width:20px; height:20px; background:#fff; -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain; mask-repeat:no-repeat; mask-position:center; mask-size:contain; -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2l7 3v6c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V5l7-3zm-1 12l5-5-1.4-1.4L11 10.2 9.4 8.6 8 10l3 4z' fill='black'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2l7 3v6c0 5-3.5 9.5-7 11-3.5-1.5-7-6-7-11V5l7-3zm-1 12l5-5-1.4-1.4L11 10.2 9.4 8.6 8 10l3 4z' fill='black'/></svg>"); }/* Header icon masks */#homeTop::before, #notifTop::before, #profileTop::before,#bn-dashboard::before, #bn-create::before, #bn-wallet::before, #bn-settings::before { content:""; display:block; width:20px; height:20px; background: currentColor; -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain; mask-repeat:no-repeat; mask-position:center; mask-size:contain; }#homeTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z'/></svg>"); }#notifTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z'/></svg>"); }#profileTop::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z'/></svg>"); }/* Bottom nav icons */#bn-dashboard::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z'/></svg>"); }#bn-create::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z'/></svg>"); }#bn-wallet::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 7a2 2 0 0 1 2-2h13a3 3 0 0 1 3 3v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm12 3h6v4h-6a2 2 0 0 1 0-4z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M3 7a2 2 0 0 1 2-2h13a3 3 0 0 1 3 3v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7zm12 3h6v4h-6a2 2 0 0 1 0-4z'/></svg>"); }#bn-settings::before { -webkit-mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M4 6h16v2H4V6zm3 5h10v2H7v-2zm-5 5h16v2H2v-2z'/></svg>"); mask-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M4 6h16v2H4V6zm3 5h10v2H7v-2zm-5 5h16v2H2v-2z'/></svg>"); }/* Open in Safari pill */#iab-open-safari { position:fixed; right:12px; bottom:calc(env(safe-area-inset-bottom) + 74px); background:#111827; color:#fff; border:0; padding:8px 12px; border-radius:999px; box-shadow:0 8px 24px rgba(2,6,23,0.24); z-index:95; display:none; font-size:14px; }</style>
@@ -411,8 +411,6 @@
       </div>
       <div id="tx-milestones" class="tx-list" style="margin-top:12px;">
       </div>
-      <div id="tx-user-role" class="muted" style="margin-top:12px">
-      </div>
     </div>
     <div id="tx-timeline" style="margin-top:12px">
     </div>
@@ -752,8 +750,16 @@
     const emailInput = document.getElementById('counterparty-email');
     if (nameLabel) nameLabel.textContent = `${otherRole} name`;
     if (emailLabel) emailLabel.textContent = `${otherRole} email`;
-    if (nameInput) nameInput.placeholder = `${otherRole} name`;
-    if (emailInput) emailInput.placeholder = `${otherRole.toLowerCase()}@example.com`;
+    if (nameInput && !nameInput.placeholder) {
+      nameInput.placeholder = `${otherRole} name`;
+    } else if (nameInput) {
+      nameInput.placeholder = `${otherRole} name`;
+    }
+    if (emailInput && !emailInput.placeholder) {
+      emailInput.placeholder = `${otherRole.toLowerCase()}@example.com`;
+    } else if (emailInput) {
+      emailInput.placeholder = `${otherRole.toLowerCase()}@example.com`;
+    }
     syncRoleToggle(role);
   }
 
@@ -959,9 +965,8 @@
     const userIsBuyer = isUserBuyer(tx);
     const counterparty = getCounterpartyInfo(tx);
     const roleText = userIsBuyer ? 'You are the buyer' : 'You are the seller';
-    const counterpartyRoleLabel = counterparty.role ? formatStatus(counterparty.role) : 'Counterparty';
     const counterpartyText = counterparty.name
-      ? `${counterpartyRoleLabel}: ${counterparty.name}${counterparty.email ? ` (${counterparty.email})` : ''}`
+      ? `Counterparty: ${counterparty.name}${counterparty.email ? ` (${counterparty.email})` : ''}`
       : '';
     metaLeft.innerHTML = `<strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}<div class="muted">${roleText}</div>${
       counterpartyText ? `<div class="muted">${counterpartyText}</div>` : ''
@@ -1042,7 +1047,7 @@
         const action = document.createElement('button');
         action.className = 'btn';
         action.type = 'button';
-        action.textContent = 'Release funds';
+        action.textContent = 'Release';
         action.addEventListener('click', () => acceptMilestone(tx.id, milestone.id));
         right.appendChild(action);
       }
@@ -1236,17 +1241,6 @@
     if (buyerEmailEl) buyerEmailEl.textContent = tx.buyerEmail || '';
     if (sellerEmailEl) sellerEmailEl.textContent = tx.sellerEmail || '';
     if (amountEl) amountEl.textContent = formatCurrency(tx.amount);
-    const roleEl = document.getElementById('tx-user-role');
-    if (roleEl) {
-      const userIsBuyer = isUserBuyer(tx);
-      const counterparty = getCounterpartyInfo(tx);
-      const roleText = userIsBuyer ? 'You are the buyer in this escrow.' : 'You are the seller in this escrow.';
-      const counterpartyRoleLabel = counterparty.role ? formatStatus(counterparty.role) : 'Counterparty';
-      const counterpartyDetails = counterparty.name
-        ? ` ${counterpartyRoleLabel}: ${counterparty.name}${counterparty.email ? ` (${counterparty.email})` : ''}.`
-        : '';
-      roleEl.textContent = `${roleText}${counterpartyDetails}`;
-    }
     if (statusEl) statusEl.innerHTML = `<span class="status-badge status-${tx.status}">${statusLabel}</span>`;
     if (timelineEl) {
       timelineEl.innerHTML = tx.timeline
@@ -1592,7 +1586,6 @@
     }
     state.wallet.balance += value;
     appendWalletHistory('deposit', value);
-    if (input) input.value = '';
 
     if (pendingCreate) {
       const newId = Math.floor(10000 + Math.random() * 90000);
@@ -1692,11 +1685,6 @@
     load();
     renderAll();
 
-    const profileNameInput = document.getElementById('profile-name');
-    if (profileNameInput && !profileNameInput.value) profileNameInput.value = getUserIdentity().name;
-    const profileEmailInput = document.getElementById('profile-email');
-    if (profileEmailInput && !profileEmailInput.value) profileEmailInput.value = getUserIdentity().email;
-
     const createNext = document.getElementById('create-next');
     if (createNext) createNext.addEventListener('click', startAgreement);
 
@@ -1717,15 +1705,6 @@
 
     const milestoneAdd = document.getElementById('milestone-add');
     if (milestoneAdd) milestoneAdd.addEventListener('click', addMilestone);
-    const milestoneNameInput = document.getElementById('milestone-name');
-    if (milestoneNameInput) {
-      milestoneNameInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          addMilestone();
-        }
-      });
-    }
     const milestoneAmountInput = document.getElementById('milestone-amount');
     if (milestoneAmountInput) {
       milestoneAmountInput.addEventListener('keydown', event => {
