@@ -29,6 +29,7 @@
   <!-- Splash (animated logo) -->
   <div id="splash" style="position:fixed;inset:0;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;flex-direction:column;color:white;z-index:9999;animation:splashFade 1.6s ease forwards;pointer-events:none;">
 <style>@keyframes splashFade{      0%{opacity:0;transform:translate3d(0,8px,0);}      30%{opacity:1;transform:translate3d(0,0,0);}      70%{opacity:1;}      100%{opacity:0;}    }    .s-pulse{ animation: sp 2.6s ease-in-out infinite; }    @keyframes sp{0%,100%{transform:scale(1);}50%{transform:scale(1.06);}}</style>
+<style>.status-released{background:#0f766e;}.tx-item.selected{border-color:rgba(37,99,235,0.65);box-shadow:0 0 0 1px rgba(37,99,235,0.12);}.role-toggle{display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap;}.role-option{flex:1 1 130px;display:flex;align-items:center;gap:8px;justify-content:center;padding:10px 12px;border:1px solid #dbe1f1;border-radius:12px;background:#fff;font-weight:600;color:#1f2a44;cursor:pointer;transition:all .2s ease;}.role-option.active{border-color:var(--brand);background:rgba(37,99,235,0.08);color:var(--brand);box-shadow:0 6px 16px rgba(37,99,235,0.14);}.role-option input{margin:0;accent-color:var(--brand);}.role-option span{flex:1;text-align:center;}</style>
 <svg class="s-pulse" viewBox="0 0 24 24" width="84" height="84" aria-hidden="true">
   <path d="M4 13a4 4 0 0 1 4-4h4l3-3 5 5-3 3v2a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
@@ -63,7 +64,10 @@
     <!-- Home / Welcome -->
     <section id="s-welcome" class="screen active">
       <h2>
-        Welcome back
+        Welcome back,
+        <span id="welcome-name">
+          Scott
+        </span>
       </h2>
       <p class="lead">
         Securely hold funds until both parties confirm delivery. Demo data stays in your browser.
@@ -167,6 +171,17 @@
         No active escrows right now.
       </div>
     </div>
+    <div id="active-escrow-detail" class="card" style="margin-top:12px;display:none;">
+      <div id="active-escrow-meta" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+      </div>
+      <div id="active-escrow-progress" class="muted" style="margin-top:8px;">
+      </div>
+      <div id="active-escrow-milestones" class="tx-list" style="margin-top:12px;">
+      </div>
+      <div id="active-escrow-no-milestones" class="muted" style="margin-top:8px;display:none;">
+        No milestones for this escrow.
+      </div>
+    </div>
   </section>
   <!-- Dashboard -->
   <section id="s-dashboard" class="screen">
@@ -196,13 +211,30 @@
     </p>
     <div class="card">
       <label class="muted">
-        Buyer
+        Your role
       </label>
-      <input id="create-buyer" placeholder="Buyer name" autocomplete="off">
-      <label class="muted">
-        Seller
+      <div class="role-toggle" id="create-role-toggle">
+        <label class="role-option">
+          <input type="radio" name="create-role" value="buyer" checked>
+          <span>
+            I'm the buyer
+          </span>
+        </label>
+        <label class="role-option">
+          <input type="radio" name="create-role" value="seller">
+          <span>
+            I'm the seller
+          </span>
+        </label>
+      </div>
+      <label class="muted" id="counterparty-name-label">
+        Seller name
       </label>
-      <input id="create-seller" placeholder="Seller name" autocomplete="off">
+      <input id="counterparty-name" placeholder="Seller name" autocomplete="off">
+      <label class="muted" id="counterparty-email-label">
+        Seller email
+      </label>
+      <input id="counterparty-email" type="email" placeholder="seller@example.com" autocomplete="email">
       <label class="muted">
         Amount
       </label>
@@ -350,10 +382,14 @@
           </div>
           <div id="tx-buyer" style="font-weight:700">
           </div>
+          <div class="muted" style="font-size:13px;margin-top:4px" id="tx-buyer-email">
+          </div>
           <div class="muted" style="margin-top:8px">
             Seller
           </div>
           <div id="tx-seller" style="font-weight:700">
+          </div>
+          <div class="muted" style="font-size:13px;margin-top:4px" id="tx-seller-email">
           </div>
         </div>
         <div style="text-align:right">
@@ -374,6 +410,8 @@
         </strong>
       </div>
       <div id="tx-milestones" class="tx-list" style="margin-top:12px;">
+      </div>
+      <div id="tx-user-role" class="muted" style="margin-top:12px">
       </div>
     </div>
     <div id="tx-timeline" style="margin-top:12px">
@@ -564,10 +602,10 @@
     Object.prototype.hasOwnProperty.call(hashParams, 'nosplash') ||
     Object.prototype.hasOwnProperty.call(externalParams, 'nosplash');
 
-  const STORAGE_KEY = 'myescrow_mobilestable_v4';
+  const STORAGE_KEY = 'myescrow_mobilestable_v5';
 
   const INITIAL_STATE = {
-    user: { name: 'Demo User', email: 'demo@example.com' },
+    user: { name: 'Scott', email: 'scott@example.com' },
     wallet: {
       balance: 300,
       history: [
@@ -579,56 +617,70 @@
     transactions: [
       {
         id: 10101,
-        buyer: 'Alice',
+        buyer: 'Scott',
+        buyerEmail: 'scott@example.com',
         seller: 'Bob',
+        sellerEmail: 'bob@example.com',
         amount: 500,
         status: 'pending',
-        timeline: [{ when: new Date(Date.now() - 864e5 * 2).toISOString(), text: 'Created' }],
+        timeline: [{ when: new Date(Date.now() - 864e5 * 2).toISOString(), text: 'Created by Scott (buyer)' }],
         milestones: [
-          { id: 'm10101a', title: 'Deposit received', amount: 250 },
-          { id: 'm10101b', title: 'Delivery inspection', amount: 250 }
+          { id: 'm10101a', title: 'Deposit received', amount: 250, status: 'pending' },
+          { id: 'm10101b', title: 'Delivery inspection', amount: 250, status: 'pending' }
         ]
       },
       {
         id: 10102,
         buyer: 'John',
-        seller: 'Sarah',
+        buyerEmail: 'john@example.com',
+        seller: 'Scott',
+        sellerEmail: 'scott@example.com',
         amount: 1200,
         status: 'active',
         timeline: [
-          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Created' },
-          { when: new Date(Date.now() - 864e5 * 1.5).toISOString(), text: 'Buyer funded escrow' }
+          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Created by Scott (seller)' },
+          { when: new Date(Date.now() - 864e5 * 1.5).toISOString(), text: 'Buyer funded escrow' },
+          { when: new Date(Date.now() - 864e5 * 1).toISOString(), text: 'Milestone "Design draft" released' }
         ],
         milestones: [
-          { id: 'm10102a', title: 'Design draft', amount: 400 },
-          { id: 'm10102b', title: 'Development sprint', amount: 400 },
-          { id: 'm10102c', title: 'Final handoff', amount: 400 }
+          { id: 'm10102a', title: 'Design draft', amount: 400, status: 'released', releasedAt: new Date(Date.now() - 864e5 * 1).toISOString() },
+          { id: 'm10102b', title: 'Development sprint', amount: 400, status: 'pending' },
+          { id: 'm10102c', title: 'Final handoff', amount: 400, status: 'pending' }
         ]
       },
       {
         id: 10103,
-        buyer: 'Mark',
+        buyer: 'Scott',
+        buyerEmail: 'scott@example.com',
         seller: 'Linda',
+        sellerEmail: 'linda@example.com',
         amount: 300,
         status: 'resolved',
         timeline: [
-          { when: new Date(Date.now() - 864e5 * 7).toISOString(), text: 'Created' },
+          { when: new Date(Date.now() - 864e5 * 7).toISOString(), text: 'Created by Scott (buyer)' },
           { when: new Date(Date.now() - 864e5 * 5).toISOString(), text: 'Delivered' },
-          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Closed' }
+          { when: new Date(Date.now() - 864e5 * 4.5).toISOString(), text: 'Milestone "Prototype submitted" released' },
+          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Milestone "Client approval" released' },
+          { when: new Date(Date.now() - 864e5 * 3.5).toISOString(), text: 'Closed' }
         ],
         milestones: [
-          { id: 'm10103a', title: 'Prototype submitted', amount: 150 },
-          { id: 'm10103b', title: 'Client approval', amount: 150 }
+          { id: 'm10103a', title: 'Prototype submitted', amount: 150, status: 'released', releasedAt: new Date(Date.now() - 864e5 * 4.5).toISOString() },
+          { id: 'm10103b', title: 'Client approval', amount: 150, status: 'released', releasedAt: new Date(Date.now() - 864e5 * 4).toISOString() }
         ]
       },
       {
         id: 10104,
         buyer: 'Chris',
-        seller: 'Dana',
+        buyerEmail: 'chris@example.com',
+        seller: 'Scott',
+        sellerEmail: 'scott@example.com',
         amount: 450,
         status: 'disputed',
-        timeline: [{ when: new Date(Date.now() - 864e5 * 0.5).toISOString(), text: 'Buyer disputed delivery' }],
-        milestones: [{ id: 'm10104a', title: 'Hardware delivered', amount: 450 }]
+        timeline: [
+          { when: new Date(Date.now() - 864e5 * 1.2).toISOString(), text: 'Created by Scott (seller)' },
+          { when: new Date(Date.now() - 864e5 * 0.5).toISOString(), text: 'Buyer disputed delivery' }
+        ],
+        milestones: [{ id: 'm10104a', title: 'Hardware delivered', amount: 450, status: 'pending' }]
       }
     ]
   };
@@ -642,9 +694,67 @@
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
+  function formatMilestoneStatus(status) {
+    if (status === 'released') return 'Released';
+    return 'Pending release';
+  }
+
   function formatCurrency(amount) {
     const value = Number(amount) || 0;
     return `$${value.toFixed(2)}`;
+  }
+
+  function getUserIdentity() {
+    return {
+      name: state.user && state.user.name ? state.user.name : 'Scott',
+      email: state.user && state.user.email ? state.user.email : 'scott@example.com'
+    };
+  }
+
+  function isUserBuyer(tx) {
+    if (!tx) return false;
+    const user = getUserIdentity();
+    const buyerEmailMatches =
+      user.email && tx.buyerEmail && tx.buyerEmail.toLowerCase() === user.email.toLowerCase();
+    if (buyerEmailMatches) return true;
+    const sellerEmailMatches =
+      user.email && tx.sellerEmail && tx.sellerEmail.toLowerCase() === user.email.toLowerCase();
+    if (sellerEmailMatches) return false;
+    if (tx.buyer === user.name) return true;
+    if (tx.seller === user.name) return false;
+    return true;
+  }
+
+  function getCounterpartyInfo(tx) {
+    const userIsBuyer = isUserBuyer(tx);
+    return {
+      role: userIsBuyer ? 'seller' : 'buyer',
+      name: userIsBuyer ? tx.seller : tx.buyer,
+      email: userIsBuyer ? tx.sellerEmail : tx.buyerEmail
+    };
+  }
+
+  function syncRoleToggle(role) {
+    eachNode(document.querySelectorAll('.role-option'), label => {
+      if (!label) return;
+      const input = label.querySelector('input[name="create-role"]');
+      const isMatch = input && input.value === role;
+      if (input && isMatch && !input.checked) input.checked = true;
+      label.classList.toggle('active', !!isMatch);
+    });
+  }
+
+  function updateCounterpartyLabels(role) {
+    const otherRole = role === 'seller' ? 'Buyer' : 'Seller';
+    const nameLabel = document.getElementById('counterparty-name-label');
+    const emailLabel = document.getElementById('counterparty-email-label');
+    const nameInput = document.getElementById('counterparty-name');
+    const emailInput = document.getElementById('counterparty-email');
+    if (nameLabel) nameLabel.textContent = `${otherRole} name`;
+    if (emailLabel) emailLabel.textContent = `${otherRole} email`;
+    if (nameInput) nameInput.placeholder = `${otherRole} name`;
+    if (emailInput) emailInput.placeholder = `${otherRole.toLowerCase()}@example.com`;
+    syncRoleToggle(role);
   }
 
   function eachNode(list, callback) {
@@ -671,8 +781,19 @@
   }
 
   let state = cloneState(INITIAL_STATE);
-  let pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650, milestones: [] };
+  let pendingCreate = {
+    role: 'buyer',
+    counterpartyName: 'Preview Seller',
+    counterpartyEmail: 'seller@example.com',
+    buyer: INITIAL_STATE.user.name,
+    buyerEmail: INITIAL_STATE.user.email,
+    seller: 'Preview Seller',
+    sellerEmail: 'seller@example.com',
+    amount: 650,
+    milestones: []
+  };
   let draftMilestones = [];
+  let activeEscrowFocus = null;
   let sigCanvas = null;
   let sigCtx = null;
   let drawing = false;
@@ -717,6 +838,8 @@
   }
 
   function renderDashboard() {
+    const welcomeNameEl = document.getElementById('welcome-name');
+    if (welcomeNameEl) welcomeNameEl.textContent = getUserIdentity().name;
     const list = document.getElementById('tx-list');
     const dash = document.getElementById('dash-txlist');
     if (!list || !dash) return;
@@ -769,28 +892,164 @@
   function renderActiveEscrows() {
     const list = document.getElementById('active-escrows-list');
     const empty = document.getElementById('active-escrows-empty');
-    if (!list || !empty) return;
+    const detailCard = document.getElementById('active-escrow-detail');
+    if (!list || !empty || !detailCard) return;
 
     list.innerHTML = '';
     const active = state.transactions.filter(tx => tx.status === 'active');
 
     if (!active.length) {
       empty.style.display = 'block';
+      detailCard.style.display = 'none';
+      activeEscrowFocus = null;
       return;
     }
 
     empty.style.display = 'none';
 
+    if (!activeEscrowFocus || !active.some(tx => tx.id === activeEscrowFocus)) {
+      activeEscrowFocus = active[0].id;
+    }
+
     active.forEach(tx => {
       const item = document.createElement('div');
       item.className = 'tx-item';
+      item.style.cursor = 'pointer';
+      if (tx.id === activeEscrowFocus) item.classList.add('selected');
       const statusLabel = formatStatus(tx.status);
+      const roleHint = isUserBuyer(tx) ? 'You are the buyer' : 'You are the seller';
       item.innerHTML = `
-        <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}</div>
+        <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}<div class="muted">${roleHint}</div></div>
         <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
       `;
-      item.addEventListener('click', () => viewTx(tx.id));
+      item.addEventListener('click', () => selectActiveEscrow(tx.id));
       list.appendChild(item);
+    });
+
+    const selected = active.find(tx => tx.id === activeEscrowFocus) || null;
+    renderActiveEscrowDetail(selected);
+  }
+
+  function selectActiveEscrow(id) {
+    if (activeEscrowFocus === id) return;
+    activeEscrowFocus = id;
+    renderActiveEscrows();
+  }
+
+  function renderActiveEscrowDetail(tx) {
+    const detailCard = document.getElementById('active-escrow-detail');
+    const meta = document.getElementById('active-escrow-meta');
+    const progressEl = document.getElementById('active-escrow-progress');
+    const milestonesEl = document.getElementById('active-escrow-milestones');
+    const empty = document.getElementById('active-escrow-no-milestones');
+    if (!detailCard || !meta || !progressEl || !milestonesEl || !empty) return;
+
+    if (!tx) {
+      detailCard.style.display = 'none';
+      meta.innerHTML = '';
+      milestonesEl.innerHTML = '';
+      progressEl.textContent = '';
+      return;
+    }
+
+    detailCard.style.display = 'block';
+    meta.innerHTML = '';
+
+    const metaLeft = document.createElement('div');
+    const userIsBuyer = isUserBuyer(tx);
+    const counterparty = getCounterpartyInfo(tx);
+    const roleText = userIsBuyer ? 'You are the buyer' : 'You are the seller';
+    const counterpartyRoleLabel = counterparty.role ? formatStatus(counterparty.role) : 'Counterparty';
+    const counterpartyText = counterparty.name
+      ? `${counterpartyRoleLabel}: ${counterparty.name}${counterparty.email ? ` (${counterparty.email})` : ''}`
+      : '';
+    metaLeft.innerHTML = `<strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}<div class="muted">${roleText}</div>${
+      counterpartyText ? `<div class="muted">${counterpartyText}</div>` : ''
+    }<div class="muted">Status: ${formatStatus(tx.status)}</div>`;
+
+    const metaRight = document.createElement('div');
+    metaRight.style.display = 'flex';
+    metaRight.style.alignItems = 'center';
+    metaRight.style.gap = '8px';
+
+    const amountEl = document.createElement('div');
+    amountEl.style.fontWeight = '700';
+    amountEl.textContent = formatCurrency(tx.amount);
+
+    const detailBtn = document.createElement('button');
+    detailBtn.className = 'ghost';
+    detailBtn.type = 'button';
+    detailBtn.textContent = 'View full details';
+    detailBtn.addEventListener('click', () => viewTx(tx.id));
+
+    metaRight.appendChild(amountEl);
+    metaRight.appendChild(detailBtn);
+
+    meta.appendChild(metaLeft);
+    meta.appendChild(metaRight);
+
+    const milestones = Array.isArray(tx.milestones) ? tx.milestones : [];
+    if (!milestones.length) {
+      progressEl.textContent = 'No milestones defined.';
+      milestonesEl.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+    milestonesEl.innerHTML = '';
+
+    const released = milestones.filter(milestone => milestone.status === 'released');
+    const releasedTotal = released.reduce((sum, milestone) => sum + (Number(milestone.amount) || 0), 0);
+    const totalAmount = milestones.reduce((sum, milestone) => sum + (Number(milestone.amount) || 0), 0);
+
+    progressEl.textContent = `Released ${released.length}/${milestones.length} milestones (${formatCurrency(releasedTotal)} of ${formatCurrency(totalAmount)})`;
+    if (!isUserBuyer(tx) && milestones.some(milestone => milestone.status !== 'released')) {
+      progressEl.textContent += ' · Awaiting buyer release';
+    }
+
+    milestones.forEach((milestone, index) => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+
+      const left = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = `${index + 1}. ${milestone.title || 'Milestone'}`;
+      const amountLine = document.createElement('div');
+      amountLine.className = 'muted';
+      amountLine.textContent = formatCurrency(milestone.amount);
+      left.appendChild(title);
+      left.appendChild(amountLine);
+      if (milestone.status === 'released' && milestone.releasedAt) {
+        const releasedLine = document.createElement('div');
+        releasedLine.className = 'muted';
+        releasedLine.textContent = `Released ${new Date(milestone.releasedAt).toLocaleString()}`;
+        left.appendChild(releasedLine);
+      }
+
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.alignItems = 'center';
+      right.style.gap = '8px';
+
+      const badge = document.createElement('span');
+      const badgeStatus = milestone.status === 'released' ? 'status-released' : 'status-pending';
+      badge.className = `status-badge ${badgeStatus}`;
+      badge.textContent = formatMilestoneStatus(milestone.status);
+      right.appendChild(badge);
+
+      if (tx.status === 'active' && milestone.status !== 'released' && isUserBuyer(tx)) {
+        const action = document.createElement('button');
+        action.className = 'btn';
+        action.type = 'button';
+        action.textContent = 'Release funds';
+        action.addEventListener('click', () => acceptMilestone(tx.id, milestone.id));
+        right.appendChild(action);
+      }
+
+      item.appendChild(left);
+      item.appendChild(right);
+      milestonesEl.appendChild(item);
     });
   }
 
@@ -916,6 +1175,44 @@
     return `m${Date.now()}${Math.floor(Math.random() * 1000)}`;
   }
 
+  function acceptMilestone(txId, milestoneId) {
+    const tx = state.transactions.find(entry => entry.id === txId);
+    if (!tx || tx.status !== 'active') return;
+    if (!isUserBuyer(tx)) {
+      alert('Only the buyer can release milestones.');
+      return;
+    }
+
+    const milestones = Array.isArray(tx.milestones) ? tx.milestones : [];
+    const milestone = milestones.find(entry => entry.id === milestoneId);
+    if (!milestone || milestone.status === 'released') return;
+
+    const now = new Date().toISOString();
+    const amount = Number(milestone.amount) || 0;
+
+    milestone.status = 'released';
+    milestone.releasedAt = now;
+
+    if (!Array.isArray(tx.timeline)) {
+      tx.timeline = [];
+    }
+    tx.timeline.push({ when: now, text: `Milestone "${milestone.title || milestone.id}" released` });
+
+    const remaining = milestones.some(entry => entry.status !== 'released');
+    if (!remaining) {
+      tx.status = 'resolved';
+      tx.timeline.push({ when: now, text: 'All milestones released. Escrow resolved.' });
+      activeEscrowFocus = null;
+    }
+
+    if (amount > 0) {
+      state.wallet.balance = Math.max(0, state.wallet.balance - amount);
+      appendWalletHistory('withdraw', amount);
+    }
+
+    save();
+  }
+
   function viewTx(id) {
     const tx = state.transactions.find(entry => entry.id === id);
     if (!tx) return;
@@ -928,13 +1225,28 @@
     const timelineEl = document.getElementById('tx-timeline');
     const milestoneCard = document.getElementById('tx-milestones-card');
     const milestoneList = document.getElementById('tx-milestones');
+    const buyerEmailEl = document.getElementById('tx-buyer-email');
+    const sellerEmailEl = document.getElementById('tx-seller-email');
 
     const statusLabel = formatStatus(tx.status);
 
     if (titleEl) titleEl.textContent = `Transaction #${tx.id}`;
     if (buyerEl) buyerEl.textContent = tx.buyer;
     if (sellerEl) sellerEl.textContent = tx.seller;
+    if (buyerEmailEl) buyerEmailEl.textContent = tx.buyerEmail || '';
+    if (sellerEmailEl) sellerEmailEl.textContent = tx.sellerEmail || '';
     if (amountEl) amountEl.textContent = formatCurrency(tx.amount);
+    const roleEl = document.getElementById('tx-user-role');
+    if (roleEl) {
+      const userIsBuyer = isUserBuyer(tx);
+      const counterparty = getCounterpartyInfo(tx);
+      const roleText = userIsBuyer ? 'You are the buyer in this escrow.' : 'You are the seller in this escrow.';
+      const counterpartyRoleLabel = counterparty.role ? formatStatus(counterparty.role) : 'Counterparty';
+      const counterpartyDetails = counterparty.name
+        ? ` ${counterpartyRoleLabel}: ${counterparty.name}${counterparty.email ? ` (${counterparty.email})` : ''}.`
+        : '';
+      roleEl.textContent = `${roleText}${counterpartyDetails}`;
+    }
     if (statusEl) statusEl.innerHTML = `<span class="status-badge status-${tx.status}">${statusLabel}</span>`;
     if (timelineEl) {
       timelineEl.innerHTML = tx.timeline
@@ -952,17 +1264,34 @@
           const item = document.createElement('div');
           item.className = 'tx-item';
 
-          const details = document.createElement('div');
+          const left = document.createElement('div');
           const title = document.createElement('strong');
           title.textContent = `${index + 1}. ${milestone.title || 'Milestone'}`;
-          details.appendChild(title);
+          const amountLine = document.createElement('div');
+          amountLine.className = 'muted';
+          amountLine.textContent = formatCurrency(milestone.amount);
+          left.appendChild(title);
+          left.appendChild(amountLine);
+          if (milestone.status === 'released' && milestone.releasedAt) {
+            const releasedLine = document.createElement('div');
+            releasedLine.className = 'muted';
+            releasedLine.textContent = `Released ${new Date(milestone.releasedAt).toLocaleString()}`;
+            left.appendChild(releasedLine);
+          }
 
-          const amountEl = document.createElement('div');
-          amountEl.style.fontWeight = '600';
-          amountEl.textContent = formatCurrency(milestone.amount);
+          const right = document.createElement('div');
+          right.style.display = 'flex';
+          right.style.alignItems = 'center';
+          right.style.gap = '8px';
 
-          item.appendChild(details);
-          item.appendChild(amountEl);
+          const badge = document.createElement('span');
+          const badgeStatus = milestone.status === 'released' ? 'status-released' : 'status-pending';
+          badge.className = `status-badge ${badgeStatus}`;
+          badge.textContent = formatMilestoneStatus(milestone.status);
+          right.appendChild(badge);
+
+          item.appendChild(left);
+          item.appendChild(right);
           milestoneList.appendChild(item);
         });
       }
@@ -1018,31 +1347,56 @@
       pendingCreate && Array.isArray(pendingCreate.milestones) ? pendingCreate.milestones : draftMilestones;
     renderAgreementMilestones(agreementMilestones);
     renderWallet();
+    const selectedRoleInput = document.querySelector('input[name="create-role"]:checked');
+    updateCounterpartyLabels(selectedRoleInput ? selectedRoleInput.value : 'buyer');
   }
 
   function startAgreement() {
-    const buyerInput = document.getElementById('create-buyer');
-    const sellerInput = document.getElementById('create-seller');
+    const roleInput = document.querySelector('input[name="create-role"]:checked');
+    const role = roleInput ? roleInput.value : 'buyer';
+    const counterpartyNameInput = document.getElementById('counterparty-name');
+    const counterpartyEmailInput = document.getElementById('counterparty-email');
     const amountInput = document.getElementById('create-amount');
-    const buyer = buyerInput ? buyerInput.value.trim() : '';
-    const seller = sellerInput ? sellerInput.value.trim() : '';
+    const counterpartyName = counterpartyNameInput ? counterpartyNameInput.value.trim() : '';
+    const counterpartyEmail = counterpartyEmailInput ? counterpartyEmailInput.value.trim() : '';
     const amount = amountInput ? Number(amountInput.value) : NaN;
 
-    if (!buyer || !seller || !isFinite(amount) || amount <= 0) {
-      alert('Fill buyer, seller, amount');
+    if (!counterpartyName || !counterpartyEmail || !isFinite(amount) || amount <= 0) {
+      alert('Fill counterparty name, email, and amount');
       return;
     }
+
+    const user = getUserIdentity();
 
     const milestones = draftMilestones.map(item => ({
       id: item.id,
       title: item.title,
-      amount: Number(item.amount) || 0
+      amount: Number(item.amount) || 0,
+      status: 'pending'
     }));
-    pendingCreate = { buyer, seller, amount, milestones };
+
+    const buyer = role === 'buyer' ? user.name : counterpartyName;
+    const buyerEmail = role === 'buyer' ? user.email : counterpartyEmail;
+    const seller = role === 'buyer' ? counterpartyName : user.name;
+    const sellerEmail = role === 'buyer' ? counterpartyEmail : user.email;
+
+    pendingCreate = {
+      role,
+      counterpartyName,
+      counterpartyEmail,
+      buyer,
+      buyerEmail,
+      seller,
+      sellerEmail,
+      amount,
+      milestones
+    };
 
     const agreementText = document.getElementById('agreement-text');
     if (agreementText) {
-      let preview = `Buyer: ${buyer}\nSeller: ${seller}\nAmount: ${formatCurrency(amount)}`;
+      let preview = `Buyer: ${buyer} (${buyerEmail})\nSeller: ${seller} (${sellerEmail})\nAmount: ${formatCurrency(
+        amount
+      )}`;
       if (milestones.length) {
         preview += '\n\nMilestones:\n';
         preview += milestones
@@ -1124,30 +1478,75 @@
   }
 
   function ensurePendingDefaults(updateUI) {
+    const user = getUserIdentity();
     if (!pendingCreate) {
-      pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650, milestones: [] };
+      pendingCreate = {
+        role: 'buyer',
+        counterpartyName: '',
+        counterpartyEmail: '',
+        buyer: user.name,
+        buyerEmail: user.email,
+        seller: '',
+        sellerEmail: '',
+        amount: 0,
+        milestones: []
+      };
+    }
+    if (!pendingCreate.role) {
+      const inferredRole =
+        pendingCreate.buyer === user.name || pendingCreate.buyerEmail === user.email ? 'buyer' : 'seller';
+      pendingCreate.role = inferredRole || 'buyer';
+    }
+    if (!pendingCreate.buyer) {
+      pendingCreate.buyer = pendingCreate.role === 'buyer' ? user.name : pendingCreate.counterpartyName || '';
+    }
+    if (!pendingCreate.buyerEmail) {
+      pendingCreate.buyerEmail = pendingCreate.role === 'buyer' ? user.email : pendingCreate.counterpartyEmail || '';
+    }
+    if (!pendingCreate.seller) {
+      pendingCreate.seller = pendingCreate.role === 'buyer' ? pendingCreate.counterpartyName || '' : user.name;
+    }
+    if (!pendingCreate.sellerEmail) {
+      pendingCreate.sellerEmail =
+        pendingCreate.role === 'buyer' ? pendingCreate.counterpartyEmail || '' : user.email;
+    }
+    if (!pendingCreate.counterpartyName) {
+      pendingCreate.counterpartyName =
+        pendingCreate.role === 'buyer' ? pendingCreate.seller : pendingCreate.buyer;
+    }
+    if (!pendingCreate.counterpartyEmail) {
+      pendingCreate.counterpartyEmail =
+        pendingCreate.role === 'buyer' ? pendingCreate.sellerEmail : pendingCreate.buyerEmail;
     }
     const normalizedMilestones = Array.isArray(pendingCreate.milestones)
-      ? pendingCreate.milestones.map((item, index) => ({
-          id: item && item.id ? item.id : generateMilestoneId(),
-          title: item && item.title ? item.title : `Milestone ${index + 1}`,
-          amount: Number(item && item.amount) || 0
-        }))
+      ? pendingCreate.milestones.map((item, index) => {
+          const normalized = {
+            id: item && item.id ? item.id : generateMilestoneId(),
+            title: item && item.title ? item.title : `Milestone ${index + 1}`,
+            amount: Number(item && item.amount) || 0,
+            status: item && item.status === 'released' ? 'released' : 'pending'
+          };
+          if (item && item.status === 'released' && item.releasedAt) {
+            normalized.releasedAt = item.releasedAt;
+          }
+          return normalized;
+        })
       : [];
     pendingCreate.milestones = normalizedMilestones.map(item => ({ ...item }));
     draftMilestones = normalizedMilestones.map(item => ({ ...item }));
     if (updateUI) {
-      const buyerInput = document.getElementById('create-buyer');
-      if (buyerInput) buyerInput.value = pendingCreate.buyer || '';
-      const sellerInput = document.getElementById('create-seller');
-      if (sellerInput) sellerInput.value = pendingCreate.seller || '';
       const amountInput = document.getElementById('create-amount');
       if (amountInput) amountInput.value = isFinite(pendingCreate.amount) ? pendingCreate.amount : '';
+      const counterpartyNameInput = document.getElementById('counterparty-name');
+      if (counterpartyNameInput) counterpartyNameInput.value = pendingCreate.counterpartyName || '';
+      const counterpartyEmailInput = document.getElementById('counterparty-email');
+      if (counterpartyEmailInput) counterpartyEmailInput.value = pendingCreate.counterpartyEmail || '';
+      updateCounterpartyLabels(pendingCreate.role || 'buyer');
       const agreementText = document.getElementById('agreement-text');
       if (agreementText) {
-        let preview = `Buyer: ${pendingCreate.buyer}\nSeller: ${pendingCreate.seller}\nAmount: ${formatCurrency(
-          pendingCreate.amount || 0
-        )}`;
+        let preview = `Buyer: ${pendingCreate.buyer} (${pendingCreate.buyerEmail || 'n/a'})\nSeller: ${
+          pendingCreate.seller
+        } (${pendingCreate.sellerEmail || 'n/a'})\nAmount: ${formatCurrency(pendingCreate.amount || 0)}`;
         if (pendingCreate.milestones.length) {
           preview += '\n\nMilestones:\n';
           preview += pendingCreate.milestones
@@ -1193,33 +1592,47 @@
     }
     state.wallet.balance += value;
     appendWalletHistory('deposit', value);
+    if (input) input.value = '';
 
     if (pendingCreate) {
       const newId = Math.floor(10000 + Math.random() * 90000);
+      const now = new Date().toISOString();
+      const user = getUserIdentity();
+      const role = pendingCreate.role || 'buyer';
+      const creationTimeline = [
+        { when: now, text: `Created by ${user.name} (${role})` },
+        {
+          when: now,
+          text: role === 'buyer' ? 'Buyer funded escrow' : 'Seller recorded buyer funding'
+        }
+      ];
       state.transactions.unshift({
         id: newId,
         buyer: pendingCreate.buyer,
+        buyerEmail: pendingCreate.buyerEmail,
         seller: pendingCreate.seller,
+        sellerEmail: pendingCreate.sellerEmail,
         amount: pendingCreate.amount,
         milestones: pendingCreate.milestones ? pendingCreate.milestones.map(item => ({ ...item })) : [],
         status: 'active',
-        timeline: [
-          { when: new Date().toISOString(), text: 'Created' },
-          { when: new Date().toISOString(), text: 'Buyer funded escrow' }
-        ]
+        timeline: creationTimeline
       });
+      activeEscrowFocus = newId;
       pendingCreate = null;
       draftMilestones = [];
-      const buyerInput = document.getElementById('create-buyer');
-      if (buyerInput) buyerInput.value = '';
-      const sellerInput = document.getElementById('create-seller');
-      if (sellerInput) sellerInput.value = '';
       const amountInput = document.getElementById('create-amount');
       if (amountInput) amountInput.value = '';
+      const counterpartyName = document.getElementById('counterparty-name');
+      if (counterpartyName) counterpartyName.value = '';
+      const counterpartyEmail = document.getElementById('counterparty-email');
+      if (counterpartyEmail) counterpartyEmail.value = '';
       const milestoneName = document.getElementById('milestone-name');
       if (milestoneName) milestoneName.value = '';
       const milestoneAmount = document.getElementById('milestone-amount');
       if (milestoneAmount) milestoneAmount.value = '';
+      const roleBuyerInput = document.querySelector('input[name="create-role"][value="buyer"]');
+      if (roleBuyerInput) roleBuyerInput.checked = true;
+      updateCounterpartyLabels('buyer');
     }
 
     save();
@@ -1279,6 +1692,11 @@
     load();
     renderAll();
 
+    const profileNameInput = document.getElementById('profile-name');
+    if (profileNameInput && !profileNameInput.value) profileNameInput.value = getUserIdentity().name;
+    const profileEmailInput = document.getElementById('profile-email');
+    if (profileEmailInput && !profileEmailInput.value) profileEmailInput.value = getUserIdentity().email;
+
     const createNext = document.getElementById('create-next');
     if (createNext) createNext.addEventListener('click', startAgreement);
 
@@ -1299,6 +1717,15 @@
 
     const milestoneAdd = document.getElementById('milestone-add');
     if (milestoneAdd) milestoneAdd.addEventListener('click', addMilestone);
+    const milestoneNameInput = document.getElementById('milestone-name');
+    if (milestoneNameInput) {
+      milestoneNameInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addMilestone();
+        }
+      });
+    }
     const milestoneAmountInput = document.getElementById('milestone-amount');
     if (milestoneAmountInput) {
       milestoneAmountInput.addEventListener('keydown', event => {
@@ -1308,6 +1735,31 @@
         }
       });
     }
+    eachNode(document.querySelectorAll('input[name="create-role"]'), input => {
+      if (!input) return;
+      input.addEventListener('change', () => {
+        const value = input.value || 'buyer';
+        ensurePendingDefaults(false);
+        pendingCreate.role = value;
+        const nameInput = document.getElementById('counterparty-name');
+        const emailInput = document.getElementById('counterparty-email');
+        if (nameInput) pendingCreate.counterpartyName = nameInput.value.trim();
+        if (emailInput) pendingCreate.counterpartyEmail = emailInput.value.trim();
+        const user = getUserIdentity();
+        if (value === 'buyer') {
+          pendingCreate.buyer = user.name;
+          pendingCreate.buyerEmail = user.email;
+          pendingCreate.seller = pendingCreate.counterpartyName || '';
+          pendingCreate.sellerEmail = pendingCreate.counterpartyEmail || '';
+        } else {
+          pendingCreate.seller = user.name;
+          pendingCreate.sellerEmail = user.email;
+          pendingCreate.buyer = pendingCreate.counterpartyName || '';
+          pendingCreate.buyerEmail = pendingCreate.counterpartyEmail || '';
+        }
+        updateCounterpartyLabels(value);
+      });
+    });
 
     const brand = document.getElementById('brand');
     if (brand) brand.addEventListener('click', () => navigate('s-welcome'));
