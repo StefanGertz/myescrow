@@ -221,6 +221,26 @@
           Other
         </option>
       </select>
+      <div class="muted" style="margin-top:12px;">
+        Milestones
+      </div>
+      <p class="muted" style="margin:4px 0 8px;font-size:13px;">
+        Break the agreement into deliverables with optional milestone payouts.
+      </p>
+      <div id="milestone-form" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="milestone-name" placeholder="Milestone title" autocomplete="off" style="flex:1 1 160px;">
+        <input id="milestone-amount" type="number" placeholder="Amount" inputmode="decimal" style="width:140px;">
+        <button type="button" class="ghost" id="milestone-add" style="flex:0 0 auto;">
+          Add milestone
+        </button>
+      </div>
+      <div id="milestone-empty" class="muted" style="margin-top:8px;">
+        No milestones yet
+      </div>
+      <div id="milestone-list" class="tx-list" style="margin-top:8px;">
+      </div>
+      <div id="milestone-total" class="muted" style="margin-top:8px;display:none;text-align:right;">
+      </div>
       <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
         <button class="ghost" data-action="navigate" data-target="s-welcome">
           Cancel
@@ -246,6 +266,18 @@
       <textarea id="agreement-text" readonly style="height:120px">
         Standard escrow terms...
       </textarea>
+      <div style="margin-top:12px;">
+        <div class="muted">
+          Milestones
+        </div>
+        <div id="agreement-milestones-empty" class="muted" style="margin-top:4px;">
+          No milestones added
+        </div>
+        <div id="agreement-milestones" class="tx-list" style="margin-top:8px;">
+        </div>
+        <div id="agreement-milestones-total" class="muted" style="margin-top:8px;display:none;text-align:right;">
+        </div>
+      </div>
       <div style="margin-top:12px">
         <label class="muted">
           Sign below
@@ -333,6 +365,15 @@
           <div id="tx-status" style="margin-top:8px">
           </div>
         </div>
+      </div>
+    </div>
+    <div id="tx-milestones-card" class="card" style="margin-top:12px;display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <strong>
+          Milestones
+        </strong>
+      </div>
+      <div id="tx-milestones" class="tx-list" style="margin-top:12px;">
       </div>
     </div>
     <div id="tx-timeline" style="margin-top:12px">
@@ -536,10 +577,59 @@
       ]
     },
     transactions: [
-      { id: 10101, buyer: 'Alice', seller: 'Bob', amount: 500, status: 'pending', timeline: [{ when: new Date(Date.now() - 864e5 * 2).toISOString(), text: 'Created' }] },
-      { id: 10102, buyer: 'John', seller: 'Sarah', amount: 1200, status: 'active', timeline: [{ when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Created' }, { when: new Date(Date.now() - 864e5 * 1.5).toISOString(), text: 'Buyer funded escrow' }] },
-      { id: 10103, buyer: 'Mark', seller: 'Linda', amount: 300, status: 'resolved', timeline: [{ when: new Date(Date.now() - 864e5 * 7).toISOString(), text: 'Created' }, { when: new Date(Date.now() - 864e5 * 5).toISOString(), text: 'Delivered' }, { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Closed' }] },
-      { id: 10104, buyer: 'Chris', seller: 'Dana', amount: 450, status: 'disputed', timeline: [{ when: new Date(Date.now() - 864e5 * 0.5).toISOString(), text: 'Buyer disputed delivery' }] }
+      {
+        id: 10101,
+        buyer: 'Alice',
+        seller: 'Bob',
+        amount: 500,
+        status: 'pending',
+        timeline: [{ when: new Date(Date.now() - 864e5 * 2).toISOString(), text: 'Created' }],
+        milestones: [
+          { id: 'm10101a', title: 'Deposit received', amount: 250 },
+          { id: 'm10101b', title: 'Delivery inspection', amount: 250 }
+        ]
+      },
+      {
+        id: 10102,
+        buyer: 'John',
+        seller: 'Sarah',
+        amount: 1200,
+        status: 'active',
+        timeline: [
+          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Created' },
+          { when: new Date(Date.now() - 864e5 * 1.5).toISOString(), text: 'Buyer funded escrow' }
+        ],
+        milestones: [
+          { id: 'm10102a', title: 'Design draft', amount: 400 },
+          { id: 'm10102b', title: 'Development sprint', amount: 400 },
+          { id: 'm10102c', title: 'Final handoff', amount: 400 }
+        ]
+      },
+      {
+        id: 10103,
+        buyer: 'Mark',
+        seller: 'Linda',
+        amount: 300,
+        status: 'resolved',
+        timeline: [
+          { when: new Date(Date.now() - 864e5 * 7).toISOString(), text: 'Created' },
+          { when: new Date(Date.now() - 864e5 * 5).toISOString(), text: 'Delivered' },
+          { when: new Date(Date.now() - 864e5 * 4).toISOString(), text: 'Closed' }
+        ],
+        milestones: [
+          { id: 'm10103a', title: 'Prototype submitted', amount: 150 },
+          { id: 'm10103b', title: 'Client approval', amount: 150 }
+        ]
+      },
+      {
+        id: 10104,
+        buyer: 'Chris',
+        seller: 'Dana',
+        amount: 450,
+        status: 'disputed',
+        timeline: [{ when: new Date(Date.now() - 864e5 * 0.5).toISOString(), text: 'Buyer disputed delivery' }],
+        milestones: [{ id: 'm10104a', title: 'Hardware delivered', amount: 450 }]
+      }
     ]
   };
 
@@ -581,7 +671,8 @@
   }
 
   let state = cloneState(INITIAL_STATE);
-  let pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650 };
+  let pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650, milestones: [] };
+  let draftMilestones = [];
   let sigCanvas = null;
   let sigCtx = null;
   let drawing = false;
@@ -703,6 +794,128 @@
     });
   }
 
+  function renderMilestoneDrafts() {
+    const list = document.getElementById('milestone-list');
+    const empty = document.getElementById('milestone-empty');
+    const total = document.getElementById('milestone-total');
+    if (!list || !empty || !total) return;
+
+    list.innerHTML = '';
+
+    if (!draftMilestones.length) {
+      empty.style.display = 'block';
+      total.style.display = 'none';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    let sum = 0;
+    draftMilestones.forEach(milestone => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+
+      const info = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = milestone.title;
+      const amountMuted = document.createElement('div');
+      amountMuted.className = 'muted';
+      amountMuted.textContent = formatCurrency(milestone.amount);
+      info.appendChild(title);
+      info.appendChild(amountMuted);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'ghost';
+      removeBtn.type = 'button';
+      removeBtn.style.padding = '6px 10px';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => removeMilestone(milestone.id));
+
+      item.appendChild(info);
+      item.appendChild(removeBtn);
+      list.appendChild(item);
+
+      sum += Number(milestone.amount) || 0;
+    });
+
+    total.style.display = 'block';
+    total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+  }
+
+  function renderAgreementMilestones(milestones) {
+    const list = document.getElementById('agreement-milestones');
+    const empty = document.getElementById('agreement-milestones-empty');
+    const total = document.getElementById('agreement-milestones-total');
+    if (!list || !empty || !total) return;
+
+    list.innerHTML = '';
+
+    if (!milestones || !milestones.length) {
+      empty.style.display = 'block';
+      total.style.display = 'none';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    let sum = 0;
+    milestones.forEach((milestone, index) => {
+      const item = document.createElement('div');
+      item.className = 'tx-item';
+
+      const details = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = `${index + 1}. ${milestone.title}`;
+      details.appendChild(title);
+
+      const amountEl = document.createElement('div');
+      amountEl.style.fontWeight = '600';
+      amountEl.textContent = formatCurrency(milestone.amount);
+
+      item.appendChild(details);
+      item.appendChild(amountEl);
+      list.appendChild(item);
+
+      sum += Number(milestone.amount) || 0;
+    });
+
+    total.style.display = 'block';
+    total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+  }
+
+  function addMilestone() {
+    const nameInput = document.getElementById('milestone-name');
+    const amountInput = document.getElementById('milestone-amount');
+    const title = nameInput ? nameInput.value.trim() : '';
+    const amount = amountInput ? Number(amountInput.value) : NaN;
+
+    if (!title || !isFinite(amount) || amount <= 0) {
+      alert('Enter milestone title and amount');
+      return;
+    }
+
+    const milestone = {
+      id: generateMilestoneId(),
+      title,
+      amount
+    };
+    draftMilestones.push(milestone);
+    renderMilestoneDrafts();
+    renderAgreementMilestones(draftMilestones);
+    if (nameInput) nameInput.value = '';
+    if (amountInput) amountInput.value = '';
+  }
+
+  function removeMilestone(id) {
+    draftMilestones = draftMilestones.filter(milestone => milestone.id !== id);
+    renderMilestoneDrafts();
+    renderAgreementMilestones(draftMilestones);
+  }
+
+  function generateMilestoneId() {
+    return `m${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  }
+
   function viewTx(id) {
     const tx = state.transactions.find(entry => entry.id === id);
     if (!tx) return;
@@ -713,6 +926,8 @@
     const amountEl = document.getElementById('tx-amount');
     const statusEl = document.getElementById('tx-status');
     const timelineEl = document.getElementById('tx-timeline');
+    const milestoneCard = document.getElementById('tx-milestones-card');
+    const milestoneList = document.getElementById('tx-milestones');
 
     const statusLabel = formatStatus(tx.status);
 
@@ -725,6 +940,32 @@
       timelineEl.innerHTML = tx.timeline
         .map(event => `<div class="muted">${new Date(event.when).toLocaleString()} - ${event.text}</div>`)
         .join('');
+    }
+    if (milestoneCard && milestoneList) {
+      milestoneList.innerHTML = '';
+      const milestones = Array.isArray(tx.milestones) ? tx.milestones : [];
+      if (!milestones.length) {
+        milestoneCard.style.display = 'none';
+      } else {
+        milestoneCard.style.display = 'block';
+        milestones.forEach((milestone, index) => {
+          const item = document.createElement('div');
+          item.className = 'tx-item';
+
+          const details = document.createElement('div');
+          const title = document.createElement('strong');
+          title.textContent = `${index + 1}. ${milestone.title || 'Milestone'}`;
+          details.appendChild(title);
+
+          const amountEl = document.createElement('div');
+          amountEl.style.fontWeight = '600';
+          amountEl.textContent = formatCurrency(milestone.amount);
+
+          item.appendChild(details);
+          item.appendChild(amountEl);
+          milestoneList.appendChild(item);
+        });
+      }
     }
 
     state._activeTx = id;
@@ -772,6 +1013,10 @@
   function renderAll() {
     renderDashboard();
     renderActiveEscrows();
+    renderMilestoneDrafts();
+    const agreementMilestones =
+      pendingCreate && Array.isArray(pendingCreate.milestones) ? pendingCreate.milestones : draftMilestones;
+    renderAgreementMilestones(agreementMilestones);
     renderWallet();
   }
 
@@ -788,12 +1033,25 @@
       return;
     }
 
-    pendingCreate = { buyer, seller, amount };
+    const milestones = draftMilestones.map(item => ({
+      id: item.id,
+      title: item.title,
+      amount: Number(item.amount) || 0
+    }));
+    pendingCreate = { buyer, seller, amount, milestones };
 
     const agreementText = document.getElementById('agreement-text');
     if (agreementText) {
-      agreementText.value = `Buyer: ${buyer}\nSeller: ${seller}\nAmount: ${formatCurrency(amount)}`;
+      let preview = `Buyer: ${buyer}\nSeller: ${seller}\nAmount: ${formatCurrency(amount)}`;
+      if (milestones.length) {
+        preview += '\n\nMilestones:\n';
+        preview += milestones
+          .map((milestone, index) => `${index + 1}. ${milestone.title} - ${formatCurrency(milestone.amount)}`)
+          .join('\n');
+      }
+      agreementText.value = preview;
     }
+    renderAgreementMilestones(milestones);
 
     navigate('s-agreement');
     initSignature();
@@ -867,17 +1125,44 @@
 
   function ensurePendingDefaults(updateUI) {
     if (!pendingCreate) {
-      pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650 };
+      pendingCreate = { buyer: 'Demo Buyer', seller: 'Preview Seller', amount: 650, milestones: [] };
     }
+    const normalizedMilestones = Array.isArray(pendingCreate.milestones)
+      ? pendingCreate.milestones.map((item, index) => ({
+          id: item && item.id ? item.id : generateMilestoneId(),
+          title: item && item.title ? item.title : `Milestone ${index + 1}`,
+          amount: Number(item && item.amount) || 0
+        }))
+      : [];
+    pendingCreate.milestones = normalizedMilestones.map(item => ({ ...item }));
+    draftMilestones = normalizedMilestones.map(item => ({ ...item }));
     if (updateUI) {
+      const buyerInput = document.getElementById('create-buyer');
+      if (buyerInput) buyerInput.value = pendingCreate.buyer || '';
+      const sellerInput = document.getElementById('create-seller');
+      if (sellerInput) sellerInput.value = pendingCreate.seller || '';
+      const amountInput = document.getElementById('create-amount');
+      if (amountInput) amountInput.value = isFinite(pendingCreate.amount) ? pendingCreate.amount : '';
       const agreementText = document.getElementById('agreement-text');
       if (agreementText) {
-        agreementText.value = `Buyer: ${pendingCreate.buyer}\nSeller: ${pendingCreate.seller}\nAmount: $${pendingCreate.amount}`;
+        let preview = `Buyer: ${pendingCreate.buyer}\nSeller: ${pendingCreate.seller}\nAmount: ${formatCurrency(
+          pendingCreate.amount || 0
+        )}`;
+        if (pendingCreate.milestones.length) {
+          preview += '\n\nMilestones:\n';
+          preview += pendingCreate.milestones
+            .map((milestone, index) => `${index + 1}. ${milestone.title} - ${formatCurrency(milestone.amount)}`)
+            .join('\n');
+        }
+        agreementText.value = preview;
       }
       const fundAmount = document.getElementById('fund-amount');
       if (fundAmount) {
-        fundAmount.textContent = pendingCreate.amount.toFixed(2);
+        const value = Number(pendingCreate.amount);
+        fundAmount.textContent = isFinite(value) ? value.toFixed(2) : '0.00';
       }
+      renderMilestoneDrafts();
+      renderAgreementMilestones(pendingCreate.milestones);
     }
   }
 
@@ -916,6 +1201,7 @@
         buyer: pendingCreate.buyer,
         seller: pendingCreate.seller,
         amount: pendingCreate.amount,
+        milestones: pendingCreate.milestones ? pendingCreate.milestones.map(item => ({ ...item })) : [],
         status: 'active',
         timeline: [
           { when: new Date().toISOString(), text: 'Created' },
@@ -923,6 +1209,17 @@
         ]
       });
       pendingCreate = null;
+      draftMilestones = [];
+      const buyerInput = document.getElementById('create-buyer');
+      if (buyerInput) buyerInput.value = '';
+      const sellerInput = document.getElementById('create-seller');
+      if (sellerInput) sellerInput.value = '';
+      const amountInput = document.getElementById('create-amount');
+      if (amountInput) amountInput.value = '';
+      const milestoneName = document.getElementById('milestone-name');
+      if (milestoneName) milestoneName.value = '';
+      const milestoneAmount = document.getElementById('milestone-amount');
+      if (milestoneAmount) milestoneAmount.value = '';
     }
 
     save();
@@ -999,6 +1296,27 @@
 
     const walletWithdraw = document.getElementById('wallet-withdraw');
     if (walletWithdraw) walletWithdraw.addEventListener('click', withdrawWallet);
+
+    const milestoneAdd = document.getElementById('milestone-add');
+    if (milestoneAdd) milestoneAdd.addEventListener('click', addMilestone);
+    const milestoneNameInput = document.getElementById('milestone-name');
+    if (milestoneNameInput) {
+      milestoneNameInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addMilestone();
+        }
+      });
+    }
+    const milestoneAmountInput = document.getElementById('milestone-amount');
+    if (milestoneAmountInput) {
+      milestoneAmountInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addMilestone();
+        }
+      });
+    }
 
     const brand = document.getElementById('brand');
     if (brand) brand.addEventListener('click', () => navigate('s-welcome'));
