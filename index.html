@@ -1299,15 +1299,6 @@
 
     const milestoneAdd = document.getElementById('milestone-add');
     if (milestoneAdd) milestoneAdd.addEventListener('click', addMilestone);
-    const milestoneNameInput = document.getElementById('milestone-name');
-    if (milestoneNameInput) {
-      milestoneNameInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          addMilestone();
-        }
-      });
-    }
     const milestoneAmountInput = document.getElementById('milestone-amount');
     if (milestoneAmountInput) {
       milestoneAmountInput.addEventListener('keydown', event => {
