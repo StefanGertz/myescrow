@@ -143,10 +143,144 @@ h2 {
 .card {
   background:var(--card);
   border-radius:var(--radius);
-  padding:14px;
+  padding:16px;
   box-shadow:var(--shadow-soft);
   border:1px solid rgba(125,109,255,0.18);
   backdrop-filter:blur(6px);
+}
+
+.tile {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:8px;
+  min-height:130px;
+}
+
+.tile .t-title {
+  font-size:17px;
+  font-weight:700;
+  color:var(--brand-600);
+  letter-spacing:0.1px;
+}
+
+.tile .muted {
+  margin:0;
+  line-height:1.45;
+}
+
+.tile button {
+  margin-top:auto;
+}
+
+.form-field {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-bottom:14px;
+}
+
+.form-field .muted {
+  margin:0;
+  font-weight:600;
+  color:var(--brand-400);
+}
+
+.milestone-form {
+  display:grid;
+  grid-template-columns:1fr minmax(120px, 160px) auto;
+  gap:8px;
+  align-items:end;
+}
+
+.milestone-form .form-field {
+  margin-bottom:0;
+}
+
+.milestone-form button {
+  height:44px;
+}
+
+@media (max-width: 560px) {
+  .milestone-form {
+    grid-template-columns:1fr;
+  }
+
+  .milestone-form button {
+    width:100%;
+  }
+}
+
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="tel"],
+input[type="password"],
+input[type="url"],
+input[type="search"],
+textarea,
+select {
+  width:100%;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid rgba(125,109,255,0.28);
+  background-color:rgba(255,255,255,0.94);
+  background-image:none;
+  color:#1f1f3d;
+  font-family:inherit;
+  font-size:15px;
+  box-sizing:border-box;
+  box-shadow:0 10px 22px rgba(53,24,120,0.12);
+  transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+#create-category {
+  padding-right:38px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%235a31ff' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 16px center;
+  background-size:14px 14px;
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus,
+input[type="tel"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus,
+input[type="search"]:focus,
+textarea:focus,
+select:focus {
+  outline:none;
+  border-color:var(--brand-400);
+  box-shadow:0 0 0 2px rgba(90,49,255,0.22), 0 14px 28px rgba(53,24,120,0.18);
+  transform:translateY(-1px);
+}
+
+.milestone-form input[type="text"],
+.milestone-form input[type="number"] {
+  width:100%;
+  margin-bottom:0;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color:rgba(15,23,42,0.45);
+}
+
+.milestone-form input[type="number"]::-webkit-outer-spin-button,
+.milestone-form input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance:none;
+  margin:0;
+}
+
+input[type="number"] {
+  -moz-appearance:textfield;
 }
 
 .tx-list {
@@ -357,20 +491,6 @@ canvas.signature {
 .settings-form label {
   font-weight:600;
   color:var(--brand-400);
-}
-
-.settings-form input {
-  padding:10px 12px;
-  border-radius:10px;
-  border:1px solid rgba(125,109,255,0.35);
-  background:rgba(255,255,255,0.96);
-  color:#1f1f3d;
-}
-
-.settings-form input:focus {
-  outline:none;
-  border-color:var(--brand-400);
-  box-shadow:0 0 0 2px rgba(90,49,255,0.22);
 }
 
 .settings-actions {
@@ -596,6 +716,17 @@ canvas.signature {
             For demo support, reach out to the team.
           </p>
           ">Contact
+          </button>
+        </div>
+      <div class="tile">
+        <div class="t-title">
+          Escrow history
+        </div>
+        <div class="muted">
+          Past escrows
+        </div>
+        <button class="ghost" data-action="navigate" data-target="s-history">
+          View history
         </button>
       </div>
     </div>
@@ -637,11 +768,35 @@ canvas.signature {
       </div>
       <div id="active-escrow-milestones" class="tx-list" style="margin-top:12px;">
       </div>
-      <div id="active-escrow-no-milestones" class="muted" style="margin-top:8px;display:none;">
-        No milestones for this escrow.
-      </div>
+    <div id="active-escrow-no-milestones" class="muted" style="margin-top:8px;display:none;">
+      No milestones for this escrow.
     </div>
-  </section>
+  </div>
+</section>
+<!-- Escrow History -->
+<section id="s-history" class="screen">
+  <h2>
+    Escrow history
+  </h2>
+  <p class="lead">
+    Completed and released escrows.
+  </p>
+  <div id="past-escrows-card" class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>
+        Past escrows
+      </strong>
+      <button class="ghost" data-action="navigate" data-target="s-create">
+        Start new
+      </button>
+    </div>
+    <div id="past-escrows-list" class="tx-list" style="margin-top:12px;">
+    </div>
+    <div id="past-escrows-empty" class="muted" style="margin-top:8px;">
+      No past escrows yet.
+    </div>
+  </div>
+</section>
   <!-- Dashboard -->
   <section id="s-dashboard" class="screen">
     <h2>
@@ -686,42 +841,60 @@ canvas.signature {
           </span>
         </label>
       </div>
-      <label class="muted" id="counterparty-name-label">
-        Seller name
-      </label>
-      <input id="counterparty-name" placeholder="Seller name" autocomplete="off">
-      <label class="muted" id="counterparty-email-label">
-        Seller email
-      </label>
-      <input id="counterparty-email" type="email" placeholder="seller@example.com" autocomplete="email">
-      <label class="muted">
-        Amount
-      </label>
-      <input id="create-amount" type="number" placeholder="Amount" inputmode="decimal">
-      <label class="muted">
-        Category
-      </label>
-      <select id="create-category">
-        <option>
-          Goods
-        </option>
-        <option>
-          Services
-        </option>
-        <option>
-          Other
-        </option>
-      </select>
+      <div class="form-field">
+        <label class="muted" id="counterparty-name-label">
+          Seller name
+        </label>
+        <input id="counterparty-name" type="text" placeholder="Seller name" autocomplete="off">
+      </div>
+      <div class="form-field">
+        <label class="muted" id="counterparty-email-label">
+          Seller email
+        </label>
+        <input id="counterparty-email" type="email" placeholder="seller@example.com" autocomplete="email">
+      </div>
+      <div class="form-field">
+        <label class="muted">
+          Amount
+        </label>
+        <input id="create-amount" type="number" placeholder="Amount" inputmode="decimal">
+      </div>
+      <div class="form-field">
+        <label class="muted">
+          Category
+        </label>
+        <select id="create-category">
+          <option>
+            Goods
+          </option>
+          <option>
+            Services
+          </option>
+          <option>
+            Other
+          </option>
+        </select>
+      </div>
       <div class="muted" style="margin-top:12px;">
         Milestones
       </div>
       <p class="muted" style="margin:4px 0 8px;font-size:13px;">
         Break the agreement into deliverables with optional milestone payouts.
       </p>
-      <div id="milestone-form" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <input id="milestone-name" placeholder="Milestone title" autocomplete="off" style="flex:1 1 160px;">
-        <input id="milestone-amount" type="number" placeholder="Amount" inputmode="decimal" style="width:140px;">
-        <button type="button" class="ghost" id="milestone-add" style="flex:0 0 auto;">
+      <div id="milestone-form" class="milestone-form">
+        <div class="form-field">
+          <label class="muted" for="milestone-name">
+            Milestone title
+          </label>
+          <input id="milestone-name" type="text" placeholder="Milestone title" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label class="muted" for="milestone-amount">
+            Amount
+          </label>
+          <input id="milestone-amount" type="number" placeholder="Amount" inputmode="decimal">
+        </div>
+        <button type="button" class="ghost" id="milestone-add">
           Add milestone
         </button>
       </div>
@@ -921,11 +1094,11 @@ canvas.signature {
         <label class="muted" for="profile-name">
           Full name
         </label>
-        <input id="profile-name" placeholder="Your name" autocomplete="name">
+        <input id="profile-name" type="text" placeholder="Your name" autocomplete="name">
         <label class="muted" for="profile-email">
           Email
         </label>
-        <input id="profile-email" placeholder="you@example.com" autocomplete="email">
+        <input id="profile-email" type="email" placeholder="you@example.com" autocomplete="email">
       </div>
       <div class="settings-actions">
         <button class="ghost" id="mark-kyc">
@@ -1329,6 +1502,8 @@ canvas.signature {
         <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}</div>
         <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
       `;
+      item.style.cursor = 'pointer';
+      item.addEventListener('click', () => viewTx(tx.id));
       list.appendChild(item);
     });
 
@@ -1369,32 +1544,69 @@ canvas.signature {
       empty.style.display = 'block';
       detailCard.style.display = 'none';
       activeEscrowFocus = null;
+      renderActiveEscrowDetail(null);
+    } else {
+      empty.style.display = 'none';
+
+      if (!activeEscrowFocus || !active.some(tx => tx.id === activeEscrowFocus)) {
+        activeEscrowFocus = active[0].id;
+      }
+
+      active.forEach(tx => {
+        const item = document.createElement('div');
+        item.className = 'tx-item';
+        item.style.cursor = 'pointer';
+        if (tx.id === activeEscrowFocus) item.classList.add('selected');
+        const statusLabel = formatStatus(tx.status);
+        const roleHint = isUserBuyer(tx) ? 'You are the buyer' : 'You are the seller';
+        item.innerHTML = `
+        <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}<div class="muted">${roleHint}</div></div>
+        <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
+      `;
+        item.addEventListener('click', () => selectActiveEscrow(tx.id));
+        list.appendChild(item);
+      });
+
+      const selected = active.find(tx => tx.id === activeEscrowFocus) || null;
+      renderActiveEscrowDetail(selected);
+    }
+
+    renderEscrowHistory();
+  }
+
+  function renderEscrowHistory() {
+    const historyCard = document.getElementById('past-escrows-card');
+    const list = document.getElementById('past-escrows-list');
+    const empty = document.getElementById('past-escrows-empty');
+    if (!historyCard || !list || !empty) return;
+
+    list.innerHTML = '';
+    const history = state.transactions.filter(
+      tx => tx.status !== 'active' && tx.status !== 'pending'
+    );
+
+    if (!history.length) {
+      empty.style.display = 'block';
+      historyCard.style.display = 'block';
       return;
     }
 
     empty.style.display = 'none';
+    historyCard.style.display = 'block';
 
-    if (!activeEscrowFocus || !active.some(tx => tx.id === activeEscrowFocus)) {
-      activeEscrowFocus = active[0].id;
-    }
-
-    active.forEach(tx => {
+    history.forEach(tx => {
       const item = document.createElement('div');
       item.className = 'tx-item';
       item.style.cursor = 'pointer';
-      if (tx.id === activeEscrowFocus) item.classList.add('selected');
       const statusLabel = formatStatus(tx.status);
-      const roleHint = isUserBuyer(tx) ? 'You are the buyer' : 'You are the seller';
+      const roleHint = isUserBuyer(tx) ? 'You were the buyer' : 'You were the seller';
       item.innerHTML = `
         <div><strong>#${tx.id}</strong> ${tx.buyer} &rarr; ${tx.seller}<div class="muted">${roleHint}</div></div>
         <div>${formatCurrency(tx.amount)} <span class="status-badge status-${tx.status}">${statusLabel}</span></div>
       `;
-      item.addEventListener('click', () => selectActiveEscrow(tx.id));
+      item.addEventListener('click', () => viewTx(tx.id));
       list.appendChild(item);
     });
-
-    const selected = active.find(tx => tx.id === activeEscrowFocus) || null;
-    renderActiveEscrowDetail(selected);
   }
 
   function selectActiveEscrow(id) {
