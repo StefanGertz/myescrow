@@ -29,7 +29,21 @@
   <!-- Splash (animated logo) -->
   <div id="splash" style="position:fixed;inset:0;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;flex-direction:column;color:white;z-index:9999;animation:splashFade 1.6s ease forwards;pointer-events:none;">
 <style>@keyframes splashFade{      0%{opacity:0;transform:translate3d(0,8px,0);}      30%{opacity:1;transform:translate3d(0,0,0);}      70%{opacity:1;}      100%{opacity:0;}    }    .s-pulse{ animation: sp 2.6s ease-in-out infinite; }    @keyframes sp{0%,100%{transform:scale(1);}50%{transform:scale(1.06);}}</style>
-<style>.status-released{background:#0f766e;}.tx-item.selected{border-color:rgba(37,99,235,0.65);box-shadow:0 0 0 1px rgba(37,99,235,0.12);}.role-toggle{display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap;}.role-option{flex:1 1 130px;display:flex;align-items:center;gap:8px;justify-content:center;padding:10px 12px;border:1px solid #dbe1f1;border-radius:12px;background:#fff;font-weight:600;color:#1f2a44;cursor:pointer;transition:all .2s ease;}.role-option.active{border-color:var(--brand);background:rgba(37,99,235,0.08);color:var(--brand);box-shadow:0 6px 16px rgba(37,99,235,0.14);}.role-option input{margin:0;accent-color:var(--brand);}.role-option span{flex:1;text-align:center;}</style>
+<style>
+.status-released{background:#0f766e;}
+.tx-item.selected{border-color:rgba(37,99,235,0.65);box-shadow:0 0 0 1px rgba(37,99,235,0.12);}
+.role-toggle{display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap;}
+.role-option{flex:1 1 130px;display:flex;align-items:center;gap:8px;justify-content:center;padding:10px 12px;border:1px solid #dbe1f1;border-radius:12px;background:#fff;font-weight:600;color:#1f2a44;cursor:pointer;transition:all .2s ease;}
+.role-option.active{border-color:var(--brand);background:rgba(37,99,235,0.08);color:var(--brand);box-shadow:0 6px 16px rgba(37,99,235,0.14);}
+.role-option input{margin:0;accent-color:var(--brand);}
+.role-option span{flex:1;text-align:center;}
+.setting-card + .setting-card{margin-top:18px;}
+.settings-form{display:flex;flex-direction:column;gap:12px;}
+.settings-form label{font-weight:600;color:#e6e7ff;}
+.settings-form input{padding:10px 12px;border-radius:10px;border:1px solid rgba(125,109,255,0.35);background:rgba(255,255,255,0.96);color:#1f1f3d;}
+.settings-form input:focus{outline:none;border-color:var(--brand-400);box-shadow:0 0 0 2px rgba(90,49,255,0.22);}
+.settings-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;}
+</style>
 <svg class="s-pulse" viewBox="0 0 24 24" width="84" height="84" aria-hidden="true">
   <path d="M4 13a4 4 0 0 1 4-4h4l3-3 5 5-3 3v2a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
@@ -140,7 +154,7 @@
         </button>
       </div>
     </div>
-    <div class="card">
+    <div class="card setting-card">
       <h3 style="margin-bottom:8px">
         Recent transactions
       </h3>
@@ -156,7 +170,7 @@
     <p class="lead">
       Escrows that are currently funded or awaiting completion.
     </p>
-    <div class="card">
+    <div class="card setting-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <strong>
           Current escrows
@@ -457,16 +471,18 @@
     <h2>
       Settings
     </h2>
-    <div class="card">
-      <label class="muted">
-        Full name
-      </label>
-      <input id="profile-name" placeholder="Your name" autocomplete="name">
-      <label class="muted">
-        Email
-      </label>
-      <input id="profile-email" placeholder="you@example.com" autocomplete="email">
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <div class="card setting-card">
+      <div class="settings-form">
+        <label class="muted" for="profile-name">
+          Full name
+        </label>
+        <input id="profile-name" placeholder="Your name" autocomplete="name">
+        <label class="muted" for="profile-email">
+          Email
+        </label>
+        <input id="profile-email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="settings-actions">
         <button class="ghost" id="mark-kyc">
           Mark KYC
         </button>
@@ -1853,3 +1869,4 @@
 </script>
 </body>
 </html>
+
