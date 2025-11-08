@@ -103,10 +103,23 @@ main {
   border-radius:12px;
   cursor:pointer;
   transition:background .2s ease;
+  position:relative;
 }
 
 .icon-btn:hover {
   background:rgba(255,255,255,0.32);
+}
+
+.icon-btn[data-has-notif="true"]::after {
+  content:'';
+  position:absolute;
+  top:6px;
+  right:6px;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#ff5c5c;
+  box-shadow:0 0 0 3px rgba(255,92,92,0.25);
 }
 
 .screen {
@@ -171,6 +184,207 @@ h2 {
 
 .tile button {
   margin-top:auto;
+}
+
+.home-stack {
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin-top:12px;
+}
+
+.flow-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+
+.flow-block {
+  border:1px dashed rgba(90,49,255,0.32);
+  border-radius:12px;
+  padding:12px;
+  background:rgba(255,255,255,0.88);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+}
+
+.flow-pill {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:rgba(90,49,255,0.12);
+  color:var(--brand-600);
+  font-size:13px;
+  font-weight:600;
+}
+
+.flow-steps {
+  margin:10px 0 0;
+  padding-left:18px;
+  color:#1f1f3d;
+  font-size:14px;
+  line-height:1.45;
+  list-style:decimal;
+  list-style-position:outside;
+}
+
+.alert-card {
+  border-left:4px solid var(--accent-orange);
+  position:relative;
+}
+
+.alert-pill {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:rgba(255,156,71,0.15);
+  color:var(--accent-orange);
+  padding:4px 12px;
+  border-radius:999px;
+  font-weight:700;
+  font-size:13px;
+}
+
+.alert-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-top:8px;
+}
+
+.process-steps {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+
+.process-step {
+  padding:12px;
+  border-radius:12px;
+  border:1px solid rgba(90,49,255,0.2);
+  background:rgba(255,255,255,0.94);
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.process-step::before {
+  content:'';
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--muted);
+  position:absolute;
+  top:12px;
+  right:12px;
+}
+
+.process-step[data-status="complete"] {
+  border-color:#22c55e;
+}
+
+.process-step[data-status="complete"]::before {
+  background:#22c55e;
+}
+
+.process-step[data-status="active"] {
+  border-color:var(--brand);
+  box-shadow:0 0 0 1px rgba(90,49,255,0.15);
+}
+
+.process-step[data-status="active"]::before {
+  background:var(--brand);
+}
+
+.process-step[data-status="upcoming"] {
+  opacity:0.75;
+}
+
+.process-step-title {
+  font-weight:700;
+}
+
+.process-step-detail {
+  font-size:13px;
+  color:#4c4f6b;
+}
+
+.process-step-status {
+  font-size:12px;
+  font-weight:600;
+  color:var(--brand-600);
+}
+
+.notif-list {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:12px;
+}
+
+.notif-item {
+  border:1px solid rgba(90,49,255,0.2);
+  border-radius:12px;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  text-align:left;
+  background:#fff;
+  cursor:pointer;
+  transition:box-shadow .2s ease, border-color .2s ease;
+}
+
+.notif-item:hover {
+  border-color:var(--brand);
+  box-shadow:0 8px 18px rgba(15,23,42,0.12);
+}
+
+.notif-item[data-disabled="true"] {
+  cursor:default;
+  opacity:0.8;
+}
+
+.notif-item[data-disabled="true"]:hover {
+  border-color:rgba(90,49,255,0.2);
+  box-shadow:none;
+}
+
+.notif-title {
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.notif-detail {
+  font-size:13px;
+  color:#4c4f6b;
+}
+
+.notif-meta {
+  font-size:12px;
+  color:var(--muted);
+}
+
+.notif-badge {
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+  padding:2px 8px;
+  border-radius:999px;
+  background:rgba(90,49,255,0.12);
+  color:var(--brand-600);
+}
+
+.flow-steps li {
+  margin-bottom:6px;
 }
 
 .form-field {
@@ -725,16 +939,39 @@ canvas.signature {
         <div class="muted">
           Past escrows
         </div>
-        <button class="ghost" data-action="navigate" data-target="s-history">
-          View history
-        </button>
-      </div>
+      <button class="ghost" data-action="navigate" data-target="s-history">
+        View history
+      </button>
     </div>
-    <div class="card">
-      <h3 style="margin-bottom:8px">
-        Recent transactions
-      </h3>
-      <div id="tx-list" class="tx-list">
+  </div>
+    <div class="home-stack">
+      <div class="card alert-card" id="home-pending-card" style="display:none;">
+        <div class="alert-pill" id="home-pending-pill">
+          Pending action
+        </div>
+        <div class="alert-head">
+          <div>
+            <div class="muted" id="home-pending-context">
+              New escrow
+            </div>
+            <div style="font-size:18px;font-weight:700;" id="home-pending-title">
+            </div>
+            <div class="muted" id="home-pending-desc" style="margin-top:4px;">
+            </div>
+          </div>
+          <button class="ghost" id="home-pending-view">
+            View escrow
+          </button>
+        </div>
+        <div class="process-steps" id="home-pending-steps">
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:8px">
+          Recent transactions
+        </h3>
+        <div id="tx-list" class="tx-list">
+        </div>
       </div>
     </div>
   </section>
@@ -905,17 +1142,77 @@ canvas.signature {
       </div>
       <div id="milestone-total" class="muted" style="margin-top:8px;display:none;text-align:right;">
       </div>
-      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-        <button class="ghost" data-action="navigate" data-target="s-welcome">
-          Cancel
-        </button>
-        <button class="btn" id="create-next">
-          Next - Terms
-        </button>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="ghost" data-action="navigate" data-target="s-welcome">
+        Cancel
+      </button>
+      <button class="btn" id="create-next">
+        Next - Terms
+      </button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <h3>
+      Creation flows at a glance
+    </h3>
+    <p class="muted" style="margin:4px 0 0;">
+      Share these timelines so both parties know exactly what happens next.
+    </p>
+    <div class="flow-grid">
+      <div class="flow-block">
+        <div class="flow-pill">
+          Seller started escrow
+        </div>
+        <ol class="flow-steps">
+          <li>Seller creates the escrow inside the app.</li>
+          <li>An email alert goes to the buyer.</li>
+          <li>Buyer signs in, lands on the dashboard, and sees <strong>Approval pending</strong>.</li>
+          <li>Buyer opens the escrow from the dashboard or list view.</li>
+          <li>Buyer reviews details and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
+          <li>After accepting, the buyer returns to the dashboard with a <strong>Funding pending</strong> card.</li>
+          <li>The buyer clicks <strong>Click to fund</strong> to complete the setup.</li>
+        </ol>
+      </div>
+      <div class="flow-block">
+        <div class="flow-pill">
+          Buyer started escrow
+        </div>
+        <ol class="flow-steps">
+          <li>Buyer creates the escrow in the app.</li>
+          <li>The seller receives an email invitation.</li>
+          <li>Seller signs in and sees <strong>Approval pending</strong> on the dashboard.</li>
+          <li>Seller opens the escrow tile from the dashboard or list.</li>
+          <li>Seller reviews the agreement and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
+          <li>The buyer is immediately shown a <strong>Funding pending</strong> notification.</li>
+          <li>Buyer finishes by selecting <strong>Click to fund</strong>.</li>
+        </ol>
       </div>
     </div>
-  </section>
-  <!-- Agreement & Signature -->
+  </div>
+  <div class="card" style="margin-top:12px;">
+    <h3>
+      How funds are released
+    </h3>
+    <p class="muted" style="margin:4px 0 0;">
+      Milestones control the release so both sides confirm delivery.
+    </p>
+    <div class="flow-grid">
+      <div class="flow-block">
+        <div class="flow-pill">
+          Milestone release
+        </div>
+        <ol class="flow-steps">
+          <li>Seller opens an active escrow and submits the milestone for buyer review.</li>
+          <li>The buyer receives an email and logs in to see <strong>Milestone pending</strong>.</li>
+          <li>Buyer opens the escrow details from the alert.</li>
+          <li>Buyer reviews the deliverable and approves the milestone.</li>
+          <li>Funds immediately release to the seller&rsquo;s payout account.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- Agreement & Signature -->
   <section id="s-agreement" class="screen">
     <h2>
       Agreement &amp; Signature
@@ -1248,6 +1545,21 @@ canvas.signature {
     },
     transactions: [
       {
+        id: 10105,
+        buyer: 'Scott',
+        buyerEmail: 'scott@example.com',
+        seller: 'Nora',
+        sellerEmail: 'nora@example.com',
+        amount: 650,
+        status: 'pending',
+        journeyStage: 'approval_pending',
+        timeline: [
+          { when: new Date(Date.now() - 3600 * 1000 * 6).toISOString(), text: 'Created by Scott (buyer)' },
+          { when: new Date(Date.now() - 3600 * 1000 * 5.5).toISOString(), text: 'Seller Nora notified for approval' }
+        ],
+        milestones: [{ id: 'm10105a', title: 'Prototype delivery', amount: 650, status: 'pending' }]
+      },
+      {
         id: 10101,
         buyer: 'Scott',
         buyerEmail: 'scott@example.com',
@@ -1529,6 +1841,189 @@ canvas.signature {
         recent.textContent = 'No activity yet';
       }
     }
+  }
+
+  function getPendingBuyerEscrow() {
+    return state.transactions.find(tx => tx.status === 'pending' && isUserBuyer(tx));
+  }
+
+  function formatNotificationTime(isoValue) {
+    if (!isoValue) return 'Just now';
+    const date = new Date(isoValue);
+    if (Number.isNaN(date.getTime())) return 'Just now';
+    return date.toLocaleString();
+  }
+
+  function getNotifications() {
+    const notifications = [];
+    const pendingTx = getPendingBuyerEscrow();
+    if (pendingTx) {
+      notifications.push({
+        id: `pending-${pendingTx.id}`,
+        title: `Pending buyer escrow #${pendingTx.id}`,
+        detail: `Waiting for ${pendingTx.seller} to accept before funding.`,
+        meta: 'Just now',
+        badge: 'Pending buyer escrow',
+        action: () => viewTx(pendingTx.id)
+      });
+    }
+
+    const resolvedTx = state.transactions.find(tx => tx.status === 'resolved');
+    if (resolvedTx) {
+      const lastTimeline =
+        resolvedTx.timeline && resolvedTx.timeline.length
+          ? resolvedTx.timeline[resolvedTx.timeline.length - 1]
+          : null;
+      notifications.push({
+        id: `resolved-${resolvedTx.id}`,
+        title: `Escrow #${resolvedTx.id} released`,
+        detail: `${resolvedTx.seller} received funds for ${formatCurrency(resolvedTx.amount)}.`,
+        meta: lastTimeline ? formatNotificationTime(lastTimeline.when) : 'Recently',
+        badge: 'Release complete'
+      });
+    }
+
+    const activeTx = state.transactions.find(tx => tx.status === 'active');
+    if (activeTx) {
+      notifications.push({
+        id: `active-${activeTx.id}`,
+        title: `Milestone update for #${activeTx.id}`,
+        detail: `Next milestone "${activeTx.milestones && activeTx.milestones[0] ? activeTx.milestones[0].title : 'Milestone'}" is still awaiting confirmation.`,
+        meta:
+          activeTx.timeline && activeTx.timeline.length
+            ? formatNotificationTime(activeTx.timeline[activeTx.timeline.length - 1].when)
+            : 'Recently',
+        badge: 'Milestone reminder'
+      });
+    }
+
+    return notifications;
+  }
+
+  function openNotifications() {
+    const notifications = getNotifications();
+    if (!notifications.length) {
+      showModal("<h3>Notifications</h3><p class='muted'>No notifications right now.</p>");
+      return;
+    }
+    const listMarkup = notifications
+      .map(notif => {
+        return `
+          <button class="notif-item" data-notif-id="${notif.id}" ${
+          notif.action ? '' : 'data-disabled="true"'
+        }>
+            <div class="notif-title">
+              ${notif.title}
+              ${notif.badge ? `<span class="notif-badge">${notif.badge}</span>` : ''}
+            </div>
+            <div class="notif-detail">${notif.detail}</div>
+            <div class="notif-meta">${notif.meta || 'Recently'}</div>
+          </button>
+        `;
+      })
+      .join('');
+
+    showModal(`<h3>Notifications</h3><div class="notif-list">${listMarkup}</div>`);
+
+    notifications.forEach(notif => {
+      if (typeof notif.action !== 'function') return;
+      const button = document.querySelector(`[data-notif-id="${notif.id}"]`);
+      if (!button) return;
+      button.addEventListener('click', () => {
+        closeModal();
+        notif.action();
+      });
+    });
+  }
+
+  function renderPendingEscrow() {
+    const card = document.getElementById('home-pending-card');
+    const notifBtn = document.getElementById('notifTop');
+    const pill = document.getElementById('home-pending-pill');
+    const title = document.getElementById('home-pending-title');
+    const desc = document.getElementById('home-pending-desc');
+    const stepsEl = document.getElementById('home-pending-steps');
+    const viewBtn = document.getElementById('home-pending-view');
+    const context = document.getElementById('home-pending-context');
+    if (!card || !pill || !title || !desc || !stepsEl || !viewBtn || !context) return;
+
+    const tx = getPendingBuyerEscrow();
+    if (!tx) {
+      card.style.display = 'none';
+      if (notifBtn) notifBtn.removeAttribute('data-has-notif');
+      return;
+    }
+
+    card.style.display = 'block';
+    if (notifBtn) notifBtn.setAttribute('data-has-notif', 'true');
+    const formattedAmount = formatCurrency(tx.amount);
+    const sellerName = tx.seller || 'your counterparty';
+    title.textContent = `Escrow #${tx.id} with ${tx.seller}`;
+    desc.textContent = `You are the buyer on this ${formattedAmount} escrow and are waiting on ${sellerName} to move forward.`;
+    const createdAt = tx.timeline && tx.timeline.length ? new Date(tx.timeline[0].when) : new Date();
+    context.textContent = `Started ${createdAt.toLocaleDateString()}`;
+    viewBtn.onclick = () => viewTx(tx.id);
+
+    const stage = tx.journeyStage || 'approval_pending';
+    const stageLabels = {
+      approval_pending: 'Awaiting seller approval',
+      funding_pending: 'Funding pending',
+      milestone_pending: 'Milestone approval pending',
+      released: 'Escrow released'
+    };
+    pill.textContent = stageLabels[stage] || 'Pending action';
+
+    const steps = [
+      {
+        id: 'create',
+        title: 'Buyer created escrow',
+        detail: 'You drafted the agreement and notified the counterparty.',
+        status: 'complete'
+      },
+      {
+        id: 'approval',
+        title: 'Approval pending',
+        detail: `${sellerName} reviews the email invite and either accepts or declines.`,
+        status: stage === 'approval_pending' ? 'active' : 'complete'
+      },
+      {
+        id: 'funding',
+        title: 'Funding pending',
+        detail: 'Once approved, you tap “Click to fund” from the dashboard.',
+        status:
+          stage === 'funding_pending'
+            ? 'active'
+            : stage === 'approval_pending'
+            ? 'upcoming'
+            : 'complete'
+      },
+      {
+        id: 'milestone',
+        title: 'Milestone approval',
+        detail: `You review deliverables and approve milestones to release funds after ${sellerName} submits them.`,
+        status:
+          stage === 'milestone_pending'
+            ? 'active'
+            : stage === 'released'
+            ? 'complete'
+            : 'upcoming'
+      }
+    ];
+
+    stepsEl.innerHTML = '';
+    steps.forEach(step => {
+      const item = document.createElement('div');
+      item.className = 'process-step';
+      item.setAttribute('data-status', step.status);
+      const statusCopy =
+        step.status === 'complete' ? 'Done' : step.status === 'active' ? 'In progress' : 'Up next';
+      item.innerHTML = `
+        <div class="process-step-title">${step.title}</div>
+        <div class="process-step-detail">${step.detail}</div>
+        <div class="process-step-status">${statusCopy}</div>
+      `;
+      stepsEl.appendChild(item);
+    });
   }
 
   function renderActiveEscrows() {
@@ -2008,6 +2503,7 @@ canvas.signature {
 
   function renderAll() {
     renderDashboard();
+    renderPendingEscrow();
     renderActiveEscrows();
     renderMilestoneDrafts();
     const agreementMilestones =
@@ -2420,7 +2916,7 @@ canvas.signature {
     if (homeTop) homeTop.addEventListener('click', () => navigate('s-welcome'));
 
     const notifTop = document.getElementById('notifTop');
-    if (notifTop) notifTop.addEventListener('click', () => showModal("<h3>Notifications</h3><p class='muted'>No new notifications.</p>"));
+    if (notifTop) notifTop.addEventListener('click', openNotifications);
 
     const profileTop = document.getElementById('profileTop');
     if (profileTop) profileTop.addEventListener('click', () => navigate('s-settings'));
