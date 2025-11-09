@@ -186,6 +186,11 @@ h2 {
   margin-top:auto;
 }
 
+.warning-text {
+  color:#dc2626;
+  font-weight:600;
+}
+
 .home-stack {
   display:flex;
   flex-direction:column;
@@ -1648,6 +1653,16 @@ canvas.signature {
     return `$${value.toFixed(2)}`;
   }
 
+  function sumMilestoneAmounts(list) {
+    if (!Array.isArray(list)) return 0;
+    return list.reduce((total, item) => total + (Number(item.amount) || 0), 0);
+  }
+
+  function milestoneTotalMatches(amount, total) {
+    if (!Number.isFinite(amount)) return true;
+    return Math.abs((Number(total) || 0) - Number(amount)) < 0.01;
+  }
+
   function getUserIdentity() {
     return {
       name: state.user && state.user.name ? state.user.name : 'Scott',
@@ -2271,7 +2286,19 @@ canvas.signature {
     });
 
     total.style.display = 'block';
-    total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+    const amountInput = document.getElementById('create-amount');
+    const enteredAmount = amountInput ? Number(amountInput.value) : NaN;
+    if (Number.isFinite(enteredAmount)) {
+      const matches = milestoneTotalMatches(enteredAmount, sum);
+      const statusText = matches
+        ? `Milestone total: ${formatCurrency(sum)} - Matches amount (${formatCurrency(enteredAmount)})`
+        : `Milestone total: ${formatCurrency(sum)} - Needs to equal amount (${formatCurrency(enteredAmount)})`;
+      total.textContent = statusText;
+      total.classList.toggle('warning-text', !matches);
+    } else {
+      total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+      total.classList.remove('warning-text');
+    }
   }
 
   function renderAgreementMilestones(milestones) {
@@ -2312,7 +2339,19 @@ canvas.signature {
     });
 
     total.style.display = 'block';
-    total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+    const referenceAmount =
+      pendingCreate && Number.isFinite(Number(pendingCreate.amount)) ? Number(pendingCreate.amount) : NaN;
+    if (Number.isFinite(referenceAmount)) {
+      const matches = milestoneTotalMatches(referenceAmount, sum);
+      const statusText = matches
+        ? `Milestone total: ${formatCurrency(sum)} - Matches amount (${formatCurrency(referenceAmount)})`
+        : `Milestone total: ${formatCurrency(sum)} - Needs to equal amount (${formatCurrency(referenceAmount)})`;
+      total.textContent = statusText;
+      total.classList.toggle('warning-text', !matches);
+    } else {
+      total.textContent = `Milestone total: ${formatCurrency(sum)}`;
+      total.classList.remove('warning-text');
+    }
   }
 
   function addMilestone() {
@@ -2537,6 +2576,14 @@ canvas.signature {
       amount: Number(item.amount) || 0,
       status: 'pending'
     }));
+
+    const milestoneSum = sumMilestoneAmounts(milestones);
+    if (milestones.length && !milestoneTotalMatches(amount, milestoneSum)) {
+      alert(
+        `Milestone total (${formatCurrency(milestoneSum)}) must equal the Amount (${formatCurrency(amount)}). Adjust your milestones before continuing.`
+      );
+      return;
+    }
 
     const buyer = role === 'buyer' ? user.name : counterpartyName;
     const buyerEmail = role === 'buyer' ? user.email : counterpartyEmail;
@@ -2881,6 +2928,18 @@ canvas.signature {
           event.preventDefault();
           addMilestone();
         }
+      });
+    }
+    const createAmountInput = document.getElementById('create-amount');
+    if (createAmountInput) {
+      createAmountInput.addEventListener('input', () => {
+        const value = Number(createAmountInput.value);
+        ensurePendingDefaults(false);
+        if (pendingCreate) {
+          pendingCreate.amount = Number.isFinite(value) ? value : 0;
+        }
+        renderMilestoneDrafts();
+        renderAgreementMilestones(draftMilestones);
       });
     }
     eachNode(document.querySelectorAll('input[name="create-role"]'), input => {
