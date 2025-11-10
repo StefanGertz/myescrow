@@ -1117,42 +1117,12 @@ canvas.signature {
           </option>
         </select>
       </div>
-      <div class="muted" style="margin-top:12px;">
-        Milestones
-      </div>
-      <p class="muted" style="margin:4px 0 8px;font-size:13px;">
-        Break the agreement into deliverables with optional milestone payouts.
-      </p>
-      <div id="milestone-form" class="milestone-form">
-        <div class="form-field">
-          <label class="muted" for="milestone-name">
-            Milestone title
-          </label>
-          <input id="milestone-name" type="text" placeholder="Milestone title" autocomplete="off">
-        </div>
-        <div class="form-field">
-          <label class="muted" for="milestone-amount">
-            Amount
-          </label>
-          <input id="milestone-amount" type="number" placeholder="Amount" inputmode="decimal">
-        </div>
-        <button type="button" class="ghost" id="milestone-add">
-          Add milestone
-        </button>
-      </div>
-      <div id="milestone-empty" class="muted" style="margin-top:8px;">
-        No milestones yet
-      </div>
-      <div id="milestone-list" class="tx-list" style="margin-top:8px;">
-      </div>
-      <div id="milestone-total" class="muted" style="margin-top:8px;display:none;text-align:right;">
-      </div>
     <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
       <button class="ghost" data-action="navigate" data-target="s-welcome">
         Cancel
       </button>
       <button class="btn" id="create-next">
-        Next - Terms
+        Next - Milestones
       </button>
     </div>
   </div>
@@ -1217,7 +1187,56 @@ canvas.signature {
     </div>
   </div>
 </section>
-<!-- Agreement & Signature -->
+  <!-- Milestones -->
+  <section id="s-create-milestones" class="screen">
+    <h2>
+      Milestones
+    </h2>
+    <p class="lead">
+      Break the agreement into deliverables before moving on to the terms.
+    </p>
+    <div class="card">
+      <div class="muted">
+        Milestone builder
+      </div>
+      <p class="muted" style="margin:4px 0 8px;font-size:13px;">
+        Add payout checkpoints that should match your escrow amount.
+      </p>
+      <div id="milestone-form" class="milestone-form">
+        <div class="form-field">
+          <label class="muted" for="milestone-name">
+            Milestone title
+          </label>
+          <input id="milestone-name" type="text" placeholder="Milestone title" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label class="muted" for="milestone-amount">
+            Amount
+          </label>
+          <input id="milestone-amount" type="number" placeholder="Amount" inputmode="decimal">
+        </div>
+        <button type="button" class="ghost" id="milestone-add">
+          Add milestone
+        </button>
+      </div>
+      <div id="milestone-empty" class="muted" style="margin-top:8px;">
+        No milestones yet
+      </div>
+      <div id="milestone-list" class="tx-list" style="margin-top:8px;">
+      </div>
+      <div id="milestone-total" class="muted" style="margin-top:8px;display:none;text-align:right;">
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="ghost" data-action="navigate" data-target="s-create">
+          Back
+        </button>
+        <button class="btn" id="milestones-next">
+          Next - Terms
+        </button>
+      </div>
+    </div>
+  </section>
+  <!-- Agreement & Signature -->
   <section id="s-agreement" class="screen">
     <h2>
       Agreement &amp; Signature
@@ -1261,7 +1280,7 @@ canvas.signature {
           </div>
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-          <button class="ghost" data-action="navigate" data-target="s-create">
+          <button class="ghost" data-action="navigate" data-target="s-create-milestones">
             Back
           </button>
           <button class="btn" id="agreement-next" disabled>
@@ -2553,7 +2572,7 @@ canvas.signature {
     updateCounterpartyLabels(selectedRoleInput ? selectedRoleInput.value : 'buyer');
   }
 
-  function startAgreement() {
+  function getCreateFormValues() {
     const roleInput = document.querySelector('input[name="create-role"]:checked');
     const role = roleInput ? roleInput.value : 'buyer';
     const counterpartyNameInput = document.getElementById('counterparty-name');
@@ -2562,11 +2581,29 @@ canvas.signature {
     const counterpartyName = counterpartyNameInput ? counterpartyNameInput.value.trim() : '';
     const counterpartyEmail = counterpartyEmailInput ? counterpartyEmailInput.value.trim() : '';
     const amount = amountInput ? Number(amountInput.value) : NaN;
+    return { role, counterpartyName, counterpartyEmail, amount };
+  }
 
-    if (!counterpartyName || !counterpartyEmail || !isFinite(amount) || amount <= 0) {
+  function validateCreateBasics() {
+    const basics = getCreateFormValues();
+    if (!basics.counterpartyName || !basics.counterpartyEmail || !isFinite(basics.amount) || basics.amount <= 0) {
       alert('Fill counterparty name, email, and amount');
-      return;
+      return null;
     }
+    return basics;
+  }
+
+  function goToMilestoneBuilder() {
+    const basics = validateCreateBasics();
+    if (!basics) return;
+    renderMilestoneDrafts();
+    navigate('s-create-milestones');
+  }
+
+  function startAgreement() {
+    const basics = validateCreateBasics();
+    if (!basics) return;
+    const { role, counterpartyName, counterpartyEmail, amount } = basics;
 
     const user = getUserIdentity();
 
@@ -2902,7 +2939,10 @@ canvas.signature {
     renderAll();
 
     const createNext = document.getElementById('create-next');
-    if (createNext) createNext.addEventListener('click', startAgreement);
+    if (createNext) createNext.addEventListener('click', goToMilestoneBuilder);
+
+    const milestonesNext = document.getElementById('milestones-next');
+    if (milestonesNext) milestonesNext.addEventListener('click', startAgreement);
 
     const agreementNext = document.getElementById('agreement-next');
     if (agreementNext) agreementNext.addEventListener('click', toFunding);
