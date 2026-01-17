@@ -560,9 +560,71 @@ input[type="number"] {
   accent-color:var(--brand);
 }
 
-.role-option span {
+.role-copy {
   flex:1;
   text-align:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+}
+
+.flow-info {
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  border:1px solid rgba(15,76,129,0.3);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  font-weight:700;
+  color:var(--brand);
+  background:rgba(20,184,166,0.08);
+  cursor:pointer;
+  transition:background .2s ease,color .2s ease,border-color .2s ease;
+  position:relative;
+  outline:none;
+}
+
+.flow-info:hover,
+.flow-info:focus-visible {
+  background:var(--brand);
+  color:#fff;
+  border-color:var(--brand);
+}
+
+.flow-info:focus-visible {
+  box-shadow:0 0 0 2px rgba(15,76,129,0.25);
+}
+
+.flow-info .flow-hint {
+  position:absolute;
+  top: calc(100% + 12px);
+  left:50%;
+  transform:translate(-50%,12px);
+  width:min(320px,90vw);
+  background:var(--card);
+  border-radius:12px;
+  border:1px solid rgba(15,76,129,0.16);
+  box-shadow:0 16px 34px rgba(15,76,129,0.18);
+  padding:12px;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease, transform .2s ease;
+  z-index:12;
+}
+
+.flow-info:hover .flow-hint,
+.flow-info:focus-visible .flow-hint {
+  opacity:1;
+  pointer-events:auto;
+  transform:translate(-50%,0);
+}
+
+.flow-info .flow-hint ol {
+  margin:10px 0 0;
+  padding-left:18px;
 }
 
 .btn {
@@ -1070,16 +1132,50 @@ canvas.signature {
         Your role
       </label>
       <div class="role-toggle" id="create-role-toggle">
-        <label class="role-option">
+        <label class="role-option active">
           <input type="radio" name="create-role" value="buyer" checked>
-          <span>
+          <span class="role-copy">
             I'm the buyer
+            <span class="flow-info" tabindex="0" aria-label="View buyer creation flow">
+              i
+              <div class="flow-hint">
+                <div class="flow-pill">
+                  Buyer started escrow
+                </div>
+                <ol class="flow-steps">
+                  <li>Buyer creates the escrow in the app.</li>
+                  <li>The seller receives an email invitation.</li>
+                  <li>Seller signs in and sees <strong>Approval pending</strong> on the dashboard.</li>
+                  <li>Seller opens the escrow tile from the dashboard or list.</li>
+                  <li>Seller reviews the agreement and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
+                  <li>The buyer is immediately shown a <strong>Funding pending</strong> notification.</li>
+                  <li>Buyer finishes by selecting <strong>Click to fund</strong>.</li>
+                </ol>
+              </div>
+            </span>
           </span>
         </label>
         <label class="role-option">
           <input type="radio" name="create-role" value="seller">
-          <span>
+          <span class="role-copy">
             I'm the seller
+            <span class="flow-info" tabindex="0" aria-label="View seller creation flow">
+              i
+              <div class="flow-hint">
+                <div class="flow-pill">
+                  Seller started escrow
+                </div>
+                <ol class="flow-steps">
+                  <li>Seller creates the escrow inside the app.</li>
+                  <li>An email alert goes to the buyer.</li>
+                  <li>Buyer signs in, lands on the dashboard, and sees <strong>Approval pending</strong>.</li>
+                  <li>Buyer opens the escrow from the dashboard or list view.</li>
+                  <li>Buyer reviews details and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
+                  <li>After accepting, the buyer returns to the dashboard with a <strong>Funding pending</strong> card.</li>
+                  <li>The buyer clicks <strong>Click to fund</strong> to complete the setup.</li>
+                </ol>
+              </div>
+            </span>
           </span>
         </label>
       </div>
@@ -1126,66 +1222,6 @@ canvas.signature {
       </button>
     </div>
   </div>
-  <div class="card" style="margin-top:16px;">
-    <h3>
-      Creation flows at a glance
-    </h3>
-    <p class="muted" style="margin:4px 0 0;">
-      Share these timelines so both parties know exactly what happens next.
-    </p>
-    <div class="flow-grid">
-      <div class="flow-block">
-        <div class="flow-pill">
-          Seller started escrow
-        </div>
-        <ol class="flow-steps">
-          <li>Seller creates the escrow inside the app.</li>
-          <li>An email alert goes to the buyer.</li>
-          <li>Buyer signs in, lands on the dashboard, and sees <strong>Approval pending</strong>.</li>
-          <li>Buyer opens the escrow from the dashboard or list view.</li>
-          <li>Buyer reviews details and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
-          <li>After accepting, the buyer returns to the dashboard with a <strong>Funding pending</strong> card.</li>
-          <li>The buyer clicks <strong>Click to fund</strong> to complete the setup.</li>
-        </ol>
-      </div>
-      <div class="flow-block">
-        <div class="flow-pill">
-          Buyer started escrow
-        </div>
-        <ol class="flow-steps">
-          <li>Buyer creates the escrow in the app.</li>
-          <li>The seller receives an email invitation.</li>
-          <li>Seller signs in and sees <strong>Approval pending</strong> on the dashboard.</li>
-          <li>Seller opens the escrow tile from the dashboard or list.</li>
-          <li>Seller reviews the agreement and chooses <strong>Accept</strong> or <strong>Do not accept</strong>.</li>
-          <li>The buyer is immediately shown a <strong>Funding pending</strong> notification.</li>
-          <li>Buyer finishes by selecting <strong>Click to fund</strong>.</li>
-        </ol>
-      </div>
-    </div>
-  </div>
-  <div class="card" style="margin-top:12px;">
-    <h3>
-      How funds are released
-    </h3>
-    <p class="muted" style="margin:4px 0 0;">
-      Milestones control the release so both sides confirm delivery.
-    </p>
-    <div class="flow-grid">
-      <div class="flow-block">
-        <div class="flow-pill">
-          Milestone release
-        </div>
-        <ol class="flow-steps">
-          <li>Seller opens an active escrow and submits the milestone for buyer review.</li>
-          <li>The buyer receives an email and logs in to see <strong>Milestone pending</strong>.</li>
-          <li>Buyer opens the escrow details from the alert.</li>
-          <li>Buyer reviews the deliverable and approves the milestone.</li>
-          <li>Funds immediately release to the seller&rsquo;s payout account.</li>
-        </ol>
-      </div>
-    </div>
-  </div>
 </section>
   <!-- Milestones -->
   <section id="s-create-milestones" class="screen">
@@ -1195,6 +1231,28 @@ canvas.signature {
     <p class="lead">
       Break the agreement into deliverables before moving on to the terms.
     </p>
+    <div class="card" style="margin-bottom:12px;">
+      <h3>
+        How funds are released
+      </h3>
+      <p class="muted" style="margin:4px 0 0;">
+        Milestones control the release so both sides confirm delivery.
+      </p>
+      <div class="flow-grid">
+        <div class="flow-block">
+          <div class="flow-pill">
+            Milestone release
+          </div>
+          <ol class="flow-steps">
+            <li>Seller opens an active escrow and submits the milestone for buyer review.</li>
+            <li>The buyer receives an email and logs in to see <strong>Milestone pending</strong>.</li>
+            <li>Buyer opens the escrow details from the alert.</li>
+            <li>Buyer reviews the deliverable and approves the milestone.</li>
+            <li>Funds immediately release to the seller&rsquo;s payout account.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <div class="muted">
         Milestone builder
