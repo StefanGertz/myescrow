@@ -1,0 +1,3 @@
+[submodule "myescrow-web"]
+	path = myescrow-web
+	url = git@github.com:StefanGertz/MyEscrowFrontEnd.git
