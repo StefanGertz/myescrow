@@ -21,6 +21,10 @@ export async function buildServer() {
   await fastify.register(authRoutes);
   await fastify.register(dashboardRoutes);
 
+  fastify.get("/", async () => {
+    return { status: "ok" };
+  });
+
   fastify.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {
       reply.status(error.statusCode).send({ error: error.message });

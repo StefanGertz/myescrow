@@ -50,13 +50,13 @@ DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
 
 - `npm run dev` - Fastify + tsx watcher.
 - `npm run build` / `npm start` - compile to `dist/` and run.
-- `npm run lint` – type-check only.
-- `npm test` – Vitest integration tests (assumes Postgres is running).
-- `npm run lint:docs` – verify `README.md` contains ASCII-only text (prevents GitHub Pages build failures).
-- `npm run db:migrate` – `prisma migrate dev` against `DATABASE_URL`.
-- `npm run db:push` – sync schema without migrations.
-- `npm run db:generate` – regenerate the Prisma client.
-- `npm run smoke` – end-to-end smoke test (signup → overview → escrow release → wallet/disputes).
+- `npm run lint` - type-check only.
+- `npm test` - Vitest integration tests (assumes Postgres is running).
+- `npm run lint:docs` - verify `README.md` contains ASCII-only text (prevents GitHub Pages build failures).
+- `npm run db:migrate` - `prisma migrate dev` against `DATABASE_URL`.
+- `npm run db:push` - sync schema without migrations.
+- `npm run db:generate` - regenerate the Prisma client.
+- `npm run smoke` - end-to-end smoke test (signup -> overview -> escrow release -> wallet/disputes).
 
 ## API surface
 
