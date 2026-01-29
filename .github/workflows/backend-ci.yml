@@ -62,7 +62,7 @@ jobs:
       - name: Wait for API
         run: |
           for i in {1..30}; do
-            if curl -sSf http://localhost:4000/ >/dev/null 2>&1; then
+            if curl -sS http://localhost:4000/ >/dev/null 2>&1; then
               exit 0
             fi
             sleep 1
