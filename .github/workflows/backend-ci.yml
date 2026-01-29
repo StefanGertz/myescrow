@@ -45,6 +45,14 @@ jobs:
         run: npm ci
         working-directory: myescrow-api
 
+      - name: Apply migrations
+        run: npm run db:migrate
+        working-directory: myescrow-api
+
+      - name: Seed database
+        run: npx prisma db seed
+        working-directory: myescrow-api
+
       - name: Unit & integration tests
         run: npm test
         working-directory: myescrow-api
