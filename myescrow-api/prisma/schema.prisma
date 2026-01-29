@@ -1,0 +1,95 @@
+// Prisma schema for MyEscrow Postgres backend
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String              @id
+  name             String
+  email            String              @unique
+  passwordHash     String
+  walletBalanceCents Int               @default(0)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  escrows          Escrow[]
+  disputes         Dispute[]
+  notifications    Notification[]
+  timelineEvents   TimelineEvent[]
+  walletTransactions WalletTransaction[]
+}
+
+model Escrow {
+  id                   Int       @id @default(autoincrement())
+  reference            String    @unique
+  ownerId              String
+  owner                User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title                String
+  counterpart          String
+  amountCents          Int
+  stage                String
+  dueDescription       String
+  status               String
+  counterpartyApproved Boolean   @default(false)
+  category             String?
+  description          String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+model Dispute {
+  id                Int      @id @default(autoincrement())
+  reference         String   @unique
+  ownerId           String
+  owner             User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title             String
+  ownerTeam         String
+  amountCents       Int
+  updatedLabel      String
+  priority          String
+  status            String
+  workspaceLaunched Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model Notification {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  detail    String
+  meta      String
+  txId      Int?
+  createdAt DateTime @default(now())
+}
+
+model TimelineEvent {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  meta      String
+  timeLabel String
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model WalletTransaction {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountCents Int
+  type      String
+  createdAt DateTime @default(now())
+}
+
+model Sequence {
+  id           String @id
+  currentValue Int    @default(0)
+}

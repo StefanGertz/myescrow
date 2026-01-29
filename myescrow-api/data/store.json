@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "nextEscrowSequence": 1800,
+    "nextDisputeSequence": 20,
+    "nextNotificationSequence": 10,
+    "nextTimelineSequence": 10,
+    "nextTransactionSequence": 200,
+    "nextUserSequence": 101
+  },
+  "users": [
+    {
+      "id": "usr_1000",
+      "name": "Scott",
+      "email": "scott@example.com",
+      "passwordHash": "$2b$10$EeEvqC/TiewV3m4PzFAqqOjQ2fHPMhgYlOqwcfx4YDqghynFmhVRG",
+      "walletBalance": 1250500,
+      "createdAt": "2024-12-01T08:00:00.000Z",
+      "updatedAt": "2026-01-20T15:15:00.000Z"
+    }
+  ],
+  "escrows": [
+    {
+      "id": 1,
+      "reference": "PO-1423",
+      "ownerId": "usr_1000",
+      "title": "Mobile release",
+      "counterpart": "Northwind Agency",
+      "amount": 8200000,
+      "stage": "Mobile app v1",
+      "dueDescription": "Due in 3 days",
+      "status": "success",
+      "counterpartyApproved": false,
+      "category": "Software",
+      "description": "Milestone release for mobile development",
+      "createdAt": "2026-01-15T13:00:00.000Z",
+      "updatedAt": "2026-01-20T12:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "reference": "PO-0988",
+      "ownerId": "usr_1000",
+      "title": "Cloud Harbor redesign",
+      "counterpart": "Cloud Harbor",
+      "amount": 12050000,
+      "stage": "Milestone 3 / 5",
+      "dueDescription": "Releasing today",
+      "status": "warning",
+      "counterpartyApproved": true,
+      "category": "Design",
+      "description": "SaaS redesign sprint",
+      "createdAt": "2025-12-18T10:30:00.000Z",
+      "updatedAt": "2026-01-24T09:00:00.000Z"
+    },
+    {
+      "id": 3,
+      "reference": "PO-0772",
+      "ownerId": "usr_1000",
+      "title": "Summit Legal KYC",
+      "counterpart": "Summit Legal",
+      "amount": 4430000,
+      "stage": "KYC & compliance scope",
+      "dueDescription": "Review in 1 day",
+      "status": "success",
+      "counterpartyApproved": true,
+      "category": "Legal",
+      "description": "Ongoing compliance review",
+      "createdAt": "2025-11-02T14:40:00.000Z",
+      "updatedAt": "2026-01-18T08:00:00.000Z"
+    },
+    {
+      "id": 4,
+      "reference": "PO-0650",
+      "ownerId": "usr_1000",
+      "title": "Bright Freight tiles",
+      "counterpart": "Bright Freight",
+      "amount": 6480000,
+      "stage": "Delivery confirmation",
+      "dueDescription": "Upload POD",
+      "status": "warning",
+      "counterpartyApproved": false,
+      "category": "Logistics",
+      "description": "Logistics verification",
+      "createdAt": "2025-10-05T16:20:00.000Z",
+      "updatedAt": "2026-01-21T07:30:00.000Z"
+    }
+  ],
+  "disputes": [
+    {
+      "id": 1,
+      "reference": "DSP-08",
+      "ownerId": "usr_1000",
+      "title": "Northwind: QA scope clarification",
+      "ownerTeam": "Ops Team 2",
+      "amount": 4200000,
+      "updatedLabel": "Last update 45m ago",
+      "priority": "high",
+      "status": "open",
+      "workspaceLaunched": false,
+      "createdAt": "2025-12-25T18:00:00.000Z",
+      "updatedAt": "2026-01-27T15:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "reference": "DSP-07",
+      "ownerId": "usr_1000",
+      "title": "Studio Delta: late delivery claim",
+      "ownerTeam": "Ops Team 4",
+      "amount": 1820000,
+      "updatedLabel": "Last update 3h ago",
+      "priority": "medium",
+      "status": "open",
+      "workspaceLaunched": false,
+      "createdAt": "2025-11-12T16:00:00.000Z",
+      "updatedAt": "2026-01-27T12:00:00.000Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-01",
+      "userId": "usr_1000",
+      "label": "Seller approval pending",
+      "detail": "Northwind onboarding kit is waiting for Nora Studio to approve.",
+      "meta": "Just now",
+      "txId": 10105,
+      "createdAt": "2026-01-27T14:59:00.000Z"
+    },
+    {
+      "id": "notif-02",
+      "userId": "usr_1000",
+      "label": "Summit Legal payout",
+      "detail": "Escrow closed and final payment sent to Summit Legal.",
+      "meta": "1h ago",
+      "txId": 10103,
+      "createdAt": "2026-01-27T13:58:00.000Z"
+    },
+    {
+      "id": "notif-03",
+      "userId": "usr_1000",
+      "label": "Wedding DJ approval",
+      "detail": "Waiting for Acme DJ Corp to approve the Wedding DJ escrow.",
+      "meta": "2h ago",
+      "txId": 10106,
+      "createdAt": "2026-01-27T12:58:00.000Z"
+    },
+    {
+      "id": "notif-04",
+      "userId": "usr_1000",
+      "label": "Restaurant tile milestone",
+      "detail": "Review \"Material acquisition\" for Tiles R' Us so funds can release.",
+      "meta": "$100k pending",
+      "txId": 10107,
+      "createdAt": "2026-01-26T17:00:00.000Z"
+    }
+  ],
+  "timelineEvents": [
+    {
+      "id": "tl-1",
+      "userId": "usr_1000",
+      "title": "Mobile release verified",
+      "meta": "Milestone release to Northwind",
+      "timeLabel": "2 hours ago",
+      "status": "released",
+      "createdAt": "2026-01-27T13:00:00.000Z"
+    },
+    {
+      "id": "tl-2",
+      "userId": "usr_1000",
+      "title": "Ops requested scope check",
+      "meta": "Cloud Harbor flagged potential overages",
+      "timeLabel": "Today, 9:24 AM",
+      "status": "attention",
+      "createdAt": "2026-01-27T09:24:00.000Z"
+    },
+    {
+      "id": "tl-3",
+      "userId": "usr_1000",
+      "title": "Funds received",
+      "meta": "Summit Legal replenished trust",
+      "timeLabel": "Yesterday",
+      "status": "funding",
+      "createdAt": "2026-01-26T10:00:00.000Z"
+    }
+  ],
+  "walletTransactions": [
+    {
+      "id": 1,
+      "userId": "usr_1000",
+      "amount": 5000000,
+      "type": "TOPUP",
+      "createdAt": "2026-01-23T10:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "userId": "usr_1000",
+      "amount": 9200000,
+      "type": "RELEASE",
+      "createdAt": "2026-01-24T17:00:00.000Z"
+    }
+  ]
+}
