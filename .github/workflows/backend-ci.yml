@@ -19,13 +19,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd 'pg_isready -U myescrow' \
-          --health-interval 10s \
-          --health-timeout 5s \
+          --health-cmd "pg_isready -U myescrow"
+          --health-interval 10s
+          --health-timeout 5s
           --health-retries 5
-    defaults:
-      run:
-        working-directory: myescrow-api
     env:
       DATABASE_URL: postgresql://myescrow:myescrow@localhost:5432/myescrow
       PORT: 4000
@@ -46,17 +43,21 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: myescrow-api
 
       - name: Unit & integration tests
         run: npm test
+        working-directory: myescrow-api
 
       - name: Build backend
         run: npm run build
+        working-directory: myescrow-api
 
       - name: Start API server
         run: |
           nohup npm start >/tmp/api.log 2>&1 &
           echo $! > /tmp/api.pid
+        working-directory: myescrow-api
 
       - name: Wait for API
         run: |
@@ -69,12 +70,15 @@ jobs:
           echo 'API failed to start'
           cat /tmp/api.log || true
           exit 1
+        working-directory: myescrow-api
 
       - name: Smoke test
         run: SMOKE_API_BASE=http://localhost:4000 npm run smoke
+        working-directory: myescrow-api
 
       - name: README encoding check
         run: npm run lint:docs
+        working-directory: myescrow-api
 
       - name: Stop API
         if: always()
@@ -83,3 +87,4 @@ jobs:
             kill $(cat /tmp/api.pid) || true
           fi
           cat /tmp/api.log || true
+        working-directory: myescrow-api
