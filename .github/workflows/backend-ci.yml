@@ -27,7 +27,7 @@ jobs:
       DATABASE_URL: postgresql://myescrow:myescrow@localhost:5432/myescrow
       PORT: 4000
       JWT_SECRET: ci-secret
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/myescrow-api
+      IMAGE_NAME: ghcr.io/${{ lower(github.repository_owner) }}/myescrow-api
 
     steps:
       - name: Checkout
