@@ -27,7 +27,6 @@ jobs:
       DATABASE_URL: postgresql://myescrow:myescrow@localhost:5432/myescrow
       PORT: 4000
       JWT_SECRET: ci-secret
-      IMAGE_NAME: ghcr.io/${{ lower(github.repository_owner) }}/myescrow-api
 
     steps:
       - name: Checkout
@@ -89,6 +88,9 @@ jobs:
       - name: README encoding check
         run: npm run lint:docs
         working-directory: myescrow-api
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/myescrow-api" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         if: github.ref == 'refs/heads/main'
