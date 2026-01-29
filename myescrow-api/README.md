@@ -50,11 +50,13 @@ DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
 
 - `npm run dev` - Fastify + tsx watcher.
 - `npm run build` / `npm start` - compile to `dist/` and run.
-- `npm run lint` - type-check only.
-- `npm test` - Vitest integration tests (assumes Postgres is running).
-- `npm run db:migrate` - `prisma migrate dev` against `DATABASE_URL`.
-- `npm run db:push` - sync schema without migrations.
-- `npm run db:generate` - regenerate the Prisma client.
+- `npm run lint` – type-check only.
+- `npm test` – Vitest integration tests (assumes Postgres is running).
+- `npm run lint:docs` – verify `README.md` contains ASCII-only text (prevents GitHub Pages build failures).
+- `npm run db:migrate` – `prisma migrate dev` against `DATABASE_URL`.
+- `npm run db:push` – sync schema without migrations.
+- `npm run db:generate` – regenerate the Prisma client.
+- `npm run smoke` – end-to-end smoke test (signup → overview → escrow release → wallet/disputes).
 
 ## API surface
 
@@ -114,6 +116,10 @@ pm ci && npm run build && npm start on the host.
 5. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
 
 Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
+
+## Continuous integration
+
+GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) installs dependencies, executes `npm test`, builds the backend, boots it locally, runs `npm run smoke` against `http://localhost:4000`, and finishes with `npm run lint:docs`. Treat that pipeline as the gate before tagging/pushing new Docker images.
 ## Notes / next steps
 
 - Update `docker-compose.yml` credentials or `DATABASE_URL` if you already have managed Postgres.
