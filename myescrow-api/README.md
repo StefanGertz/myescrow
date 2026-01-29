@@ -48,13 +48,13 @@ DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
 
 ### Scripts
 
-- `npm run dev` – Fastify + tsx watcher.
-- `npm run build` / `npm start` – compile to `dist/` and run.
-- `npm run lint` – type-check only.
-- `npm test` – Vitest integration tests (assumes Postgres is running).
-- `npm run db:migrate` – `prisma migrate dev` against `DATABASE_URL`.
-- `npm run db:push` – sync schema without migrations.
-- `npm run db:generate` – regenerate the Prisma client.
+- `npm run dev` - Fastify + tsx watcher.
+- `npm run build` / `npm start` - compile to `dist/` and run.
+- `npm run lint` - type-check only.
+- `npm test` - Vitest integration tests (assumes Postgres is running).
+- `npm run db:migrate` - `prisma migrate dev` against `DATABASE_URL`.
+- `npm run db:push` - sync schema without migrations.
+- `npm run db:generate` - regenerate the Prisma client.
 
 ## API surface
 
@@ -100,20 +100,20 @@ docker run --env-file .env -p 4000:4000 myescrow-api
 `
 
 The image runs 
-ode dist/server.js, so remember to build (or rely on the Dockerfile’s build stage) before pushing to a registry.
+ode dist/server.js, so remember to build (or rely on the Dockerfile-s build stage) before pushing to a registry.
 
 ### Staging/production checklist
 
-1. **Database** – Provision Postgres (e.g., Supabase, RDS). Copy the connection string into DATABASE_URL.
-2. **Migrations** – Run 
+1. **Database** - Provision Postgres (e.g., Supabase, RDS). Copy the connection string into DATABASE_URL.
+2. **Migrations** - Run 
 pm run db:migrate (or 
 px prisma migrate deploy) against the remote DB before booting the app.
-3. **Secrets** – Set PORT, JWT_SECRET, and DATABASE_URL in your hosting platform.
-4. **Runtime** – Either run the Docker image above or 
+3. **Secrets** - Set PORT, JWT_SECRET, and DATABASE_URL in your hosting platform.
+4. **Runtime** - Either run the Docker image above or 
 pm ci && npm run build && npm start on the host.
-5. **Observability** – Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
+5. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
 
-Point the frontend’s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
+Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
 ## Notes / next steps
 
 - Update `docker-compose.yml` credentials or `DATABASE_URL` if you already have managed Postgres.
