@@ -126,3 +126,23 @@ GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) ins
 - Extend the Prisma schema as new dashboard features land (milestones, multi-user access, etc.).
 - Harden auth (password policies, refresh tokens, rate limits) before promoting to production use.
 
+## Staging deployment
+
+1. Provision a Postgres 16 instance and capture the connection string (`DATABASE_URL`).
+2. Run migrations + seed once against that database from your laptop:
+   ```bash
+   DATABASE_URL="postgresql://..." npm run db:migrate
+   DATABASE_URL="postgresql://..." npx prisma db seed
+   ```
+3. On the staging host, export `DATABASE_URL`, `JWT_SECRET`, (and optionally `PORT`, `GHCR_USER`, `GHCR_TOKEN`).
+4. Pull + boot the published image using the helper script:
+   ```bash
+   cd myescrow-api
+   chmod +x scripts/deploy-staging.sh
+   ./scripts/deploy-staging.sh
+   ```
+   The script writes `.env.staging` and runs `docker compose -f docker-compose.staging.yml up -d`.
+5. Smoke-test the staging URL from your workstation:
+   ```bash
+   SMOKE_API_BASE=https://staging.example.com npm run smoke
+   ```
