@@ -119,7 +119,7 @@ Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the serve
 
 ## Continuous integration
 
-GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) installs dependencies, executes `npm test`, builds the backend, boots it locally, runs `npm run smoke` against `http://localhost:4000`, and finishes with `npm run lint:docs`. Treat that pipeline as the gate before tagging/pushing new Docker images.
+GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) installs dependencies, executes `npm test`, builds the backend, boots it locally, runs `npm run smoke` against `http://localhost:4000`, and finishes with `npm run lint:docs`. When the branch is `main`, the workflow also builds and pushes a Docker image to `ghcr.io/<owner>/myescrow-api`. Treat that pipeline as the gate before tagging/pushing new Docker images.
 ## Notes / next steps
 
 - Update `docker-compose.yml` credentials or `DATABASE_URL` if you already have managed Postgres.
