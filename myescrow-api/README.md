@@ -1,4 +1,4 @@
-# MyEscrow API
+# MyEscrow API ![Backend CI](https://github.com/StefanGertz/myescrow/actions/workflows/backend-ci.yml/badge.svg)
 
 Fastify-based backend for the MyEscrow dashboard, now powered by PostgreSQL + Prisma. The original JSON fixtures remain as seed data so the frontend keeps the same demo flows.
 
