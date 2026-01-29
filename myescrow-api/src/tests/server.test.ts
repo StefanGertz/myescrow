@@ -113,6 +113,20 @@ describe("MyEscrow API", () => {
     expect(response.json().balance).toBeGreaterThan(0);
   });
 
+  it("lists wallet transactions", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/wallet/transactions",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(Array.isArray(body.transactions)).toBe(true);
+    expect(body.transactions.length).toBeGreaterThan(0);
+    expect(body.transactions[0]).toHaveProperty("type");
+    expect(body.transactions[0]).toHaveProperty("amount");
+  });
+
   it("resolves a dispute", async () => {
     const responseDisputes = await server.inject({
       method: "GET",

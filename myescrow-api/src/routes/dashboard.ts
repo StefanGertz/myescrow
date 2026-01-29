@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { addTimelineEvent, createEscrow, getOverview, listDisputes, listEscrows, listNotifications, recordWalletTransaction, updateDispute, updateEscrowState } from "../services/dashboardService";
+import { addTimelineEvent, createEscrow, getOverview, listDisputes, listEscrows, listNotifications, listWalletTransactions, recordWalletTransaction, updateDispute, updateEscrowState } from "../services/dashboardService";
 import { adjustWalletBalance, findUserById } from "../services/userService";
 import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
@@ -169,6 +169,12 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         amount,
         balance: Number((updatedUser.walletBalanceCents / 100).toFixed(2)),
       };
+    });
+
+    secured.get("/api/dashboard/wallet/transactions", async (request) => {
+      const user = await requireUser(request);
+      const transactions = await listWalletTransactions(secured.prisma, user.id);
+      return { transactions };
     });
   });
 }

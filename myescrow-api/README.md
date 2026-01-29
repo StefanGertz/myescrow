@@ -79,6 +79,7 @@ Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/aut
 | GET | `/api/dashboard/notifications` | Dashboard notifications. |
 | POST | `/api/dashboard/wallet/topup` | Increase wallet balance (`{ amount: number }`). |
 | POST | `/api/dashboard/wallet/withdraw` | Withdraw from wallet (`{ amount: number }`). |
+| GET | `/api/dashboard/wallet/transactions` | Recent wallet transactions (credits/debits). |
 
 ## Testing
 

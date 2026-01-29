@@ -213,6 +213,21 @@ export async function listNotifications(prisma: PrismaClient, userId: string) {
   }));
 }
 
+export async function listWalletTransactions(prisma: PrismaClient, userId: string, limit = 10) {
+  const transactions = await prisma.walletTransaction.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return transactions.map((tx) => ({
+    id: tx.id,
+    amount: formatCurrencyFromCents(Math.abs(tx.amountCents)),
+    type: tx.type,
+    direction: tx.amountCents >= 0 ? "credit" : "debit",
+    createdAt: tx.createdAt.toISOString(),
+  }));
+}
+
 export async function recordWalletTransaction(prisma: PrismaClient, userId: string, amountCents: number, type: string) {
   await prisma.walletTransaction.create({
     data: {
