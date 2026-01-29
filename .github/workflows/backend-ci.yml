@@ -71,7 +71,7 @@ jobs:
         run: |
           for i in {1..30}; do
             status=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4000/ || true)
-            if [ -n "$status" ]; then
+            if [ "$status" = "200" ]; then
               exit 0
             fi
             sleep 1
