@@ -8,10 +8,32 @@ const loginSchema = z.object({
   password: z.string().min(8),
 });
 
+const COMMON_PASSWORDS = new Set([
+  "password",
+  "password1",
+  "password123",
+  "12345678",
+  "123456789",
+  "qwerty123",
+  "letmein123",
+  "welcome123",
+]);
+
+const strongPasswordSchema = z
+  .string()
+  .min(12, "Password must be at least 12 characters long.")
+  .refine((value) => /[A-Z]/.test(value), { message: "Password must include at least one uppercase letter." })
+  .refine((value) => /[a-z]/.test(value), { message: "Password must include at least one lowercase letter." })
+  .refine((value) => /[0-9]/.test(value), { message: "Password must include at least one number." })
+  .refine((value) => /[^A-Za-z0-9]/.test(value), { message: "Password must include at least one symbol." })
+  .refine((value) => !COMMON_PASSWORDS.has(value.toLowerCase()), {
+    message: "Password is too common. Pick something more unique.",
+  });
+
 const signupSchema = z.object({
-  name: z.string().min(2),
+  name: z.string().trim().min(2).max(80),
   email: z.string().email(),
-  password: z.string().min(8),
+  password: strongPasswordSchema,
 });
 
 export async function authRoutes(fastify: FastifyInstance) {
