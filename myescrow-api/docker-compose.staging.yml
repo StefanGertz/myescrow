@@ -1,16 +1,34 @@
-version: "3.8"
 services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-escrow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-escrowpass}
+      POSTGRES_DB: ${DB_NAME:-myescrow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-escrow} -d ${DB_NAME:-myescrow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   api:
     image: ghcr.io/stefangertz/myescrow-api:latest
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "4000:4000"
     environment:
       PORT: ${PORT:-4000}
       JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${DB_USER:-escrow}:${DB_PASSWORD:-escrowpass}@db:5432/${DB_NAME:-myescrow}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/"]
       interval: 15s
       timeout: 5s
       retries: 5
+volumes:
+  pgdata:
