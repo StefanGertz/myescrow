@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const API_BASE = process.env.SMOKE_API_BASE ?? 'http://localhost:4000';
-const PASSWORD = process.env.SMOKE_PASSWORD ?? 'demo1234';
+const PASSWORD = process.env.SMOKE_PASSWORD ?? 'SmokeTest!2024';
 const USER_NAME = process.env.SMOKE_USER_NAME ?? 'Smoke Tester';
 const AMOUNT = Number(process.env.SMOKE_ESCROW_AMOUNT ?? 1500);
 
