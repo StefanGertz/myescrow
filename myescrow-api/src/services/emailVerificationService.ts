@@ -5,7 +5,8 @@ import { normalizeEmail } from "./userService";
 
 const CODE_DIGITS = Number(process.env.EMAIL_VERIFICATION_CODE_DIGITS ?? "6");
 const EXPIRATION_MINUTES = Number(process.env.EMAIL_VERIFICATION_TTL_MINUTES ?? "15");
-const DEBUG_CODES_ENABLED = process.env.AUTH_DEBUG_CODES === "true";
+const DEBUG_CODES_ENABLED =
+  process.env.AUTH_DEBUG_CODES === "true" || process.env.NODE_ENV !== "production";
 
 const hashValue = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 

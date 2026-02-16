@@ -53,7 +53,7 @@ RESEND_API_KEY=
 - `JWT_SECRET` secures JWTs.
 - `DATABASE_URL` points Prisma at Postgres. Append `?schema=<yourname>` if you want isolated schemas per developer/test run.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION` toggles the verification workflow (defaults to `true`).
-- `AUTH_DEBUG_CODES` surfaces verification codes in API responses/logs for local development and smoke tests. Set to `false` in production.
+- `AUTH_DEBUG_CODES` surfaces verification codes in API responses/logs for local development and smoke tests. Left unset, it defaults to `true` whenever `NODE_ENV !== "production"`; set it explicitly to `false` in production environments.
 - `APP_URL`, `EMAIL_FROM`, and `RESEND_API_KEY` configure email delivery. When `RESEND_API_KEY` is omitted, the API logs verification codes instead of sending mail.
 
 ### Email verification
