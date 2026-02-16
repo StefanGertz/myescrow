@@ -28,6 +28,7 @@ async function main() {
       email: user.email,
       passwordHash: user.passwordHash,
       walletBalanceCents: user.walletBalance,
+      emailVerified: true,
       createdAt: new Date(user.createdAt),
       updatedAt: new Date(user.updatedAt),
     })),

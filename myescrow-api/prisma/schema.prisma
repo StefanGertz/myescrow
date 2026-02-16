@@ -14,6 +14,7 @@ model User {
   name             String
   email            String              @unique
   passwordHash     String
+  emailVerified    Boolean             @default(false)
   walletBalanceCents Int               @default(0)
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
@@ -22,6 +23,7 @@ model User {
   notifications    Notification[]
   timelineEvents   TimelineEvent[]
   walletTransactions WalletTransaction[]
+  verificationTokens EmailVerificationToken[]
 }
 
 model Escrow {
@@ -92,4 +94,17 @@ model WalletTransaction {
 model Sequence {
   id           String @id
   currentValue Int    @default(0)
+}
+
+model EmailVerificationToken {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

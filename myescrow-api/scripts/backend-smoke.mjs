@@ -34,6 +34,13 @@ async function signup(email) {
   });
 }
 
+async function verifyEmail(email, code) {
+  return request('/api/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ email, code })
+  });
+}
+
 const authHeaders = (token) => ({ Authorization: `Bearer ${token}` });
 
 async function overview(token) {
@@ -88,8 +95,16 @@ function ensure(condition, message) {
   console.log(`Using API base ${API_BASE}`);
   console.log(`Signing up smoke user ${email}`);
   const signupResult = await signup(email);
-  const token = signupResult.token;
-  ensure(token, 'Signup response missing token');
+  let token = signupResult.token;
+
+  if (!token && signupResult.verificationRequired) {
+    ensure(signupResult.debugCode, 'Verification code missing; set AUTH_DEBUG_CODES=true for smoke tests');
+    console.log('Verifying email using debug code');
+    const verification = await verifyEmail(email, signupResult.debugCode);
+    token = verification.token;
+  }
+
+  ensure(token, 'Signup flow did not return a session token');
 
   console.log('Fetching overview before creating escrow');
   const before = await overview(token);

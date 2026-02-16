@@ -41,10 +41,24 @@ Create `.env` (or copy `.env.example`):
 PORT=4000
 JWT_SECRET=dev-secret-change-me
 DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
+AUTH_REQUIRE_EMAIL_VERIFICATION=true
+AUTH_DEBUG_CODES=true
+EMAIL_VERIFICATION_CODE_DIGITS=6
+EMAIL_VERIFICATION_TTL_MINUTES=15
+APP_URL=http://localhost:3000
+EMAIL_FROM="MyEscrow <no-reply@myescrow.test>"
+RESEND_API_KEY=
 ```
 
 - `JWT_SECRET` secures JWTs.
 - `DATABASE_URL` points Prisma at Postgres. Append `?schema=<yourname>` if you want isolated schemas per developer/test run.
+- `AUTH_REQUIRE_EMAIL_VERIFICATION` toggles the verification workflow (defaults to `true`).
+- `AUTH_DEBUG_CODES` surfaces verification codes in API responses/logs for local development and smoke tests. Set to `false` in production.
+- `APP_URL`, `EMAIL_FROM`, and `RESEND_API_KEY` configure email delivery. When `RESEND_API_KEY` is omitted, the API logs verification codes instead of sending mail.
+
+### Email verification
+
+Signups now return `verificationRequired: true` until the user enters a 6-digit code delivered via email. The `/api/auth/verify-email` endpoint consumes the code and returns the usual `{ token, user }` payload. `/api/auth/resend-verification` generates a new code if a user loses the previous message. Login requests before verification return HTTP 403 with guidance to verify first.
 
 ### Scripts
 
@@ -66,6 +80,8 @@ Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/aut
 | --- | --- | --- |
 | POST | `/api/auth/signup` | Create an account (name, email, password). |
 | POST | `/api/auth/login` | Authenticate and receive a JWT. |
+| POST | `/api/auth/verify-email` | Submit the 6-digit code emailed during signup. |
+| POST | `/api/auth/resend-verification` | Send another verification email if the previous code expired. |
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
 | GET | `/api/dashboard/escrows` | Escrows requiring review. |
 | POST | `/api/dashboard/escrows/create` | Create a new escrow draft. |

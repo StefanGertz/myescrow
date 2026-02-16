@@ -16,11 +16,15 @@ export async function findUserById(prisma: PrismaClient, userId: string) {
   return prisma.user.findUnique({ where: { id: userId } });
 }
 
-export async function createUser(prisma: PrismaClient, data: {
-  name: string;
-  email: string;
-  password: string;
-}): Promise<User> {
+export async function createUser(
+  prisma: PrismaClient,
+  data: {
+    name: string;
+    email: string;
+    password: string;
+  },
+  options?: { emailVerified?: boolean },
+): Promise<User> {
   const normalized = normalizeEmail(data.email);
   const existing = await prisma.user.findUnique({ where: { email: normalized } });
   if (existing) {
@@ -34,6 +38,7 @@ export async function createUser(prisma: PrismaClient, data: {
       name: data.name,
       email: normalized,
       passwordHash,
+      emailVerified: options?.emailVerified ?? false,
     },
   });
 }

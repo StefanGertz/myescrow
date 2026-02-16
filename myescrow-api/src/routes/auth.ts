@@ -2,6 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppError } from "../utils/errors";
 import { createUser, findUserByEmail, normalizeEmail, verifyPassword } from "../services/userService";
+import {
+  confirmEmailVerificationCode,
+  formatVerificationResponse,
+  issueEmailVerification,
+} from "../services/emailVerificationService";
+import { sendVerificationEmail } from "../services/emailService";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -36,12 +42,26 @@ const signupSchema = z.object({
   password: strongPasswordSchema,
 });
 
+const verifyEmailSchema = z.object({
+  email: z.string().email(),
+  code: z.string().min(6).max(8),
+});
+
+const resendVerificationSchema = z.object({
+  email: z.string().email(),
+});
+
+const requireVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== "false";
+
 export async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/api/auth/login", async (request) => {
     const body = loginSchema.parse(request.body);
     const user = await findUserByEmail(fastify.prisma, body.email);
     if (!user) {
       throw new AppError("Invalid email or password.", 401);
+    }
+    if (requireVerification && !user.emailVerified) {
+      throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
     }
     await verifyPassword(user, body.password);
     const token = fastify.jwt.sign({ userId: user.id, email: user.email });
@@ -55,9 +75,58 @@ export async function authRoutes(fastify: FastifyInstance) {
       name: body.name,
       email: normalizedEmail,
       password: body.password,
+    }, { emailVerified: !requireVerification });
+
+    if (!requireVerification) {
+      const token = fastify.jwt.sign({ userId: user.id, email: user.email });
+      reply.code(201);
+      return { token, user: { id: user.id, name: user.name, email: user.email } };
+    }
+
+    const verification = await issueEmailVerification(fastify.prisma, user);
+    await sendVerificationEmail({
+      to: user.email,
+      name: user.name,
+      code: verification.code,
+      expiresAt: verification.expiresAt,
+      logger: fastify.log,
     });
-    const token = fastify.jwt.sign({ userId: user.id, email: user.email });
+
     reply.code(201);
+    return formatVerificationResponse(user, verification);
+  });
+
+  fastify.post("/api/auth/verify-email", async (request) => {
+    if (!requireVerification) {
+      throw new AppError("Email verification is disabled.", 400);
+    }
+    const body = verifyEmailSchema.parse(request.body);
+    const user = await confirmEmailVerificationCode(fastify.prisma, body.email, body.code);
+    const token = fastify.jwt.sign({ userId: user.id, email: user.email });
     return { token, user: { id: user.id, name: user.name, email: user.email } };
+  });
+
+  fastify.post("/api/auth/resend-verification", async (request) => {
+    if (!requireVerification) {
+      return { verificationRequired: false };
+    }
+    const body = resendVerificationSchema.parse(request.body);
+    const normalizedEmail = normalizeEmail(body.email);
+    const user = await findUserByEmail(fastify.prisma, normalizedEmail);
+    if (!user) {
+      return { verificationRequired: true, email: normalizedEmail };
+    }
+    if (user.emailVerified) {
+      return { verificationRequired: false, email: user.email };
+    }
+    const verification = await issueEmailVerification(fastify.prisma, user);
+    await sendVerificationEmail({
+      to: user.email,
+      name: user.name,
+      code: verification.code,
+      expiresAt: verification.expiresAt,
+      logger: fastify.log,
+    });
+    return formatVerificationResponse(user, verification);
   });
 }
