@@ -25,6 +25,13 @@ services:
       PORT: ${PORT:-4000}
       JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: ${DATABASE_URL:-postgres://${DB_USER:-escrow}:${DB_PASSWORD:-escrowpass}@db:5432/${DB_NAME:-myescrow}}
+      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-true}
+      AUTH_DEBUG_CODES: ${AUTH_DEBUG_CODES:-false}
+      EMAIL_VERIFICATION_CODE_DIGITS: ${EMAIL_VERIFICATION_CODE_DIGITS:-6}
+      EMAIL_VERIFICATION_TTL_MINUTES: ${EMAIL_VERIFICATION_TTL_MINUTES:-15}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      EMAIL_FROM: ${EMAIL_FROM:-"MyEscrow <no-reply@myescrowdemo.xyz>"}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/"]
       interval: 15s
