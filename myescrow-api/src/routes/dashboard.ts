@@ -1,6 +1,22 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { addTimelineEvent, createEscrow, getOverview, listDisputes, listEscrows, listNotifications, listWalletTransactions, recordWalletTransaction, updateDispute, updateEscrowState } from "../services/dashboardService";
+import {
+  addTimelineEvent,
+  approveEscrow,
+  cancelEscrow,
+  createEscrow,
+  fundEscrow,
+  getOverview,
+  listDisputes,
+  listEscrows,
+  listNotifications,
+  listWalletTransactions,
+  recordWalletTransaction,
+  rejectEscrow,
+  releaseEscrow,
+  updateDispute,
+} from "../services/dashboardService";
+import { sendEscrowInvitationEmail } from "../services/emailService";
 import { adjustWalletBalance, findUserById } from "../services/userService";
 import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
@@ -9,9 +25,18 @@ import { nowIso } from "../utils/dates";
 const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpart: z.string().min(2),
+  counterpartyEmail: z.string().email(),
   amount: z.number().positive(),
+  creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
   category: z.string().optional(),
   description: z.string().optional(),
+  milestones: z.array(
+    z.object({
+      title: z.string().min(1),
+      amount: z.number().positive(),
+      description: z.string().optional(),
+    }),
+  ).optional(),
 });
 
 const walletSchema = z.object({
@@ -50,33 +75,41 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/create", async (request, reply) => {
       const user = await requireUser(request);
       const body = createEscrowSchema.parse(request.body);
-      const escrow = await createEscrow(secured.prisma, user.id, body);
+      const result = await createEscrow(secured.prisma, user.id, {
+        title: body.title,
+        counterpart: body.counterpart,
+        counterpartyEmail: body.counterpartyEmail,
+        amount: body.amount,
+        creatorRole: body.creatorRole,
+        ...(body.category ? { category: body.category } : {}),
+        ...(body.description ? { description: body.description } : {}),
+        ...(body.milestones ? { milestones: body.milestones } : {}),
+      });
+      await sendEscrowInvitationEmail({
+        to: result.counterpartyUser.email,
+        recipientName: result.counterpartyUser.name,
+        creatorName: result.owner.name,
+        escrowTitle: result.escrow.title,
+        escrowReference: result.escrow.reference,
+        creatorRole: body.creatorRole,
+        logger: secured.log,
+      });
       reply.code(201);
       return {
         success: true,
-        escrowId: escrow.id,
-        reference: escrow.reference,
-        createdAt: escrow.createdAt,
+        escrowId: result.escrow.id,
+        reference: result.escrow.reference,
+        createdAt: result.escrow.createdAt,
       };
     });
 
-    const escrowAction = (path: string, handler: (reference: string, userId: string) => Promise<any>) => {
-      secured.post(`/api/dashboard/escrows/:id/${path}`, async (request) => {
-        const user = await requireUser(request);
-        const { id } = idParamsSchema.parse(request.params);
-        return handler(id, user.id);
-      });
-    };
-
-    escrowAction("release", async (reference, userId) => {
-      const escrow = await updateEscrowState(secured.prisma, userId, reference, {
-        counterpartyApproved: true,
-        status: "success",
-        dueDescription: "Release queued",
-      });
-      await addTimelineEvent(secured.prisma, userId, {
+    secured.post("/api/dashboard/escrows/:id/release", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const escrow = await releaseEscrow(secured.prisma, user.id, id);
+      await addTimelineEvent(secured.prisma, user.id, {
         title: `Release approved for ${escrow.reference}`,
-        meta: `${escrow.counterpart} milestone queued`,
+        meta: `${escrow.counterpart} payout sent`,
         status: "released",
       });
       return {
@@ -86,31 +119,36 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       };
     });
 
-    escrowAction("approve", async (reference, userId) => {
-      const escrow = await updateEscrowState(secured.prisma, userId, reference, {
-        counterpartyApproved: true,
-        status: "success",
-        dueDescription: "Ready for release",
-      });
+    secured.post("/api/dashboard/escrows/:id/approve", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const escrow = await approveEscrow(secured.prisma, user.id, id);
       return { success: true, escrowId: escrow.reference };
     });
 
-    escrowAction("reject", async (reference, userId) => {
-      const escrow = await updateEscrowState(secured.prisma, userId, reference, {
-        counterpartyApproved: false,
-        status: "warning",
-        dueDescription: "Awaiting revisions",
-      });
+    secured.post("/api/dashboard/escrows/:id/reject", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const escrow = await rejectEscrow(secured.prisma, user.id, id);
       return { success: true, escrowId: escrow.reference };
     });
 
-    escrowAction("cancel", async (reference, userId) => {
-      const escrow = await updateEscrowState(secured.prisma, userId, reference, {
-        status: "warning",
-        stage: "Cancelled",
-        dueDescription: "Cancelled",
-      });
+    secured.post("/api/dashboard/escrows/:id/cancel", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const escrow = await cancelEscrow(secured.prisma, user.id, id);
       return { success: true, escrowId: escrow.reference };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/fund", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const escrow = await fundEscrow(secured.prisma, user.id, id);
+      return {
+        success: true,
+        escrowId: escrow.reference,
+        fundedAt: escrow.fundedAt?.toISOString() ?? nowIso(),
+      };
     });
 
     secured.get("/api/dashboard/disputes", async (request) => {

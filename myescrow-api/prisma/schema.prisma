@@ -18,7 +18,9 @@ model User {
   walletBalanceCents Int               @default(0)
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
-  escrows          Escrow[]
+  escrows          Escrow[]            @relation("EscrowOwner")
+  buyerEscrows     Escrow[]            @relation("EscrowBuyer")
+  sellerEscrows    Escrow[]            @relation("EscrowSeller")
   disputes         Dispute[]
   notifications    Notification[]
   timelineEvents   TimelineEvent[]
@@ -31,7 +33,13 @@ model Escrow {
   id                   Int       @id @default(autoincrement())
   reference            String    @unique
   ownerId              String
-  owner                User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner                User      @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  buyerId              String
+  buyer                User      @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  sellerId             String
+  seller               User      @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  creatorRole          String
+  counterpartyEmail    String
   title                String
   counterpart          String
   amountCents          Int
@@ -39,10 +47,39 @@ model Escrow {
   dueDescription       String
   status               String
   counterpartyApproved Boolean   @default(false)
+  lifecycleStatus      String    @default("pending_approval")
+  fundingStatus        String    @default("not_funded")
   category             String?
   description          String?
+  approvedAt           DateTime?
+  fundedAt             DateTime?
+  rejectedAt           DateTime?
+  cancelledAt          DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+  milestones           EscrowMilestone[]
+
+  @@index([ownerId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([lifecycleStatus])
+}
+
+model EscrowMilestone {
+  id          Int      @id @default(autoincrement())
+  escrowId     Int
+  escrow       Escrow   @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  amountCents  Int
+  orderIndex   Int
+  status       String   @default("pending")
+  releasedAt   DateTime?
+  rejectedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([escrowId, orderIndex])
 }
 
 model Dispute {

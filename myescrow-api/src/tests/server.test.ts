@@ -6,8 +6,10 @@ import { PrismaClient } from "@prisma/client";
 
 let server: FastifyInstance;
 let token: string;
+let counterpartyToken: string;
 let schemaName: string;
 const defaultPassword = "password123";
+let createdEscrowReference: string;
 
 beforeAll(async () => {
   schemaName = `vitest_${Date.now()}`;
@@ -84,6 +86,17 @@ describe("MyEscrow API", () => {
     expect(loginResponse.statusCode).toBe(200);
   });
 
+  it("logs in with the counterparty account", async () => {
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "nora@example.com", password: defaultPassword },
+    });
+    expect(response.statusCode).toBe(200);
+    counterpartyToken = response.json().token;
+    expect(counterpartyToken).toBeDefined();
+  });
+
   it("returns dashboard overview", async () => {
     const response = await server.inject({
       method: "GET",
@@ -98,10 +111,16 @@ describe("MyEscrow API", () => {
 
   it("creates a new escrow", async () => {
     const payload = {
-      title: "New milestone",
-      counterpart: "Acme Builders",
-      amount: 15000,
+      title: "New project escrow",
+      counterpart: "Nora Studio",
+      counterpartyEmail: "nora@example.com",
+      creatorRole: "buyer",
+      amount: 1500,
       category: "Construction",
+      milestones: [
+        { title: "Deposit", amount: 500, description: "Kickoff payment" },
+        { title: "Final handoff", amount: 1000, description: "Final delivery" },
+      ],
     };
     const response = await server.inject({
       method: "POST",
@@ -113,20 +132,33 @@ describe("MyEscrow API", () => {
     const body = response.json();
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
+    createdEscrowReference = body.reference;
   });
 
-  it("releases an escrow", async () => {
-    const escrowsResponse = await server.inject({
-      method: "GET",
-      url: "/api/dashboard/escrows",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const escrows = escrowsResponse.json();
-    const releasable = escrows.escrows.find((escrow: any) => escrow.counterpartyApproved);
-    expect(releasable).toBeDefined();
+  it("approves the escrow as the counterparty", async () => {
     const response = await server.inject({
       method: "POST",
-      url: `/api/dashboard/escrows/${releasable.id}/release`,
+      url: `/api/dashboard/escrows/${createdEscrowReference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().success).toBe(true);
+  });
+
+  it("funds the escrow as the buyer", async () => {
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().success).toBe(true);
+  });
+
+  it("releases the funded escrow", async () => {
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/release`,
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(response.statusCode).toBe(200);

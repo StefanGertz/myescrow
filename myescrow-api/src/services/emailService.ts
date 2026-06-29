@@ -13,6 +13,15 @@ type VerificationEmailPayload = {
 };
 
 type PasswordResetEmailPayload = VerificationEmailPayload;
+type EscrowInvitationEmailPayload = {
+  to: string;
+  recipientName: string;
+  creatorName: string;
+  escrowTitle: string;
+  escrowReference: string;
+  creatorRole: "buyer" | "seller";
+  logger: FastifyBaseLogger;
+};
 
 const buildEmailHtml = (code: string, expiresAt: Date) => {
   const formattedExpiry = expiresAt.toLocaleString("en-US", {
@@ -147,5 +156,80 @@ export async function sendPasswordResetEmail({
     const text = await response.text();
     logger.error({ to, text }, "Failed to send password reset email via Resend");
     throw new Error("Failed to send password reset email.");
+  }
+}
+
+const buildEscrowInvitationHtml = ({
+  creatorName,
+  escrowTitle,
+  escrowReference,
+  creatorRole,
+}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole">) => {
+  const link = `${APP_URL.replace(/\/$/, "")}/?screen=dashboard`;
+  const roleText = creatorRole === "buyer" ? "buyer" : "seller";
+  return `
+    <p>Hi there,</p>
+    <p><strong>${creatorName}</strong> invited you to join the escrow <strong>${escrowTitle}</strong> (${escrowReference}) as the ${roleText === "buyer" ? "seller" : "buyer"}.</p>
+    <p>Sign in to MyEscrow to review the agreement and approve or reject it.</p>
+    <p><a href="${link}">Open MyEscrow</a></p>
+  `;
+};
+
+const buildEscrowInvitationText = ({
+  creatorName,
+  escrowTitle,
+  escrowReference,
+  creatorRole,
+}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole">) => {
+  const link = `${APP_URL.replace(/\/$/, "")}/?screen=dashboard`;
+  const invitedRole = creatorRole === "buyer" ? "seller" : "buyer";
+  return [
+    `${creatorName} invited you to join the escrow "${escrowTitle}" (${escrowReference}) as the ${invitedRole}.`,
+    "Sign in to review the agreement and approve or reject it.",
+    `Open MyEscrow: ${link}`,
+  ].join("\n");
+};
+
+export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPayload) {
+  const {
+    to,
+    recipientName: _recipientName,
+    creatorName,
+    escrowTitle,
+    escrowReference,
+    creatorRole,
+    logger,
+  } = payload;
+
+  logger.info({ to, escrowReference }, "Escrow invitation issued");
+
+  if (!RESEND_API_KEY) {
+    logger.warn(
+      { to, escrowReference },
+      "RESEND_API_KEY not set; escrow invitation email not sent externally.",
+    );
+    return;
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to,
+      subject: `Review escrow ${escrowReference} on MyEscrow`,
+      html: buildEscrowInvitationHtml({ creatorName, escrowTitle, escrowReference, creatorRole }),
+      text: buildEscrowInvitationText({ creatorName, escrowTitle, escrowReference, creatorRole }),
+      reply_to: EMAIL_FROM,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    logger.error({ to, text, escrowReference }, "Failed to send escrow invitation email via Resend");
+    throw new Error("Failed to send escrow invitation email.");
   }
 }

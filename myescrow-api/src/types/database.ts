@@ -2,7 +2,7 @@ export type EscrowStatus = "success" | "warning";
 export type TimelineStatus = "released" | "attention" | "funding";
 export type DisputePriority = "high" | "medium" | "low";
 export type DisputeStatus = "open" | "resolved";
-export type WalletTransactionType = "TOPUP" | "WITHDRAW" | "RELEASE";
+export type WalletTransactionType = "TOPUP" | "WITHDRAW" | "RELEASE" | "FUND";
 
 export type UserRecord = {
   id: string;
@@ -18,6 +18,10 @@ export type EscrowRecord = {
   id: number;
   reference: string;
   ownerId: string;
+  buyerId: string;
+  sellerId: string;
+  creatorRole: "buyer" | "seller";
+  counterpartyEmail: string;
   title: string;
   counterpart: string;
   amount: number; // cents
@@ -25,8 +29,28 @@ export type EscrowRecord = {
   dueDescription: string;
   status: EscrowStatus;
   counterpartyApproved: boolean;
+  lifecycleStatus: string;
+  fundingStatus: string;
   category?: string;
   description?: string;
+  approvedAt?: string;
+  fundedAt?: string;
+  rejectedAt?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EscrowMilestoneRecord = {
+  id: number;
+  escrowId: number;
+  title: string;
+  description?: string;
+  amount: number; // cents
+  orderIndex: number;
+  status: string;
+  releasedAt?: string;
+  rejectedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -87,6 +111,7 @@ export type DatabaseSchema = {
   meta: MetaState;
   users: UserRecord[];
   escrows: EscrowRecord[];
+  escrowMilestones: EscrowMilestoneRecord[];
   disputes: DisputeRecord[];
   notifications: NotificationRecord[];
   timelineEvents: TimelineEventRecord[];

@@ -13,6 +13,7 @@ async function main() {
 
   await prisma.$transaction([
     prisma.walletTransaction.deleteMany(),
+    prisma.escrowMilestone.deleteMany(),
     prisma.timelineEvent.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.dispute.deleteMany(),
@@ -39,6 +40,10 @@ async function main() {
       data: {
         reference: escrow.reference,
         ownerId: escrow.ownerId,
+        buyerId: escrow.buyerId,
+        sellerId: escrow.sellerId,
+        creatorRole: escrow.creatorRole,
+        counterpartyEmail: escrow.counterpartyEmail,
         title: escrow.title,
         counterpart: escrow.counterpart,
         amountCents: escrow.amount,
@@ -46,13 +51,34 @@ async function main() {
         dueDescription: escrow.dueDescription,
         status: escrow.status,
         counterpartyApproved: escrow.counterpartyApproved,
+        lifecycleStatus: escrow.lifecycleStatus,
+        fundingStatus: escrow.fundingStatus,
         category: escrow.category,
         description: escrow.description,
+        approvedAt: escrow.approvedAt ? new Date(escrow.approvedAt) : undefined,
+        fundedAt: escrow.fundedAt ? new Date(escrow.fundedAt) : undefined,
+        rejectedAt: escrow.rejectedAt ? new Date(escrow.rejectedAt) : undefined,
+        cancelledAt: escrow.cancelledAt ? new Date(escrow.cancelledAt) : undefined,
         createdAt: new Date(escrow.createdAt),
         updatedAt: new Date(escrow.updatedAt),
       },
     });
   }
+
+  await prisma.escrowMilestone.createMany({
+    data: data.escrowMilestones.map((milestone) => ({
+      escrowId: milestone.escrowId,
+      title: milestone.title,
+      description: milestone.description,
+      amountCents: milestone.amount,
+      orderIndex: milestone.orderIndex,
+      status: milestone.status,
+      releasedAt: milestone.releasedAt ? new Date(milestone.releasedAt) : undefined,
+      rejectedAt: milestone.rejectedAt ? new Date(milestone.rejectedAt) : undefined,
+      createdAt: new Date(milestone.createdAt),
+      updatedAt: new Date(milestone.updatedAt),
+    })),
+  });
 
   for (const dispute of data.disputes) {
     await prisma.dispute.create({
