@@ -12,6 +12,8 @@ type VerificationEmailPayload = {
   logger: FastifyBaseLogger;
 };
 
+type PasswordResetEmailPayload = VerificationEmailPayload;
+
 const buildEmailHtml = (code: string, expiresAt: Date) => {
   const formattedExpiry = expiresAt.toLocaleString("en-US", {
     hour: "numeric",
@@ -78,5 +80,72 @@ export async function sendVerificationEmail({
     const text = await response.text();
     logger.error({ to, text }, "Failed to send verification email via Resend");
     throw new Error("Failed to send verification email.");
+  }
+}
+
+const buildResetEmailHtml = (code: string, expiresAt: Date) => {
+  const formattedExpiry = expiresAt.toLocaleString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    day: "numeric",
+  });
+  const link = `${APP_URL.replace(/\/$/, "")}/reset-password`;
+  return `
+    <p>Hi there,</p>
+    <p>Your MyEscrow password reset code is <strong style="font-size: 20px;">${code}</strong>.</p>
+    <p>Enter this code on the password reset page within the next 15 minutes (${formattedExpiry}).</p>
+    <p>You can also open <a href="${link}">${link}</a> and paste the code there.</p>
+    <p>If you didn't request this, you can ignore the email.</p>
+  `;
+};
+
+const buildResetEmailText = (code: string) => {
+  const link = `${APP_URL.replace(/\/$/, "")}/reset-password`;
+  return [
+    `Your MyEscrow password reset code is ${code}.`,
+    "Enter this code within 15 minutes.",
+    `Reset page: ${link}`,
+    "",
+    "If you didn't request this code, you can ignore the email.",
+  ].join("\n");
+};
+
+export async function sendPasswordResetEmail({
+  to,
+  code,
+  expiresAt,
+  logger,
+}: PasswordResetEmailPayload) {
+  logger.info({ to, code }, "Password reset code issued");
+
+  if (!RESEND_API_KEY) {
+    logger.warn(
+      { to },
+      "RESEND_API_KEY not set; password reset email not sent externally. Code logged for development only.",
+    );
+    return;
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to,
+      subject: "Reset your MyEscrow password",
+      html: buildResetEmailHtml(code, expiresAt),
+      text: buildResetEmailText(code),
+      reply_to: EMAIL_FROM,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    logger.error({ to, text }, "Failed to send password reset email via Resend");
+    throw new Error("Failed to send password reset email.");
   }
 }

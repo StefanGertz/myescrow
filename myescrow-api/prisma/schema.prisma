@@ -24,6 +24,7 @@ model User {
   timelineEvents   TimelineEvent[]
   walletTransactions WalletTransaction[]
   verificationTokens EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model Escrow {
@@ -97,6 +98,19 @@ model Sequence {
 }
 
 model EmailVerificationToken {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
   id         Int      @id @default(autoincrement())
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)

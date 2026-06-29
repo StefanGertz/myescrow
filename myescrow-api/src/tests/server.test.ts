@@ -53,6 +53,37 @@ describe("MyEscrow API", () => {
     expect(token).toBeDefined();
   });
 
+  it("issues a password reset code and accepts a new password", async () => {
+    const forgotResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/forgot-password",
+      payload: { email: "scott@example.com" },
+    });
+    expect(forgotResponse.statusCode).toBe(200);
+    const forgotBody = forgotResponse.json();
+    expect(forgotBody.accepted).toBe(true);
+    expect(forgotBody.debugCode).toBeDefined();
+
+    const resetResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/reset-password",
+      payload: {
+        email: "scott@example.com",
+        code: forgotBody.debugCode,
+        password: "BetterPassword123!",
+      },
+    });
+    expect(resetResponse.statusCode).toBe(200);
+    expect(resetResponse.json().success).toBe(true);
+
+    const loginResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "scott@example.com", password: "BetterPassword123!" },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+  });
+
   it("returns dashboard overview", async () => {
     const response = await server.inject({
       method: "GET",

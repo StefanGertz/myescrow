@@ -66,3 +66,15 @@ export async function verifyPassword(user: User, password: string) {
     throw new AppError("Invalid email or password.", 401);
   }
 }
+
+export async function setUserPassword(
+  prisma: Pick<PrismaClient, "user">,
+  userId: string,
+  password: string,
+) {
+  const passwordHash = await bcrypt.hash(password, 10);
+  return prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash },
+  });
+}

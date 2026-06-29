@@ -7,7 +7,12 @@ import {
   formatVerificationResponse,
   issueEmailVerification,
 } from "../services/emailVerificationService";
-import { sendVerificationEmail } from "../services/emailService";
+import { sendPasswordResetEmail, sendVerificationEmail } from "../services/emailService";
+import {
+  confirmPasswordReset,
+  formatPasswordResetResponse,
+  issuePasswordReset,
+} from "../services/passwordResetService";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -49,6 +54,16 @@ const verifyEmailSchema = z.object({
 
 const resendVerificationSchema = z.object({
   email: z.string().email(),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  code: z.string().min(6).max(8),
+  password: strongPasswordSchema,
 });
 
 const requireVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== "false";
@@ -128,5 +143,29 @@ export async function authRoutes(fastify: FastifyInstance) {
       logger: fastify.log,
     });
     return formatVerificationResponse(user, verification);
+  });
+
+  fastify.post("/api/auth/forgot-password", async (request) => {
+    const body = forgotPasswordSchema.parse(request.body);
+    const normalizedEmail = normalizeEmail(body.email);
+    const user = await findUserByEmail(fastify.prisma, normalizedEmail);
+    if (!user) {
+      return formatPasswordResetResponse(normalizedEmail, null);
+    }
+    const reset = await issuePasswordReset(fastify.prisma, user);
+    await sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      code: reset.code,
+      expiresAt: reset.expiresAt,
+      logger: fastify.log,
+    });
+    return formatPasswordResetResponse(user.email, reset);
+  });
+
+  fastify.post("/api/auth/reset-password", async (request) => {
+    const body = resetPasswordSchema.parse(request.body);
+    await confirmPasswordReset(fastify.prisma, body.email, body.code, body.password);
+    return { success: true };
   });
 }
