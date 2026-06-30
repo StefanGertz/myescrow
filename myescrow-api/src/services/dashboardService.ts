@@ -884,6 +884,75 @@ export async function rejectMilestone(
   });
 }
 
+export async function resubmitMilestone(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+): Promise<MilestoneActionResult> {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.sellerId !== userId) {
+    throw new AppError("Only the seller can resubmit rejected milestones.", 403);
+  }
+  if (escrow.lifecycleStatus !== "funded") {
+    throw new AppError("Milestones can only be resubmitted after funding.", 400);
+  }
+
+  const targetMilestone = getMilestoneById(escrow, milestoneId);
+  if (targetMilestone.status !== "rejected") {
+    throw new AppError("Only rejected milestones can be resubmitted.", 400);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.escrowMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        status: "pending",
+        rejectedAt: null,
+      },
+    });
+
+    const milestones = await tx.escrowMilestone.findMany({
+      where: { escrowId: escrow.id },
+      orderBy: { orderIndex: "asc" },
+    });
+    const state = getEscrowStateFromMilestones(milestones);
+    const updatedEscrow = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: state,
+      include: includeEscrowRelations,
+    });
+
+    await createTimeline(
+      tx,
+      updatedEscrow.buyerId,
+      `Milestone resubmitted for ${updatedEscrow.reference}`,
+      `${targetMilestone.title} is ready for review again`,
+      "attention",
+    );
+    await createTimeline(
+      tx,
+      updatedEscrow.sellerId,
+      `You resubmitted ${targetMilestone.title}`,
+      "Waiting for buyer review",
+      "attention",
+    );
+    await createNotification(
+      tx,
+      updatedEscrow.buyerId,
+      "Milestone resubmitted",
+      `${targetMilestone.title} was resubmitted and is ready for review.`,
+      "Just now",
+      updatedEscrow.id,
+    );
+
+    return {
+      escrow: updatedEscrow,
+      milestone: updatedEscrow.milestones.find((item) => item.id === milestoneId)!,
+    };
+  });
+}
+
 export async function listDisputes(prisma: PrismaClient, userId: string): Promise<DisputeResponse[]> {
   const disputes = await prisma.dispute.findMany({ where: { ownerId: userId, status: "open" } });
   return disputes.map((dispute) => ({

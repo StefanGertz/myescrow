@@ -11,6 +11,8 @@ let schemaName: string;
 const defaultPassword = "password123";
 let createdEscrowReference: string;
 let createdMilestoneId: number;
+let secondMilestoneEscrowReference: string;
+let rejectedMilestoneId: number;
 
 beforeAll(async () => {
   schemaName = `vitest_${Date.now()}`;
@@ -192,6 +194,80 @@ describe("MyEscrow API", () => {
     expect(targetEscrow.stage).toBe("Milestones active");
     expect(targetEscrow.milestones[0].status).toBe("released");
     expect(targetEscrow.milestones[1].status).toBe("pending");
+  });
+
+  it("creates another funded escrow for rejection and resubmission checks", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        title: "Revision workflow escrow",
+        counterpart: "Nora Studio",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 900,
+        milestones: [
+          { title: "Draft", amount: 300 },
+          { title: "Final", amount: 600 },
+        ],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    secondMilestoneEscrowReference = createResponse.json().reference;
+
+    const approveResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(approveResponse.statusCode).toBe(200);
+
+    const fundResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/fund`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(fundResponse.statusCode).toBe(200);
+  });
+
+  it("rejects and resubmits a milestone", async () => {
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(escrowsResponse.statusCode).toBe(200);
+    const targetEscrow = escrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === secondMilestoneEscrowReference);
+    expect(targetEscrow).toBeDefined();
+    rejectedMilestoneId = targetEscrow.milestones[0].id;
+
+    const rejectResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/reject`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(rejectResponse.statusCode).toBe(200);
+
+    const sellerResubmitResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/resubmit`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(sellerResubmitResponse.statusCode).toBe(200);
+
+    const refreshedEscrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const refreshedEscrow = refreshedEscrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === secondMilestoneEscrowReference);
+    expect(refreshedEscrow.lifecycleStatus).toBe("funded");
+    expect(refreshedEscrow.milestones[0].status).toBe("pending");
   });
 
   it("tops up the wallet", async () => {

@@ -16,6 +16,7 @@ import {
   rejectEscrow,
   rejectMilestone,
   releaseEscrow,
+  resubmitMilestone,
   updateDispute,
 } from "../services/dashboardService";
 import { sendEscrowInvitationEmail } from "../services/emailService";
@@ -178,6 +179,17 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         escrowId: result.escrow.reference,
         milestoneId: result.milestone.id,
         rejectedAt: result.milestone.rejectedAt?.toISOString() ?? nowIso(),
+      };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/resubmit", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const result = await resubmitMilestone(secured.prisma, user.id, id, milestoneId);
+      return {
+        success: true,
+        escrowId: result.escrow.reference,
+        milestoneId: result.milestone.id,
       };
     });
 
