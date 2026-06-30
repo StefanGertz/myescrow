@@ -23,6 +23,7 @@ export type EscrowMilestoneResponse = {
 };
 
 export type EscrowResponse = {
+  escrowId: number;
   id: string;
   title: string;
   description?: string;
@@ -205,6 +206,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
   };
 
   return {
+    escrowId: record.id,
     id: record.reference,
     title: record.title,
     ...(record.description ? { description: record.description } : {}),
