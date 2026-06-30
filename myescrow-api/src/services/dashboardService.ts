@@ -80,6 +80,11 @@ type CreateEscrowInput = {
   }>;
 };
 
+type MilestoneActionResult = {
+  escrow: EscrowWithRelations;
+  milestone: EscrowWithRelations["milestones"][number];
+};
+
 const visibleEscrowWhere = (userId: string): Prisma.EscrowWhereInput => ({
   OR: [{ ownerId: userId }, { buyerId: userId }, { sellerId: userId }],
 });
@@ -113,6 +118,9 @@ function deriveStage(record: EscrowWithRelations) {
     return "Funding pending";
   }
   if (record.lifecycleStatus === "funded") {
+    if (record.milestones.some((milestone) => milestone.status === "rejected")) {
+      return "Milestone attention";
+    }
     return record.milestones.some((milestone) => milestone.status === "pending")
       ? "Milestones active"
       : "Funded";
@@ -137,6 +145,10 @@ function deriveDueDescription(record: EscrowWithRelations) {
     return "Buyer funding required";
   }
   if (record.lifecycleStatus === "funded") {
+    const rejectedMilestones = record.milestones.filter((milestone) => milestone.status === "rejected").length;
+    if (rejectedMilestones > 0) {
+      return `${rejectedMilestones} milestone(s) need revision`;
+    }
     const pendingMilestones = record.milestones.filter((milestone) => milestone.status === "pending").length;
     return pendingMilestones > 0 ? `${pendingMilestones} milestone(s) pending` : "Funded";
   }
@@ -240,6 +252,48 @@ async function findEscrowForUser(prisma: PrismaClient, userId: string, reference
     throw new AppError("Escrow not found.", 404);
   }
   return escrow;
+}
+
+function getMilestoneById(
+  escrow: EscrowWithRelations,
+  milestoneId: number,
+) {
+  const milestone = escrow.milestones.find((item) => item.id === milestoneId);
+  if (!milestone) {
+    throw new AppError("Milestone not found.", 404);
+  }
+  return milestone;
+}
+
+function getEscrowStateFromMilestones(milestones: EscrowWithRelations["milestones"]) {
+  const remainingPending = milestones.filter((milestone) => milestone.status === "pending").length;
+  const rejectedCount = milestones.filter((milestone) => milestone.status === "rejected").length;
+  const allReleased = milestones.length > 0 && milestones.every((milestone) => milestone.status === "released");
+
+  if (allReleased) {
+    return {
+      lifecycleStatus: "completed",
+      stage: "Released",
+      dueDescription: "All funds released",
+      status: "success",
+    } as const;
+  }
+
+  if (rejectedCount > 0) {
+    return {
+      lifecycleStatus: "funded",
+      stage: "Milestone attention",
+      dueDescription: `${rejectedCount} milestone(s) need revision`,
+      status: "warning",
+    } as const;
+  }
+
+  return {
+    lifecycleStatus: "funded",
+    stage: "Milestones active",
+    dueDescription: `${remainingPending} milestone(s) pending`,
+    status: "success",
+  } as const;
 }
 
 export async function getOverview(prisma: PrismaClient, userId: string) {
@@ -669,6 +723,164 @@ export async function releaseEscrow(prisma: PrismaClient, userId: string, refere
     );
 
     return updated;
+  });
+}
+
+export async function approveMilestone(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+): Promise<MilestoneActionResult> {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.buyerId !== userId) {
+    throw new AppError("Only the buyer can approve milestone releases.", 403);
+  }
+  if (escrow.lifecycleStatus !== "funded") {
+    throw new AppError("Milestones can only be approved after funding.", 400);
+  }
+
+  const targetMilestone = getMilestoneById(escrow, milestoneId);
+  if (targetMilestone.status !== "pending") {
+    throw new AppError("Only pending milestones can be approved.", 400);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const seller = await tx.user.findUnique({ where: { id: escrow.sellerId } });
+    if (!seller) {
+      throw new AppError("Seller not found.", 404);
+    }
+
+    const releasedAt = new Date();
+    const milestone = await tx.escrowMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        status: "released",
+        releasedAt,
+        rejectedAt: null,
+      },
+    });
+
+    await tx.user.update({
+      where: { id: seller.id },
+      data: { walletBalanceCents: seller.walletBalanceCents + milestone.amountCents },
+    });
+    await tx.walletTransaction.create({
+      data: {
+        userId: seller.id,
+        amountCents: milestone.amountCents,
+        type: "RELEASE",
+      },
+    });
+
+    const milestones = await tx.escrowMilestone.findMany({
+      where: { escrowId: escrow.id },
+      orderBy: { orderIndex: "asc" },
+    });
+    const state = getEscrowStateFromMilestones(milestones);
+    const updatedEscrow = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: state,
+      include: includeEscrowRelations,
+    });
+
+    await createTimeline(
+      tx,
+      seller.id,
+      `Milestone released for ${updatedEscrow.reference}`,
+      `${milestone.title} paid out`,
+      "released",
+    );
+    await createTimeline(
+      tx,
+      updatedEscrow.buyerId,
+      `You released ${milestone.title}`,
+      `${formatCurrencyFromCents(milestone.amountCents)} sent to ${updatedEscrow.seller.name}`,
+      "released",
+    );
+    await createNotification(
+      tx,
+      seller.id,
+      "Milestone released",
+      `${milestone.title} funds were released to your wallet.`,
+      "Just now",
+      updatedEscrow.id,
+    );
+
+    return {
+      escrow: updatedEscrow,
+      milestone: updatedEscrow.milestones.find((item) => item.id === milestoneId)!,
+    };
+  });
+}
+
+export async function rejectMilestone(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+): Promise<MilestoneActionResult> {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.buyerId !== userId) {
+    throw new AppError("Only the buyer can reject milestones.", 403);
+  }
+  if (escrow.lifecycleStatus !== "funded") {
+    throw new AppError("Milestones can only be reviewed after funding.", 400);
+  }
+
+  const targetMilestone = getMilestoneById(escrow, milestoneId);
+  if (targetMilestone.status !== "pending") {
+    throw new AppError("Only pending milestones can be rejected.", 400);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const rejectedAt = new Date();
+    await tx.escrowMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        status: "rejected",
+        rejectedAt,
+      },
+    });
+
+    const milestones = await tx.escrowMilestone.findMany({
+      where: { escrowId: escrow.id },
+      orderBy: { orderIndex: "asc" },
+    });
+    const state = getEscrowStateFromMilestones(milestones);
+    const updatedEscrow = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: state,
+      include: includeEscrowRelations,
+    });
+
+    await createTimeline(
+      tx,
+      updatedEscrow.sellerId,
+      `Milestone rejected for ${updatedEscrow.reference}`,
+      `${targetMilestone.title} needs revision`,
+      "attention",
+    );
+    await createTimeline(
+      tx,
+      updatedEscrow.buyerId,
+      `You rejected ${targetMilestone.title}`,
+      "Seller needs to revise this milestone",
+      "attention",
+    );
+    await createNotification(
+      tx,
+      updatedEscrow.sellerId,
+      "Milestone needs revision",
+      `${targetMilestone.title} was rejected and needs updates.`,
+      "Just now",
+      updatedEscrow.id,
+    );
+
+    return {
+      escrow: updatedEscrow,
+      milestone: updatedEscrow.milestones.find((item) => item.id === milestoneId)!,
+    };
   });
 }
 

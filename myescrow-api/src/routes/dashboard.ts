@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   addTimelineEvent,
   approveEscrow,
+  approveMilestone,
   cancelEscrow,
   createEscrow,
   fundEscrow,
@@ -13,6 +14,7 @@ import {
   listWalletTransactions,
   recordWalletTransaction,
   rejectEscrow,
+  rejectMilestone,
   releaseEscrow,
   updateDispute,
 } from "../services/dashboardService";
@@ -44,6 +46,10 @@ const walletSchema = z.object({
 });
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
+const milestoneParamsSchema = z.object({
+  id: z.string().min(1),
+  milestoneId: z.coerce.number().int().positive(),
+});
 
 export async function dashboardRoutes(fastify: FastifyInstance) {
   fastify.register(async (secured) => {
@@ -148,6 +154,30 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         success: true,
         escrowId: escrow.reference,
         fundedAt: escrow.fundedAt?.toISOString() ?? nowIso(),
+      };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/approve", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const result = await approveMilestone(secured.prisma, user.id, id, milestoneId);
+      return {
+        success: true,
+        escrowId: result.escrow.reference,
+        milestoneId: result.milestone.id,
+        releasedAt: result.milestone.releasedAt?.toISOString() ?? nowIso(),
+      };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/reject", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const result = await rejectMilestone(secured.prisma, user.id, id, milestoneId);
+      return {
+        success: true,
+        escrowId: result.escrow.reference,
+        milestoneId: result.milestone.id,
+        rejectedAt: result.milestone.rejectedAt?.toISOString() ?? nowIso(),
       };
     });
 

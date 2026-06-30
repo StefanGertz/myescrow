@@ -10,6 +10,7 @@ let counterpartyToken: string;
 let schemaName: string;
 const defaultPassword = "password123";
 let createdEscrowReference: string;
+let createdMilestoneId: number;
 
 beforeAll(async () => {
   schemaName = `vitest_${Date.now()}`;
@@ -155,14 +156,42 @@ describe("MyEscrow API", () => {
     expect(response.json().success).toBe(true);
   });
 
-  it("releases the funded escrow", async () => {
+  it("releases a single milestone from the funded escrow", async () => {
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(escrowsResponse.statusCode).toBe(200);
+    const targetEscrow = escrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === createdEscrowReference);
+    expect(targetEscrow).toBeDefined();
+    createdMilestoneId = targetEscrow.milestones[0].id;
+
     const response = await server.inject({
       method: "POST",
-      url: `/api/dashboard/escrows/${createdEscrowReference}/release`,
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().success).toBe(true);
+  });
+
+  it("keeps the escrow funded until all milestones are released", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    const targetEscrow = response
+      .json()
+      .escrows.find((escrow: any) => escrow.id === createdEscrowReference);
+    expect(targetEscrow.lifecycleStatus).toBe("funded");
+    expect(targetEscrow.stage).toBe("Milestones active");
+    expect(targetEscrow.milestones[0].status).toBe("released");
+    expect(targetEscrow.milestones[1].status).toBe("pending");
   });
 
   it("tops up the wallet", async () => {
