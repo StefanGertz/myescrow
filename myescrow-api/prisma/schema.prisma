@@ -34,10 +34,10 @@ model Escrow {
   reference            String    @unique
   ownerId              String
   owner                User      @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  buyerId              String
-  buyer                User      @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
-  sellerId             String
-  seller               User      @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyerId              String?
+  buyer                User?     @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  sellerId             String?
+  seller               User?     @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
   creatorRole          String
   counterpartyEmail    String
   title                String
@@ -63,6 +63,7 @@ model Escrow {
   @@index([buyerId])
   @@index([sellerId])
   @@index([lifecycleStatus])
+  @@index([counterpartyEmail])
 }
 
 model EscrowMilestone {

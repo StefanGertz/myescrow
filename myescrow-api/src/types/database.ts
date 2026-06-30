@@ -18,8 +18,8 @@ export type EscrowRecord = {
   id: number;
   reference: string;
   ownerId: string;
-  buyerId: string;
-  sellerId: string;
+  buyerId?: string;
+  sellerId?: string;
   creatorRole: "buyer" | "seller";
   counterpartyEmail: string;
   title: string;

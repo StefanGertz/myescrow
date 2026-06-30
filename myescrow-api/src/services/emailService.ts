@@ -20,6 +20,7 @@ type EscrowInvitationEmailPayload = {
   escrowTitle: string;
   escrowReference: string;
   creatorRole: "buyer" | "seller";
+  invitationStatus: "existing_user" | "signup_required" | "verification_required";
   logger: FastifyBaseLogger;
 };
 
@@ -164,14 +165,38 @@ const buildEscrowInvitationHtml = ({
   escrowTitle,
   escrowReference,
   creatorRole,
-}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole">) => {
-  const link = `${APP_URL.replace(/\/$/, "")}/?screen=dashboard`;
+  invitationStatus,
+  to,
+}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole" | "invitationStatus" | "to">) => {
+  const baseUrl = APP_URL.replace(/\/$/, "");
+  const signupParams = new URLSearchParams({ email: to, invite: escrowReference });
+  const verifyParams = new URLSearchParams({ email: to, invite: escrowReference });
+  const dashboardLink = `${baseUrl}/?screen=dashboard`;
+  const signupLink = `${baseUrl}/signup?${signupParams.toString()}`;
+  const verifyLink = `${baseUrl}/verify-email?${verifyParams.toString()}`;
   const roleText = creatorRole === "buyer" ? "buyer" : "seller";
+  const action = invitationStatus === "existing_user"
+    ? {
+        sentence: "Sign in to MyEscrow to review the agreement and approve or reject it.",
+        link: dashboardLink,
+        label: "Open MyEscrow",
+      }
+    : invitationStatus === "verification_required"
+      ? {
+          sentence: "Verify your MyEscrow email, then sign in to review the agreement.",
+          link: verifyLink,
+          label: "Verify your email",
+        }
+      : {
+          sentence: "Create your MyEscrow account to review the agreement and continue onboarding.",
+          link: signupLink,
+          label: "Create your account",
+        };
   return `
     <p>Hi there,</p>
     <p><strong>${creatorName}</strong> invited you to join the escrow <strong>${escrowTitle}</strong> (${escrowReference}) as the ${roleText === "buyer" ? "seller" : "buyer"}.</p>
-    <p>Sign in to MyEscrow to review the agreement and approve or reject it.</p>
-    <p><a href="${link}">Open MyEscrow</a></p>
+    <p>${action.sentence}</p>
+    <p><a href="${action.link}">${action.label}</a></p>
   `;
 };
 
@@ -180,12 +205,26 @@ const buildEscrowInvitationText = ({
   escrowTitle,
   escrowReference,
   creatorRole,
-}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole">) => {
-  const link = `${APP_URL.replace(/\/$/, "")}/?screen=dashboard`;
+  invitationStatus,
+  to,
+}: Pick<EscrowInvitationEmailPayload, "creatorName" | "escrowTitle" | "escrowReference" | "creatorRole" | "invitationStatus" | "to">) => {
+  const baseUrl = APP_URL.replace(/\/$/, "");
+  const signupParams = new URLSearchParams({ email: to, invite: escrowReference });
+  const verifyParams = new URLSearchParams({ email: to, invite: escrowReference });
+  const link = invitationStatus === "existing_user"
+    ? `${baseUrl}/?screen=dashboard`
+    : invitationStatus === "verification_required"
+      ? `${baseUrl}/verify-email?${verifyParams.toString()}`
+      : `${baseUrl}/signup?${signupParams.toString()}`;
   const invitedRole = creatorRole === "buyer" ? "seller" : "buyer";
+  const actionLine = invitationStatus === "existing_user"
+    ? "Sign in to review the agreement and approve or reject it."
+    : invitationStatus === "verification_required"
+      ? "Verify your email, then sign in to review the agreement."
+      : "Create your account to review the agreement and continue onboarding.";
   return [
     `${creatorName} invited you to join the escrow "${escrowTitle}" (${escrowReference}) as the ${invitedRole}.`,
-    "Sign in to review the agreement and approve or reject it.",
+    actionLine,
     `Open MyEscrow: ${link}`,
   ].join("\n");
 };
@@ -198,6 +237,7 @@ export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPa
     escrowTitle,
     escrowReference,
     creatorRole,
+    invitationStatus,
     logger,
   } = payload;
 
@@ -221,8 +261,22 @@ export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPa
       from: EMAIL_FROM,
       to,
       subject: `Review escrow ${escrowReference} on MyEscrow`,
-      html: buildEscrowInvitationHtml({ creatorName, escrowTitle, escrowReference, creatorRole }),
-      text: buildEscrowInvitationText({ creatorName, escrowTitle, escrowReference, creatorRole }),
+      html: buildEscrowInvitationHtml({
+        creatorName,
+        escrowTitle,
+        escrowReference,
+        creatorRole,
+        invitationStatus,
+        to,
+      }),
+      text: buildEscrowInvitationText({
+        creatorName,
+        escrowTitle,
+        escrowReference,
+        creatorRole,
+        invitationStatus,
+        to,
+      }),
       reply_to: EMAIL_FROM,
     }),
   });

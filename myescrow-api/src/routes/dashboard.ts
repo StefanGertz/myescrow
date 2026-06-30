@@ -93,12 +93,13 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         ...(body.milestones ? { milestones: body.milestones } : {}),
       });
       await sendEscrowInvitationEmail({
-        to: result.counterpartyUser.email,
-        recipientName: result.counterpartyUser.name,
+        to: result.invitedEmail,
+        recipientName: result.counterpartyUser?.name ?? body.counterpart,
         creatorName: result.owner.name,
         escrowTitle: result.escrow.title,
         escrowReference: result.escrow.reference,
         creatorRole: body.creatorRole,
+        invitationStatus: result.invitationStatus,
         logger: secured.log,
       });
       reply.code(201);
@@ -106,6 +107,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         success: true,
         escrowId: result.escrow.id,
         reference: result.escrow.reference,
+        invitationStatus: result.invitationStatus,
         createdAt: result.escrow.createdAt,
       };
     });

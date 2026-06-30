@@ -7,6 +7,7 @@ import {
   formatVerificationResponse,
   issueEmailVerification,
 } from "../services/emailVerificationService";
+import { claimPendingEscrowsForUser } from "../services/dashboardService";
 import { sendPasswordResetEmail, sendVerificationEmail } from "../services/emailService";
 import {
   confirmPasswordReset,
@@ -79,6 +80,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
     }
     await verifyPassword(user, body.password);
+    await claimPendingEscrowsForUser(fastify.prisma, user.id);
     const token = fastify.jwt.sign({ userId: user.id, email: user.email });
     return { token, user: { id: user.id, name: user.name, email: user.email } };
   });
@@ -117,6 +119,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
     const body = verifyEmailSchema.parse(request.body);
     const user = await confirmEmailVerificationCode(fastify.prisma, body.email, body.code);
+    await claimPendingEscrowsForUser(fastify.prisma, user.id);
     const token = fastify.jwt.sign({ userId: user.id, email: user.email });
     return { token, user: { id: user.id, name: user.name, email: user.email } };
   });

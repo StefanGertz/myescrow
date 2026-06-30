@@ -13,6 +13,8 @@ let createdEscrowReference: string;
 let createdMilestoneId: number;
 let secondMilestoneEscrowReference: string;
 let rejectedMilestoneId: number;
+let invitedSignupEscrowReference: string;
+let invitedCounterpartyToken: string;
 
 beforeAll(async () => {
   schemaName = `vitest_${Date.now()}`;
@@ -136,6 +138,95 @@ describe("MyEscrow API", () => {
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
     createdEscrowReference = body.reference;
+  });
+
+  it("creates an escrow for a counterparty who has not signed up yet", async () => {
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        title: "Invite-first escrow",
+        counterpart: "Jamie Contractor",
+        counterpartyEmail: "jamie.contractor@example.com",
+        creatorRole: "buyer",
+        amount: 750,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.invitationStatus).toBe("signup_required");
+    invitedSignupEscrowReference = body.reference;
+
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const invitedEscrow = escrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === invitedSignupEscrowReference);
+    expect(invitedEscrow.lifecycleStatus).toBe("pending_counterparty_signup");
+    expect(invitedEscrow.stage).toBe("Invitation pending");
+  });
+
+  it("claims the pending escrow after the invited counterparty signs up and verifies", async () => {
+    const signupResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/signup",
+      payload: {
+        name: "Jamie Contractor",
+        email: "jamie.contractor@example.com",
+        password: "InviteFlowPass123!",
+      },
+    });
+    expect(signupResponse.statusCode).toBe(201);
+    const signupBody = signupResponse.json();
+    expect(signupBody.verificationRequired).toBe(true);
+    expect(signupBody.debugCode).toBeDefined();
+
+    const verifyResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/verify-email",
+      payload: {
+        email: "jamie.contractor@example.com",
+        code: signupBody.debugCode,
+      },
+    });
+    expect(verifyResponse.statusCode).toBe(200);
+    invitedCounterpartyToken = verifyResponse.json().token;
+    expect(invitedCounterpartyToken).toBeDefined();
+
+    const ownerEscrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const ownerEscrow = ownerEscrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === invitedSignupEscrowReference);
+    expect(ownerEscrow.lifecycleStatus).toBe("pending_approval");
+
+    const invitedEscrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    const invitedEscrow = invitedEscrowsResponse
+      .json()
+      .escrows.find((escrow: any) => escrow.id === invitedSignupEscrowReference);
+    expect(invitedEscrow).toBeDefined();
+    expect(invitedEscrow.lifecycleStatus).toBe("pending_approval");
+  });
+
+  it("lets the invited counterparty approve after onboarding", async () => {
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${invitedSignupEscrowReference}/approve`,
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().success).toBe(true);
   });
 
   it("approves the escrow as the counterparty", async () => {
