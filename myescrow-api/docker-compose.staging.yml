@@ -32,7 +32,8 @@ services:
       PASSWORD_RESET_CODE_DIGITS: ${PASSWORD_RESET_CODE_DIGITS:-6}
       PASSWORD_RESET_TTL_MINUTES: ${PASSWORD_RESET_TTL_MINUTES:-15}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      EMAIL_FROM: ${EMAIL_FROM:-"MyEscrow <no-reply@myescrowdemo.xyz>"}
+      EMAIL_FROM: ${EMAIL_FROM:-"MyEscrow <hello@myescrowdemo.xyz>"}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/"]

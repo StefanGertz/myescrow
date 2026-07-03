@@ -46,7 +46,8 @@ AUTH_DEBUG_CODES=true
 EMAIL_VERIFICATION_CODE_DIGITS=6
 EMAIL_VERIFICATION_TTL_MINUTES=15
 APP_URL=http://localhost:3000
-EMAIL_FROM="MyEscrow <no-reply@myescrow.test>"
+EMAIL_FROM="MyEscrow <hello@myescrow.test>"
+EMAIL_REPLY_TO=""
 RESEND_API_KEY=
 ```
 
@@ -54,7 +55,7 @@ RESEND_API_KEY=
 - `DATABASE_URL` points Prisma at Postgres. Append `?schema=<yourname>` if you want isolated schemas per developer/test run.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION` toggles the verification workflow (defaults to `true`).
 - `AUTH_DEBUG_CODES` surfaces verification codes in API responses/logs for local development and smoke tests. Left unset, it defaults to `true` whenever `NODE_ENV !== "production"`; set it explicitly to `false` in production environments.
-- `APP_URL`, `EMAIL_FROM`, and `RESEND_API_KEY` configure email delivery. When `RESEND_API_KEY` is omitted, the API logs verification codes instead of sending mail.
+- `APP_URL`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, and `RESEND_API_KEY` configure email delivery. Use a verified sender domain in deployed environments, and set `EMAIL_REPLY_TO` only to a monitored inbox. When `RESEND_API_KEY` is omitted, the API logs verification codes instead of sending mail.
 
 ### Email verification
 

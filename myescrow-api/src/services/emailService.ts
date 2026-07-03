@@ -1,8 +1,59 @@
 import type { FastifyBaseLogger } from "fastify";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM ?? "MyEscrow <no-reply@myescrow.local>";
+const EMAIL_FROM = process.env.EMAIL_FROM ?? "MyEscrow <hello@myescrow.local>";
+const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO;
 const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
+
+type ResendEmailPayload = {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  category: "verification" | "password_reset" | "escrow_invitation";
+  logger: FastifyBaseLogger;
+};
+
+async function sendResendEmail({
+  to,
+  subject,
+  html,
+  text,
+  category,
+  logger,
+}: ResendEmailPayload) {
+  const startedAt = Date.now();
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to,
+      subject,
+      html,
+      text,
+      ...(EMAIL_REPLY_TO ? { reply_to: EMAIL_REPLY_TO } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    logger.error(
+      { to, category, statusCode: response.status, responseText },
+      "Failed to send email via Resend",
+    );
+    throw new Error(`Failed to send ${category.replaceAll("_", " ")} email.`);
+  }
+
+  const result = await response.json().catch(() => null) as { id?: string } | null;
+  logger.info(
+    { to, category, emailId: result?.id, acceptedInMs: Date.now() - startedAt },
+    "Email accepted by Resend",
+  );
+}
 
 type VerificationEmailPayload = {
   to: string;
@@ -70,27 +121,14 @@ export async function sendVerificationEmail({
     return;
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: EMAIL_FROM,
-      to,
-      subject: "Verify your MyEscrow account",
-      html: buildEmailHtml(code, expiresAt),
-      text: buildEmailText(code, expiresAt),
-      reply_to: EMAIL_FROM,
-    }),
+  await sendResendEmail({
+    to,
+    subject: `Your MyEscrow verification code: ${code}`,
+    html: buildEmailHtml(code, expiresAt),
+    text: buildEmailText(code, expiresAt),
+    category: "verification",
+    logger,
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    logger.error({ to, text }, "Failed to send verification email via Resend");
-    throw new Error("Failed to send verification email.");
-  }
 }
 
 const buildResetEmailHtml = (code: string, expiresAt: Date) => {
@@ -137,27 +175,14 @@ export async function sendPasswordResetEmail({
     return;
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: EMAIL_FROM,
-      to,
-      subject: "Reset your MyEscrow password",
-      html: buildResetEmailHtml(code, expiresAt),
-      text: buildResetEmailText(code),
-      reply_to: EMAIL_FROM,
-    }),
+  await sendResendEmail({
+    to,
+    subject: `Your MyEscrow password reset code: ${code}`,
+    html: buildResetEmailHtml(code, expiresAt),
+    text: buildResetEmailText(code),
+    category: "password_reset",
+    logger,
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    logger.error({ to, text }, "Failed to send password reset email via Resend");
-    throw new Error("Failed to send password reset email.");
-  }
 }
 
 const buildEscrowInvitationHtml = ({
@@ -251,39 +276,26 @@ export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPa
     return;
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: EMAIL_FROM,
+  await sendResendEmail({
+    to,
+    subject: `Review escrow ${escrowReference} on MyEscrow`,
+    html: buildEscrowInvitationHtml({
+      creatorName,
+      escrowTitle,
+      escrowReference,
+      creatorRole,
+      invitationStatus,
       to,
-      subject: `Review escrow ${escrowReference} on MyEscrow`,
-      html: buildEscrowInvitationHtml({
-        creatorName,
-        escrowTitle,
-        escrowReference,
-        creatorRole,
-        invitationStatus,
-        to,
-      }),
-      text: buildEscrowInvitationText({
-        creatorName,
-        escrowTitle,
-        escrowReference,
-        creatorRole,
-        invitationStatus,
-        to,
-      }),
-      reply_to: EMAIL_FROM,
     }),
+    text: buildEscrowInvitationText({
+      creatorName,
+      escrowTitle,
+      escrowReference,
+      creatorRole,
+      invitationStatus,
+      to,
+    }),
+    category: "escrow_invitation",
+    logger,
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    logger.error({ to, text, escrowReference }, "Failed to send escrow invitation email via Resend");
-    throw new Error("Failed to send escrow invitation email.");
-  }
 }

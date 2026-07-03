@@ -13,13 +13,10 @@ This workspace contains the MyEscrow project split into:
 As of 2026-07-02:
 
 - Root repo branch: `main`
-- Root repo status: clean except for `myescrow-web` showing as modified because the submodule worktree is dirty
-- `myescrow-api` latest local commit: `dcb4f71` - `Update frontend submodule for production route fixes`
 - `myescrow-web` branch: `master`
-- `myescrow-web` latest local commit: `60091c7` - `Fix production auth suspense and transaction route sync`
-- Uncommitted frontend change: `myescrow-web/src/app/page.tsx`
-
-If moving machines, preserve that uncommitted `myescrow-web/src/app/page.tsx` change by committing it, stashing it, or copying the diff before switching.
+- The root repo records the current frontend submodule commit.
+- Email verification uses Resend with a verified sender domain; deployed environments should set `EMAIL_FROM`, `EMAIL_REPLY_TO`, and `RESEND_API_KEY` explicitly.
+- The signup and verification screens warn users that delivery can take a few minutes and suggest checking spam or junk folders.
 
 ## Repo shape
 
@@ -72,7 +69,8 @@ AUTH_DEBUG_CODES=true
 EMAIL_VERIFICATION_CODE_DIGITS=6
 EMAIL_VERIFICATION_TTL_MINUTES=15
 APP_URL=http://localhost:3000
-EMAIL_FROM="MyEscrow <no-reply@myescrow.test>"
+EMAIL_FROM="MyEscrow <hello@myescrow.test>"
+EMAIL_REPLY_TO=""
 RESEND_API_KEY=
 ```
 
