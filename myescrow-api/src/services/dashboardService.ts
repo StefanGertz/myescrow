@@ -18,6 +18,13 @@ export type EscrowMilestoneResponse = {
   amount: string;
   status: string;
   description?: string;
+  deadline?: string;
+  requestedTitle?: string;
+  requestedDescription?: string;
+  requestedAmount?: string;
+  requestedDeadline?: string;
+  changeRequestNote?: string;
+  changeRequestedAt?: string;
   releasedAt?: string;
   rejectedAt?: string;
 };
@@ -88,7 +95,16 @@ type CreateEscrowInput = {
     title: string;
     amount: number;
     description?: string | undefined;
+    deadline?: string | undefined;
   }>;
+};
+
+type MilestoneChangeRequestInput = {
+  title: string;
+  description?: string | undefined;
+  amount: number;
+  deadline?: string | undefined;
+  note?: string | undefined;
 };
 
 type MilestoneActionResult = {
@@ -146,6 +162,9 @@ function deriveStage(record: EscrowWithRelations) {
   if (record.lifecycleStatus === "pending_approval") {
     return "Approval pending";
   }
+  if (record.lifecycleStatus === "changes_requested") {
+    return "Changes requested";
+  }
   if (record.lifecycleStatus === "rejected") {
     return "Rejected";
   }
@@ -175,6 +194,11 @@ function deriveDueDescription(record: EscrowWithRelations) {
   }
   if (record.lifecycleStatus === "pending_approval") {
     return `Waiting for ${record.counterpart} to approve`;
+  }
+  if (record.lifecycleStatus === "changes_requested") {
+    return record.ownerId === record.buyerId || record.ownerId === record.sellerId
+      ? "Milestone revisions requested"
+      : "Changes requested";
   }
   if (record.lifecycleStatus === "rejected") {
     return `${record.counterpart} rejected the agreement`;
@@ -262,6 +286,17 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
       amount: formatCurrencyFromCents(milestone.amountCents),
       status: milestone.status,
       ...(milestone.description ? { description: milestone.description } : {}),
+      ...(milestone.deadline ? { deadline: milestone.deadline.toISOString() } : {}),
+      ...(milestone.requestedTitle ? { requestedTitle: milestone.requestedTitle } : {}),
+      ...(milestone.requestedDescription !== null
+        ? { requestedDescription: milestone.requestedDescription }
+        : {}),
+      ...(milestone.requestedAmountCents !== null
+        ? { requestedAmount: formatCurrencyFromCents(milestone.requestedAmountCents) }
+        : {}),
+      ...(milestone.requestedDeadline ? { requestedDeadline: milestone.requestedDeadline.toISOString() } : {}),
+      ...(milestone.changeRequestNote ? { changeRequestNote: milestone.changeRequestNote } : {}),
+      ...(milestone.changeRequestedAt ? { changeRequestedAt: milestone.changeRequestedAt.toISOString() } : {}),
       ...(milestone.releasedAt ? { releasedAt: milestone.releasedAt.toISOString() } : {}),
       ...(milestone.rejectedAt ? { rejectedAt: milestone.rejectedAt.toISOString() } : {}),
     })),
@@ -505,6 +540,7 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
             title: milestone.title.trim(),
             description: milestone.description?.trim() || null,
             amountCents: dollarsToCents(milestone.amount),
+            deadline: milestone.deadline ? new Date(milestone.deadline) : null,
             orderIndex: index,
           })),
         },
@@ -721,6 +757,143 @@ export async function rejectEscrow(prisma: PrismaClient, userId: string, referen
       updated.id,
     );
 
+    return updated;
+  });
+}
+
+export async function requestMilestoneChanges(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+  data: MilestoneChangeRequestInput,
+) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.ownerId === userId) {
+    throw new AppError("Only the invited counterparty can request changes.", 403);
+  }
+  if (!["pending_approval", "changes_requested"].includes(escrow.lifecycleStatus)) {
+    throw new AppError("Changes can only be requested before escrow approval.", 400);
+  }
+  const milestone = getMilestoneById(escrow, milestoneId);
+  if (milestone.status !== "pending") {
+    throw new AppError("Only pending milestones can be revised.", 400);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const requestedAt = new Date();
+    await tx.escrowMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        requestedTitle: data.title.trim(),
+        requestedDescription: data.description?.trim() ?? "",
+        requestedAmountCents: dollarsToCents(data.amount),
+        requestedDeadline: data.deadline ? new Date(data.deadline) : null,
+        changeRequestNote: data.note?.trim() || null,
+        changeRequestedAt: requestedAt,
+      },
+    });
+    const updated = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        lifecycleStatus: "changes_requested",
+        stage: "Changes requested",
+        dueDescription: "Milestone revisions requested",
+        counterpartyApproved: false,
+      },
+      include: includeEscrowRelations,
+    });
+    await createTimeline(
+      tx,
+      escrow.ownerId,
+      `Changes requested for ${milestone.title}`,
+      `${updated.counterpart} proposed milestone revisions`,
+      "attention",
+    );
+    await createNotification(
+      tx,
+      escrow.ownerId,
+      "Milestone changes requested",
+      `${updated.counterpart} requested changes to ${milestone.title}.`,
+      "Just now",
+      updated.id,
+    );
+    return updated;
+  });
+}
+
+export async function applyMilestoneChanges(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.ownerId !== userId) {
+    throw new AppError("Only the escrow creator can apply requested changes.", 403);
+  }
+  if (escrow.lifecycleStatus !== "changes_requested") {
+    throw new AppError("This escrow has no requested changes.", 400);
+  }
+  const milestone = getMilestoneById(escrow, milestoneId);
+  if (!milestone.changeRequestedAt || !milestone.requestedTitle || milestone.requestedAmountCents === null) {
+    throw new AppError("This milestone has no requested changes.", 400);
+  }
+  const requestedTitle = milestone.requestedTitle;
+  const requestedAmountCents = milestone.requestedAmountCents;
+
+  return prisma.$transaction(async (tx) => {
+    await tx.escrowMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        title: requestedTitle,
+        description: milestone.requestedDescription?.trim() || null,
+        amountCents: requestedAmountCents,
+        deadline: milestone.requestedDeadline,
+        requestedTitle: null,
+        requestedDescription: null,
+        requestedAmountCents: null,
+        requestedDeadline: null,
+        changeRequestNote: null,
+        changeRequestedAt: null,
+      },
+    });
+    const milestones = await tx.escrowMilestone.findMany({
+      where: { escrowId: escrow.id },
+      orderBy: { orderIndex: "asc" },
+    });
+    const remainingRequests = milestones.filter((item) => item.changeRequestedAt !== null).length;
+    const amountCents = milestones.reduce((total, item) => total + item.amountCents, 0);
+    const updated = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        amountCents,
+        lifecycleStatus: remainingRequests ? "changes_requested" : "pending_approval",
+        stage: remainingRequests ? "Changes requested" : "Approval pending",
+        dueDescription: remainingRequests
+          ? `${remainingRequests} milestone revision(s) pending`
+          : `Waiting for ${escrow.counterpart} to approve`,
+      },
+      include: includeEscrowRelations,
+    });
+    const counterpartyId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
+    if (counterpartyId) {
+      await createTimeline(
+        tx,
+        counterpartyId,
+        `${updated.reference} milestone revised`,
+        `${milestone.title} was updated by the creator`,
+        "attention",
+      );
+      await createNotification(
+        tx,
+        counterpartyId,
+        "Requested milestone updated",
+        `${updated.owner.name} applied your requested changes to ${milestone.title}.`,
+        "Just now",
+        updated.id,
+      );
+    }
     return updated;
   });
 }

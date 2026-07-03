@@ -173,7 +173,7 @@ describe("MyEscrow API", () => {
       category: "Construction",
       signatureDataUrl: creatorSignature,
       milestones: [
-        { title: "Deposit", amount: 500, description: "Kickoff payment" },
+        { title: "Deposit", amount: 500, description: "Kickoff payment", deadline: "2026-08-01T00:00:00.000Z" },
         { title: "Final handoff", amount: 1000, description: "Final delivery" },
       ],
     };
@@ -188,6 +188,63 @@ describe("MyEscrow API", () => {
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
     createdEscrowReference = body.reference;
+  });
+
+  it("supports milestone change requests before escrow approval", async () => {
+    const counterpartyEscrows = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const escrow = counterpartyEscrows.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    const milestoneId = escrow.milestones[0].id;
+    expect(escrow.milestones[0].deadline).toBe("2026-08-01T00:00:00.000Z");
+
+    const requestResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestoneId}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        title: "Revised deposit wording",
+        description: "Updated kickoff scope",
+        amount: 600,
+        deadline: "2026-08-15T00:00:00.000Z",
+        note: "Please allow two more weeks.",
+      },
+    });
+    expect(requestResponse.statusCode).toBe(200);
+
+    const ownerBeforeApply = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const requestedEscrow = ownerBeforeApply.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(requestedEscrow.lifecycleStatus).toBe("changes_requested");
+    expect(requestedEscrow.milestones[0].requestedTitle).toBe("Revised deposit wording");
+
+    const applyResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestoneId}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(applyResponse.statusCode).toBe(200);
+
+    const counterpartyAfterApply = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const revisedEscrow = counterpartyAfterApply.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(revisedEscrow.lifecycleStatus).toBe("pending_approval");
+    expect(revisedEscrow.amount).toBe("$1,600.00");
+    expect(revisedEscrow.milestones[0]).toEqual(
+      expect.objectContaining({
+        title: "Revised deposit wording",
+        amount: "$600.00",
+        deadline: "2026-08-15T00:00:00.000Z",
+      }),
+    );
   });
 
   it("creates an escrow for a counterparty who has not signed up yet", async () => {

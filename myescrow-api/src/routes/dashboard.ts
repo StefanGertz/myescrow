@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   addTimelineEvent,
+  applyMilestoneChanges,
   approveEscrow,
   approveMilestone,
   cancelEscrow,
@@ -16,6 +17,7 @@ import {
   recordWalletTransaction,
   rejectEscrow,
   rejectMilestone,
+  requestMilestoneChanges,
   releaseEscrow,
   resubmitMilestone,
   updateDispute,
@@ -45,6 +47,7 @@ const createEscrowSchema = z.object({
       title: z.string().min(1),
       amount: z.number().positive(),
       description: z.string().optional(),
+      deadline: z.string().datetime().optional(),
     }),
   ).optional(),
 });
@@ -58,6 +61,13 @@ const notificationQuerySchema = z.object({ history: z.coerce.boolean().optional(
 const milestoneParamsSchema = z.object({
   id: z.string().min(1),
   milestoneId: z.coerce.number().int().positive(),
+});
+const milestoneChangeRequestSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  amount: z.number().positive(),
+  deadline: z.string().datetime().optional(),
+  note: z.string().max(1000).optional(),
 });
 
 export async function dashboardRoutes(fastify: FastifyInstance) {
@@ -203,6 +213,21 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         escrowId: result.escrow.reference,
         milestoneId: result.milestone.id,
       };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/request-changes", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const body = milestoneChangeRequestSchema.parse(request.body);
+      const escrow = await requestMilestoneChanges(secured.prisma, user.id, id, milestoneId, body);
+      return { success: true, escrowId: escrow.reference, milestoneId };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/apply-changes", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const escrow = await applyMilestoneChanges(secured.prisma, user.id, id, milestoneId);
+      return { success: true, escrowId: escrow.reference, milestoneId };
     });
 
     secured.get("/api/dashboard/disputes", async (request) => {

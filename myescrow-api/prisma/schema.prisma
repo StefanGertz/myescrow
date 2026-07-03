@@ -69,18 +69,25 @@ model Escrow {
 }
 
 model EscrowMilestone {
-  id          Int       @id @default(autoincrement())
-  escrowId    Int
-  escrow      Escrow    @relation(fields: [escrowId], references: [id], onDelete: Cascade)
-  title       String
-  description String?
-  amountCents Int
-  orderIndex  Int
-  status      String    @default("pending")
-  releasedAt  DateTime?
-  rejectedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                   Int       @id @default(autoincrement())
+  escrowId             Int
+  escrow               Escrow    @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  title                String
+  description          String?
+  amountCents          Int
+  deadline             DateTime?
+  orderIndex           Int
+  status               String    @default("pending")
+  requestedTitle       String?
+  requestedDescription String?
+  requestedAmountCents Int?
+  requestedDeadline    DateTime?
+  changeRequestNote    String?
+  changeRequestedAt    DateTime?
+  releasedAt           DateTime?
+  rejectedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([escrowId, orderIndex])
 }
