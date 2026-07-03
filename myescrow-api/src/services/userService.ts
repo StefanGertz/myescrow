@@ -60,11 +60,19 @@ export async function adjustWalletBalance(prisma: PrismaClient, userId: string, 
   });
 }
 
-export async function verifyPassword(user: User, password: string) {
+export async function verifyPassword(
+  user: User,
+  password: string,
+  errorMessage = "Invalid email or password.",
+) {
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
-    throw new AppError("Invalid email or password.", 401);
+    throw new AppError(errorMessage, 401);
   }
+}
+
+export async function passwordMatches(user: User, password: string) {
+  return bcrypt.compare(password, user.passwordHash);
 }
 
 export async function setUserPassword(

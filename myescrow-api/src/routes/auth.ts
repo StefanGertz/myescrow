@@ -1,7 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppError } from "../utils/errors";
-import { createUser, findUserByEmail, normalizeEmail, verifyPassword } from "../services/userService";
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  normalizeEmail,
+  passwordMatches,
+  setUserPassword,
+  verifyPassword,
+} from "../services/userService";
 import {
   confirmEmailVerificationCode,
   formatVerificationResponse,
@@ -88,6 +96,11 @@ const resetPasswordSchema = z.object({
   password: strongPasswordSchema,
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8),
+  newPassword: strongPasswordSchema,
+});
+
 const requireVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFICATION !== "false";
 
 export async function authRoutes(fastify: FastifyInstance) {
@@ -104,6 +117,28 @@ export async function authRoutes(fastify: FastifyInstance) {
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
     return issueSession(fastify, user);
   });
+
+  fastify.post(
+    "/api/auth/change-password",
+    { preHandler: fastify.authenticate },
+    async (request) => {
+      const userId = request.user?.userId;
+      if (!userId) {
+        throw new AppError("Unauthorized", 401);
+      }
+      const user = await findUserById(fastify.prisma, userId);
+      if (!user) {
+        throw new AppError("Unauthorized", 401);
+      }
+      const body = changePasswordSchema.parse(request.body);
+      await verifyPassword(user, body.currentPassword, "Current password is incorrect.");
+      if (await passwordMatches(user, body.newPassword)) {
+        throw new AppError("New password must be different from your current password.", 400);
+      }
+      await setUserPassword(fastify.prisma, user.id, body.newPassword);
+      return { success: true };
+    },
+  );
 
   fastify.post("/api/auth/signup", async (request, reply) => {
     const body = signupSchema.parse(request.body);

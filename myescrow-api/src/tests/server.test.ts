@@ -110,6 +110,55 @@ describe("MyEscrow API", () => {
     expect(counterpartyToken).toBeDefined();
   });
 
+  it("changes the authenticated user's password", async () => {
+    const unauthorizedResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/change-password",
+      payload: { currentPassword: defaultPassword, newPassword: "StrongerPassword456!" },
+    });
+    expect(unauthorizedResponse.statusCode).toBe(401);
+
+    const incorrectResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/change-password",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { currentPassword: "not-the-password", newPassword: "StrongerPassword456!" },
+    });
+    expect(incorrectResponse.statusCode).toBe(401);
+    expect(incorrectResponse.json().error).toBe("Current password is incorrect.");
+
+    const weakResponse = await server.inject({
+      method: "POST",
+      url: "/api/auth/change-password",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { currentPassword: defaultPassword, newPassword: "too-weak" },
+    });
+    expect(weakResponse.statusCode).toBe(400);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/auth/change-password",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { currentPassword: defaultPassword, newPassword: "StrongerPassword456!" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().success).toBe(true);
+
+    const oldPasswordLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "nora@example.com", password: defaultPassword },
+    });
+    expect(oldPasswordLogin.statusCode).toBe(401);
+
+    const newPasswordLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "nora@example.com", password: "StrongerPassword456!" },
+    });
+    expect(newPasswordLogin.statusCode).toBe(200);
+  });
+
   it("returns dashboard overview", async () => {
     const response = await server.inject({
       method: "GET",

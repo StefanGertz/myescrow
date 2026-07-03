@@ -18,12 +18,6 @@ export async function buildServer() {
   await fastify.register(cors, { origin: true });
   await fastify.register(prismaPlugin);
   await fastify.register(authPlugin);
-  await fastify.register(authRoutes);
-  await fastify.register(dashboardRoutes);
-
-  fastify.get("/", async () => {
-    return { status: "ok" };
-  });
 
   fastify.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {
@@ -39,6 +33,13 @@ export async function buildServer() {
     }
     fastify.log.error(error);
     reply.status(500).send({ error: "Internal server error" });
+  });
+
+  await fastify.register(authRoutes);
+  await fastify.register(dashboardRoutes);
+
+  fastify.get("/", async () => {
+    return { status: "ok" };
   });
 
   return fastify;
