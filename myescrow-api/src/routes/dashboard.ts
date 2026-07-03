@@ -54,6 +54,7 @@ const walletSchema = z.object({
 });
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
+const notificationQuerySchema = z.object({ history: z.coerce.boolean().optional().default(false) });
 const milestoneParamsSchema = z.object({
   id: z.string().min(1),
   milestoneId: z.coerce.number().int().positive(),
@@ -232,7 +233,8 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
 
     secured.get("/api/dashboard/notifications", async (request) => {
       const user = await requireUser(request);
-      const notifications = await listNotifications(secured.prisma, user.id);
+      const { history } = notificationQuerySchema.parse(request.query);
+      const notifications = await listNotifications(secured.prisma, user.id, history);
       return { notifications };
     });
 

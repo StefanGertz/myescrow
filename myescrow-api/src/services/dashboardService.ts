@@ -1143,9 +1143,9 @@ export async function updateDispute(prisma: PrismaClient, userId: string, refere
   });
 }
 
-export async function listNotifications(prisma: PrismaClient, userId: string) {
+export async function listNotifications(prisma: PrismaClient, userId: string, includeDismissed = false) {
   const notifications = await prisma.notification.findMany({
-    where: { userId, dismissedAt: null },
+    where: { userId, ...(includeDismissed ? {} : { dismissedAt: null }) },
     orderBy: { createdAt: "desc" },
   });
   return notifications.map((notification) => ({

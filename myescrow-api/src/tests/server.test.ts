@@ -152,6 +152,15 @@ describe("MyEscrow API", () => {
     expect(afterResponse.json().notifications).not.toContainEqual(
       expect.objectContaining({ id: notificationId }),
     );
+
+    const historyResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications?history=true",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(historyResponse.json().notifications).toContainEqual(
+      expect.objectContaining({ id: notificationId }),
+    );
   });
 
   it("creates a new escrow", async () => {
