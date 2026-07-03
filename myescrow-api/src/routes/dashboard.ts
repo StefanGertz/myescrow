@@ -6,6 +6,7 @@ import {
   approveMilestone,
   cancelEscrow,
   createEscrow,
+  dismissNotification,
   fundEscrow,
   getOverview,
   listDisputes,
@@ -233,6 +234,13 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const notifications = await listNotifications(secured.prisma, user.id);
       return { notifications };
+    });
+
+    secured.post("/api/dashboard/notifications/:id/dismiss", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      await dismissNotification(secured.prisma, user.id, id);
+      return { success: true };
     });
 
     secured.post("/api/dashboard/wallet/topup", async (request) => {

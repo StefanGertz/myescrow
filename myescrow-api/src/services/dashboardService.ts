@@ -1145,7 +1145,7 @@ export async function updateDispute(prisma: PrismaClient, userId: string, refere
 
 export async function listNotifications(prisma: PrismaClient, userId: string) {
   const notifications = await prisma.notification.findMany({
-    where: { userId },
+    where: { userId, dismissedAt: null },
     orderBy: { createdAt: "desc" },
   });
   return notifications.map((notification) => ({
@@ -1156,6 +1156,16 @@ export async function listNotifications(prisma: PrismaClient, userId: string) {
     txId: notification.txId ?? undefined,
     createdAt: notification.createdAt.toISOString(),
   }));
+}
+
+export async function dismissNotification(prisma: PrismaClient, userId: string, notificationId: string) {
+  const result = await prisma.notification.updateMany({
+    where: { id: notificationId, userId, dismissedAt: null },
+    data: { dismissedAt: new Date() },
+  });
+  if (result.count === 0) {
+    throw new AppError("Notification not found.", 404);
+  }
 }
 
 export async function listWalletTransactions(prisma: PrismaClient, userId: string, limit = 10) {

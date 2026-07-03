@@ -102,14 +102,15 @@ model Dispute {
 }
 
 model Notification {
-  id        String   @id
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label     String
-  detail    String
-  meta      String
-  txId      Int?
-  createdAt DateTime @default(now())
+  id          String    @id
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label       String
+  detail      String
+  meta        String
+  txId        Int?
+  createdAt   DateTime  @default(now())
+  dismissedAt DateTime?
 }
 
 model TimelineEvent {

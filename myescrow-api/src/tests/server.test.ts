@@ -128,6 +128,32 @@ describe("MyEscrow API", () => {
     expect(body.notifications[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("persists dismissed notifications for the signed-in user", async () => {
+    const beforeResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const notificationId = beforeResponse.json().notifications[0].id;
+
+    const dismissResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/notifications/${notificationId}/dismiss`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(dismissResponse.statusCode).toBe(200);
+    expect(dismissResponse.json().success).toBe(true);
+
+    const afterResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(afterResponse.json().notifications).not.toContainEqual(
+      expect.objectContaining({ id: notificationId }),
+    );
+  });
+
   it("creates a new escrow", async () => {
     const payload = {
       title: "New project escrow",
