@@ -64,6 +64,13 @@ async function releaseEscrow(token, reference) {
   });
 }
 
+async function escrowAction(token, reference, action) {
+  return request(`/api/dashboard/escrows/${reference}/${action}`, {
+    method: 'POST',
+    headers: authHeaders(token)
+  });
+}
+
 async function walletAction(token, path, amount) {
   return request(`/api/dashboard/wallet/${path}`, {
     method: 'POST',
@@ -91,7 +98,9 @@ function ensure(condition, message) {
 }
 
 (async () => {
-  const email = `smoke+${Date.now()}@example.com`;
+  const runId = Date.now();
+  const email = `smoke+${runId}@example.com`;
+  const counterpartyEmail = `smoke-seller+${runId}@example.com`;
   console.log(`Using API base ${API_BASE}`);
   console.log(`Signing up smoke user ${email}`);
   const signupResult = await signup(email);
@@ -106,6 +115,16 @@ function ensure(condition, message) {
 
   ensure(token, 'Signup flow did not return a session token');
 
+  console.log(`Signing up counterparty ${counterpartyEmail}`);
+  const counterpartySignup = await signup(counterpartyEmail);
+  let counterpartyToken = counterpartySignup.token;
+  if (!counterpartyToken && counterpartySignup.verificationRequired) {
+    ensure(counterpartySignup.debugCode, 'Counterparty verification code missing; set AUTH_DEBUG_CODES=true for smoke tests');
+    const verification = await verifyEmail(counterpartyEmail, counterpartySignup.debugCode);
+    counterpartyToken = verification.token;
+  }
+  ensure(counterpartyToken, 'Counterparty signup flow did not return a session token');
+
   console.log('Fetching overview before creating escrow');
   const before = await overview(token);
   console.log(`Found ${before.activeEscrows?.length ?? 0} active escrows before smoke run`);
@@ -114,6 +133,8 @@ function ensure(condition, message) {
   const escrowPayload = {
     title: 'Smoke Contract',
     counterpart: 'Smoke Corp',
+    counterpartyEmail,
+    creatorRole: 'buyer',
     amount: AMOUNT,
     category: 'Automation',
     description: 'Automated smoke test'
@@ -126,6 +147,16 @@ function ensure(condition, message) {
 
   const match = after.activeEscrows?.find((escrow) => escrow.id === createResult.reference || escrow.reference === createResult.reference);
   ensure(match, 'Created escrow not present in overview response');
+
+  console.log('Approving escrow as invited counterparty');
+  const approvalResult = await escrowAction(counterpartyToken, createResult.reference, 'approve');
+  ensure(approvalResult?.success, 'Approval endpoint did not return success');
+
+  console.log('Funding buyer wallet and escrow');
+  const fundingTopup = await walletAction(token, 'topup', AMOUNT);
+  ensure(fundingTopup?.success, 'Funding wallet topup should succeed');
+  const fundingResult = await escrowAction(token, createResult.reference, 'fund');
+  ensure(fundingResult?.success, 'Fund endpoint did not return success');
 
   console.log('Triggering release on created escrow');
   const releaseResult = await releaseEscrow(token, createResult.reference);
