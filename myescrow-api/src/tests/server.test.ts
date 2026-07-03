@@ -23,6 +23,7 @@ beforeAll(async () => {
   const baseUrl = process.env.DATABASE_URL ?? "postgresql://myescrow:myescrow@localhost:5432/myescrow";
   process.env.DATABASE_URL = `${baseUrl}?schema=${schemaName}`;
   process.env.JWT_SECRET = "test-secret";
+  process.env.AUTH_SESSION_TTL_SECONDS = "28800";
   process.env.PORT = "0";
   process.env.NODE_ENV = "test";
   const projectRoot = path.resolve(__dirname, "../..");
@@ -60,6 +61,11 @@ describe("MyEscrow API", () => {
     expect(body.user.email).toBe("scott@example.com");
     token = body.token;
     expect(token).toBeDefined();
+    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    const payload = server.jwt.decode<{ iat: number; exp: number }>(token);
+    expect(payload).not.toBeNull();
+    if (!payload) throw new Error("Expected a decodable session token");
+    expect(payload.exp - payload.iat).toBe(28_800);
   });
 
   it("issues a password reset code and accepts a new password", async () => {

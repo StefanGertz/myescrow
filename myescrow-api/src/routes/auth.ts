@@ -14,6 +14,27 @@ import {
   formatPasswordResetResponse,
   issuePasswordReset,
 } from "../services/passwordResetService";
+import { env } from "../config/env";
+
+type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+const issueSession = (fastify: FastifyInstance, user: SessionUser) => {
+  const issuedAtSeconds = Math.floor(Date.now() / 1000);
+  const token = fastify.jwt.sign(
+    { userId: user.id, email: user.email },
+    { expiresIn: env.authSessionTtlSeconds },
+  );
+
+  return {
+    token,
+    expiresAt: new Date((issuedAtSeconds + env.authSessionTtlSeconds) * 1000).toISOString(),
+    user: { id: user.id, name: user.name, email: user.email },
+  };
+};
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -81,8 +102,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
     await verifyPassword(user, body.password);
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
-    const token = fastify.jwt.sign({ userId: user.id, email: user.email });
-    return { token, user: { id: user.id, name: user.name, email: user.email } };
+    return issueSession(fastify, user);
   });
 
   fastify.post("/api/auth/signup", async (request, reply) => {
@@ -95,9 +115,8 @@ export async function authRoutes(fastify: FastifyInstance) {
     }, { emailVerified: !requireVerification });
 
     if (!requireVerification) {
-      const token = fastify.jwt.sign({ userId: user.id, email: user.email });
       reply.code(201);
-      return { token, user: { id: user.id, name: user.name, email: user.email } };
+      return issueSession(fastify, user);
     }
 
     const verification = await issueEmailVerification(fastify.prisma, user);
@@ -120,8 +139,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     const body = verifyEmailSchema.parse(request.body);
     const user = await confirmEmailVerificationCode(fastify.prisma, body.email, body.code);
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
-    const token = fastify.jwt.sign({ userId: user.id, email: user.email });
-    return { token, user: { id: user.id, name: user.name, email: user.email } };
+    return issueSession(fastify, user);
   });
 
   fastify.post("/api/auth/resend-verification", async (request) => {
