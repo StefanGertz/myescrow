@@ -35,6 +35,11 @@ export type EscrowResponse = {
   counterpartyApproved: boolean;
   lifecycleStatus: string;
   fundingStatus: string;
+  creatorRole: "buyer" | "seller";
+  createdAt: string;
+  approvedAt?: string;
+  buyerSignatureDataUrl?: string;
+  sellerSignatureDataUrl?: string;
   role: "buyer" | "seller";
   isOwner: boolean;
   buyer: { id: string; name: string; email: string };
@@ -78,6 +83,7 @@ type CreateEscrowInput = {
   creatorRole: "buyer" | "seller";
   category?: string | undefined;
   description?: string | undefined;
+  signatureDataUrl?: string | undefined;
   milestones?: Array<{
     title: string;
     amount: number;
@@ -218,6 +224,26 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     counterpartyApproved: record.counterpartyApproved,
     lifecycleStatus: record.lifecycleStatus,
     fundingStatus: record.fundingStatus,
+    creatorRole: record.creatorRole as "buyer" | "seller",
+    createdAt: record.createdAt.toISOString(),
+    ...(record.approvedAt ? { approvedAt: record.approvedAt.toISOString() } : {}),
+    ...(record.creatorRole === "buyer"
+      ? {
+          ...(record.creatorSignatureDataUrl
+            ? { buyerSignatureDataUrl: record.creatorSignatureDataUrl }
+            : {}),
+          ...(record.counterpartySignatureDataUrl
+            ? { sellerSignatureDataUrl: record.counterpartySignatureDataUrl }
+            : {}),
+        }
+      : {
+          ...(record.counterpartySignatureDataUrl
+            ? { buyerSignatureDataUrl: record.counterpartySignatureDataUrl }
+            : {}),
+          ...(record.creatorSignatureDataUrl
+            ? { sellerSignatureDataUrl: record.creatorSignatureDataUrl }
+            : {}),
+        }),
     role: getEscrowRole(record, userId),
     isOwner: record.ownerId === userId,
     buyer: {
@@ -473,6 +499,7 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
         fundingStatus: "not_funded",
         category: data.category ?? null,
         description: data.description ?? null,
+        creatorSignatureDataUrl: data.signatureDataUrl ?? null,
         milestones: {
           create: milestoneInputs.map((milestone, index) => ({
             title: milestone.title.trim(),
@@ -599,7 +626,12 @@ export async function claimPendingEscrowsForUser(prisma: PrismaClient, userId: s
   return { claimedCount: pendingEscrows.length };
 }
 
-export async function approveEscrow(prisma: PrismaClient, userId: string, reference: string) {
+export async function approveEscrow(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  signatureDataUrl?: string,
+) {
   const escrow = await findEscrowForUser(prisma, userId, reference);
   if (escrow.ownerId === userId) {
     throw new AppError("Only the invited counterparty can approve this escrow.", 403);
@@ -618,6 +650,7 @@ export async function approveEscrow(prisma: PrismaClient, userId: string, refere
         dueDescription: "Buyer funding required",
         status: "warning",
         approvedAt: new Date(),
+        counterpartySignatureDataUrl: signatureDataUrl ?? null,
       },
       include: includeEscrowRelations,
     });

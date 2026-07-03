@@ -9,6 +9,8 @@ let token: string;
 let counterpartyToken: string;
 let schemaName: string;
 const defaultPassword = "password123";
+const creatorSignature = "data:image/png;base64,Y3JlYXRvcg==";
+const counterpartySignature = "data:image/png;base64,Y291bnRlcnBhcnR5";
 let createdEscrowReference: string;
 let createdMilestoneId: number;
 let secondMilestoneEscrowReference: string;
@@ -122,6 +124,7 @@ describe("MyEscrow API", () => {
       creatorRole: "buyer",
       amount: 1500,
       category: "Construction",
+      signatureDataUrl: creatorSignature,
       milestones: [
         { title: "Deposit", amount: 500, description: "Kickoff payment" },
         { title: "Final handoff", amount: 1000, description: "Final delivery" },
@@ -234,6 +237,7 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/approve`,
       headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().success).toBe(true);
@@ -260,6 +264,10 @@ describe("MyEscrow API", () => {
       .json()
       .escrows.find((escrow: any) => escrow.id === createdEscrowReference);
     expect(targetEscrow).toBeDefined();
+    expect(targetEscrow.buyerSignatureDataUrl).toBe(creatorSignature);
+    expect(targetEscrow.sellerSignatureDataUrl).toBe(counterpartySignature);
+    expect(targetEscrow.createdAt).toBeTruthy();
+    expect(targetEscrow.approvedAt).toBeTruthy();
     createdMilestoneId = targetEscrow.milestones[0].id;
 
     const response = await server.inject({

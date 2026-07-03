@@ -25,6 +25,11 @@ import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
 import { nowIso } from "../utils/dates";
 
+const signatureDataUrlSchema = z
+  .string()
+  .max(500_000)
+  .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/, "Signature must be a PNG data URL.");
+
 const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpart: z.string().min(2),
@@ -33,6 +38,7 @@ const createEscrowSchema = z.object({
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
   category: z.string().optional(),
   description: z.string().optional(),
+  signatureDataUrl: signatureDataUrlSchema.optional(),
   milestones: z.array(
     z.object({
       title: z.string().min(1),
@@ -90,6 +96,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         creatorRole: body.creatorRole,
         ...(body.category ? { category: body.category } : {}),
         ...(body.description ? { description: body.description } : {}),
+        ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
         ...(body.milestones ? { milestones: body.milestones } : {}),
       });
       await sendEscrowInvitationEmail({
@@ -131,7 +138,8 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/approve", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const escrow = await approveEscrow(secured.prisma, user.id, id);
+      const body = z.object({ signatureDataUrl: signatureDataUrlSchema.optional() }).parse(request.body ?? {});
+      const escrow = await approveEscrow(secured.prisma, user.id, id, body.signatureDataUrl);
       return { success: true, escrowId: escrow.reference };
     });
 
