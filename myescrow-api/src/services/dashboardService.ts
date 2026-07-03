@@ -1154,6 +1154,7 @@ export async function listNotifications(prisma: PrismaClient, userId: string) {
     detail: notification.detail,
     meta: notification.meta,
     txId: notification.txId ?? undefined,
+    createdAt: notification.createdAt.toISOString(),
   }));
 }
 

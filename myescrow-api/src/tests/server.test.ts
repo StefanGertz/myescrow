@@ -116,6 +116,18 @@ describe("MyEscrow API", () => {
     expect(body.activeEscrows.length).toBeGreaterThan(0);
   });
 
+  it("returns real notification creation timestamps", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.notifications.length).toBeGreaterThan(0);
+    expect(body.notifications[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
   it("creates a new escrow", async () => {
     const payload = {
       title: "New project escrow",
