@@ -84,7 +84,6 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
 
 type CreateEscrowInput = {
   title: string;
-  counterpart: string;
   counterpartyEmail: string;
   amount: number;
   creatorRole: "buyer" | "seller";
@@ -105,6 +104,14 @@ type MilestoneChangeRequestInput = {
   amount: number;
   deadline?: string | undefined;
   note?: string | undefined;
+};
+
+type MilestoneChangeReviewInput = {
+  decision: "accept" | "reject";
+  title?: string | undefined;
+  description?: string | undefined;
+  amount?: number | undefined;
+  deadline?: string | null | undefined;
 };
 
 type MilestoneActionResult = {
@@ -509,7 +516,7 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
   const counterpartyReady = invitationStatus === "existing_user";
   const buyerId = data.creatorRole === "buyer" ? userId : counterpartyReady ? counterpartyUser!.id : null;
   const sellerId = data.creatorRole === "seller" ? userId : counterpartyReady ? counterpartyUser!.id : null;
-  const counterpartName = data.counterpart.trim() || counterpartyUser?.name || normalizedCounterpartyEmail;
+  const counterpartName = counterpartyUser?.name ?? normalizedCounterpartyEmail;
 
   const result = await prisma.$transaction(async (tx) => {
     const sequence = await getNextSequenceValue(tx, "escrow", 650);
@@ -618,9 +625,10 @@ export async function claimPendingEscrowsForUser(prisma: PrismaClient, userId: s
         data: {
           buyerId: isSellerInvite ? escrow.buyerId : user.id,
           sellerId: isSellerInvite ? user.id : escrow.sellerId,
+          counterpart: user.name,
           lifecycleStatus: "pending_approval",
           stage: "Approval pending",
-          dueDescription: `Waiting for ${escrow.counterpart} to approve`,
+          dueDescription: `Waiting for ${user.name} to approve`,
           status: "warning",
         },
         include: includeEscrowRelations,
@@ -827,6 +835,7 @@ export async function applyMilestoneChanges(
   userId: string,
   reference: string,
   milestoneId: number,
+  data: MilestoneChangeReviewInput = { decision: "accept" },
 ) {
   const escrow = await findEscrowForUser(prisma, userId, reference);
   if (escrow.ownerId !== userId) {
@@ -839,17 +848,30 @@ export async function applyMilestoneChanges(
   if (!milestone.changeRequestedAt || !milestone.requestedTitle || milestone.requestedAmountCents === null) {
     throw new AppError("This milestone has no requested changes.", 400);
   }
-  const requestedTitle = milestone.requestedTitle;
-  const requestedAmountCents = milestone.requestedAmountCents;
+  const acceptsChanges = data.decision === "accept";
+  const acceptedTitle = data.title?.trim() || milestone.requestedTitle;
+  const acceptedDescription =
+    data.description === undefined ? milestone.requestedDescription?.trim() || null : data.description.trim() || null;
+  const acceptedAmountCents = data.amount === undefined ? milestone.requestedAmountCents : dollarsToCents(data.amount);
+  const acceptedDeadline =
+    data.deadline === undefined
+      ? milestone.requestedDeadline
+      : data.deadline === null
+        ? null
+        : new Date(data.deadline);
 
   return prisma.$transaction(async (tx) => {
     await tx.escrowMilestone.update({
       where: { id: milestoneId },
       data: {
-        title: requestedTitle,
-        description: milestone.requestedDescription?.trim() || null,
-        amountCents: requestedAmountCents,
-        deadline: milestone.requestedDeadline,
+        ...(acceptsChanges
+          ? {
+              title: acceptedTitle,
+              description: acceptedDescription,
+              amountCents: acceptedAmountCents,
+              deadline: acceptedDeadline,
+            }
+          : {}),
         requestedTitle: null,
         requestedDescription: null,
         requestedAmountCents: null,
@@ -881,15 +903,19 @@ export async function applyMilestoneChanges(
       await createTimeline(
         tx,
         counterpartyId,
-        `${updated.reference} milestone revised`,
-        `${milestone.title} was updated by the creator`,
+        `${updated.reference} milestone review completed`,
+        acceptsChanges
+          ? `${milestone.title} was updated by the creator`
+          : `${updated.owner.name} kept the original ${milestone.title} terms`,
         "attention",
       );
       await createNotification(
         tx,
         counterpartyId,
-        "Requested milestone updated",
-        `${updated.owner.name} applied your requested changes to ${milestone.title}.`,
+        acceptsChanges ? "Requested milestone updated" : "Original milestone retained",
+        acceptsChanges
+          ? `${updated.owner.name} accepted your requested changes to ${milestone.title}.`
+          : `${updated.owner.name} kept the original terms for ${milestone.title}.`,
         "Just now",
         updated.id,
       );

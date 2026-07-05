@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
@@ -17,6 +17,7 @@ let secondMilestoneEscrowReference: string;
 let rejectedMilestoneId: number;
 let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
+const sentEmails: Array<{ from?: string; to?: string; subject?: string; html?: string; text?: string }> = [];
 
 beforeAll(async () => {
   schemaName = `vitest_${Date.now()}`;
@@ -26,6 +27,14 @@ beforeAll(async () => {
   process.env.AUTH_SESSION_TTL_SECONDS = "28800";
   process.env.PORT = "0";
   process.env.NODE_ENV = "test";
+  process.env.RESEND_API_KEY = "test-resend-key";
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+    sentEmails.push(JSON.parse(String(init?.body ?? "{}")));
+    return new Response(JSON.stringify({ id: `email-${sentEmails.length}` }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }));
   const projectRoot = path.resolve(__dirname, "../..");
   execSync("npx prisma migrate deploy", { cwd: projectRoot, stdio: "inherit" });
   execSync("npx prisma db seed", { cwd: projectRoot, stdio: "inherit" });
@@ -47,6 +56,8 @@ afterAll(async () => {
       console.warn("Failed to drop test schema", error);
     }
   }
+  vi.unstubAllGlobals();
+  delete process.env.RESEND_API_KEY;
 });
 
 describe("MyEscrow API", () => {
@@ -221,7 +232,6 @@ describe("MyEscrow API", () => {
   it("creates a new escrow", async () => {
     const payload = {
       title: "New project escrow",
-      counterpart: "Nora Studio",
       counterpartyEmail: "nora@example.com",
       creatorRole: "buyer",
       amount: 1500,
@@ -239,6 +249,7 @@ describe("MyEscrow API", () => {
       payload,
     });
     expect(response.statusCode).toBe(201);
+    expect(response.json().counterpart).toBe("Nora Studio");
     const body = response.json();
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
@@ -255,6 +266,7 @@ describe("MyEscrow API", () => {
     const milestoneId = escrow.milestones[0].id;
     expect(escrow.milestones[0].deadline).toBe("2026-08-01T00:00:00.000Z");
 
+    sentEmails.length = 0;
     const requestResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestoneId}/request-changes`,
@@ -268,6 +280,15 @@ describe("MyEscrow API", () => {
       },
     });
     expect(requestResponse.statusCode).toBe(200);
+    expect(requestResponse.json().emailNotification).toBe("sent");
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]).toEqual(
+      expect.objectContaining({
+        to: "scott@example.com",
+        subject: expect.stringContaining(`requested changes to ${createdEscrowReference}`),
+        text: expect.stringContaining("Please allow two more weeks."),
+      }),
+    );
 
     const ownerBeforeApply = await server.inject({
       method: "GET",
@@ -282,6 +303,13 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestoneId}/apply-changes`,
       headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "accept",
+        title: "Creator-reviewed deposit wording",
+        description: "Creator-adjusted kickoff scope",
+        amount: 625,
+        deadline: "2026-08-20T00:00:00.000Z",
+      },
     });
     expect(applyResponse.statusCode).toBe(200);
 
@@ -292,14 +320,44 @@ describe("MyEscrow API", () => {
     });
     const revisedEscrow = counterpartyAfterApply.json().escrows.find((item: any) => item.id === createdEscrowReference);
     expect(revisedEscrow.lifecycleStatus).toBe("pending_approval");
-    expect(revisedEscrow.amount).toBe("$1,600.00");
+    expect(revisedEscrow.amount).toBe("$1,625.00");
     expect(revisedEscrow.milestones[0]).toEqual(
       expect.objectContaining({
-        title: "Revised deposit wording",
-        amount: "$600.00",
-        deadline: "2026-08-15T00:00:00.000Z",
+        title: "Creator-reviewed deposit wording",
+        amount: "$625.00",
+        deadline: "2026-08-20T00:00:00.000Z",
       }),
     );
+
+    const retainedMilestone = revisedEscrow.milestones[1];
+    const secondRequestResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${retainedMilestone.id}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { title: "Changed handoff", amount: 900, note: "Reduce this payment." },
+    });
+    expect(secondRequestResponse.statusCode).toBe(200);
+
+    const rejectResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${retainedMilestone.id}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { decision: "reject" },
+    });
+    expect(rejectResponse.statusCode).toBe(200);
+
+    const afterRejectResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const afterReject = afterRejectResponse.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(afterReject.lifecycleStatus).toBe("pending_approval");
+    expect(afterReject.amount).toBe("$1,625.00");
+    expect(afterReject.milestones[1]).toEqual(
+      expect.objectContaining({ title: "Final handoff", amount: "$1,000.00" }),
+    );
+    expect(afterReject.milestones[1].requestedTitle).toBeUndefined();
   });
 
   it("creates an escrow for a counterparty who has not signed up yet", async () => {
@@ -309,7 +367,6 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
       payload: {
         title: "Invite-first escrow",
-        counterpart: "Jamie Contractor",
         counterpartyEmail: "jamie.contractor@example.com",
         creatorRole: "buyer",
         amount: 750,
@@ -330,6 +387,7 @@ describe("MyEscrow API", () => {
       .escrows.find((escrow: any) => escrow.id === invitedSignupEscrowReference);
     expect(invitedEscrow.lifecycleStatus).toBe("pending_counterparty_signup");
     expect(invitedEscrow.stage).toBe("Invitation pending");
+    expect(invitedEscrow.counterpart).toBe("jamie.contractor@example.com");
   });
 
   it("claims the pending escrow after the invited counterparty signs up and verifies", async () => {
@@ -359,6 +417,22 @@ describe("MyEscrow API", () => {
     invitedCounterpartyToken = verifyResponse.json().token;
     expect(invitedCounterpartyToken).toBeDefined();
 
+    const walletResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/wallet/transactions",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(walletResponse.statusCode).toBe(200);
+    expect(walletResponse.json().transactions).toEqual([]);
+
+    const overviewResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/overview",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(overviewResponse.statusCode).toBe(200);
+    expect(overviewResponse.json().walletBalance).toBe("$0.00");
+
     const ownerEscrowsResponse = await server.inject({
       method: "GET",
       url: "/api/dashboard/escrows",
@@ -368,6 +442,7 @@ describe("MyEscrow API", () => {
       .json()
       .escrows.find((escrow: any) => escrow.id === invitedSignupEscrowReference);
     expect(ownerEscrow.lifecycleStatus).toBe("pending_approval");
+    expect(ownerEscrow.counterpart).toBe("Jamie Contractor");
 
     const invitedEscrowsResponse = await server.inject({
       method: "GET",
@@ -461,7 +536,6 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
       payload: {
         title: "Revision workflow escrow",
-        counterpart: "Nora Studio",
         counterpartyEmail: "nora@example.com",
         creatorRole: "buyer",
         amount: 900,
@@ -537,6 +611,26 @@ describe("MyEscrow API", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().balance).toBeGreaterThan(0);
+  });
+
+  it("records wallet withdrawals as debits", async () => {
+    const withdrawResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/wallet/withdraw",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { amount: 100 },
+    });
+    expect(withdrawResponse.statusCode).toBe(200);
+
+    const transactionsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/wallet/transactions",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(transactionsResponse.statusCode).toBe(200);
+    expect(transactionsResponse.json().transactions[0]).toEqual(
+      expect.objectContaining({ type: "WITHDRAW", direction: "debit" }),
+    );
   });
 
   it("lists wallet transactions", async () => {

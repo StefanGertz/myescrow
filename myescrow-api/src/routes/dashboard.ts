@@ -22,7 +22,7 @@ import {
   resubmitMilestone,
   updateDispute,
 } from "../services/dashboardService";
-import { sendEscrowInvitationEmail } from "../services/emailService";
+import { sendEscrowInvitationEmail, sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { adjustWalletBalance, findUserById } from "../services/userService";
 import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
@@ -35,7 +35,6 @@ const signatureDataUrlSchema = z
 
 const createEscrowSchema = z.object({
   title: z.string().min(2),
-  counterpart: z.string().min(2),
   counterpartyEmail: z.string().email(),
   amount: z.number().positive(),
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
@@ -70,6 +69,14 @@ const milestoneChangeRequestSchema = z.object({
   note: z.string().max(1000).optional(),
 });
 
+const milestoneChangeReviewSchema = z.object({
+  decision: z.enum(["accept", "reject"]).default("accept"),
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  amount: z.number().positive().optional(),
+  deadline: z.string().datetime().nullable().optional(),
+});
+
 export async function dashboardRoutes(fastify: FastifyInstance) {
   fastify.register(async (secured) => {
     secured.addHook("preHandler", secured.authenticate);
@@ -102,7 +109,6 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const body = createEscrowSchema.parse(request.body);
       const result = await createEscrow(secured.prisma, user.id, {
         title: body.title,
-        counterpart: body.counterpart,
         counterpartyEmail: body.counterpartyEmail,
         amount: body.amount,
         creatorRole: body.creatorRole,
@@ -113,7 +119,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       });
       await sendEscrowInvitationEmail({
         to: result.invitedEmail,
-        recipientName: result.counterpartyUser?.name ?? body.counterpart,
+        recipientName: result.counterpartyUser?.name ?? result.invitedEmail,
         creatorName: result.owner.name,
         escrowTitle: result.escrow.title,
         escrowReference: result.escrow.reference,
@@ -126,6 +132,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         success: true,
         escrowId: result.escrow.id,
         reference: result.escrow.reference,
+        counterpart: result.escrow.counterpart,
         invitationStatus: result.invitationStatus,
         createdAt: result.escrow.createdAt,
       };
@@ -220,13 +227,33 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
       const body = milestoneChangeRequestSchema.parse(request.body);
       const escrow = await requestMilestoneChanges(secured.prisma, user.id, id, milestoneId, body);
-      return { success: true, escrowId: escrow.reference, milestoneId };
+      const milestone = escrow.milestones.find((item) => item.id === milestoneId);
+      let emailNotification: "sent" | "skipped" | "failed" = "failed";
+      try {
+        emailNotification = await sendMilestoneChangeRequestEmail({
+          to: escrow.owner.email,
+          recipientName: escrow.owner.name,
+          requesterName: user.name,
+          escrowTitle: escrow.title,
+          escrowReference: escrow.reference,
+          milestoneTitle: milestone?.title ?? body.title,
+          ...(body.note ? { note: body.note } : {}),
+          logger: request.log,
+        });
+      } catch (error) {
+        request.log.error(
+          { error, to: escrow.owner.email, escrowReference: escrow.reference, milestoneId },
+          "Milestone change request was saved, but its email notification failed",
+        );
+      }
+      return { success: true, escrowId: escrow.reference, milestoneId, emailNotification };
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/apply-changes", async (request) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
-      const escrow = await applyMilestoneChanges(secured.prisma, user.id, id, milestoneId);
+      const body = milestoneChangeReviewSchema.parse(request.body ?? {});
+      const escrow = await applyMilestoneChanges(secured.prisma, user.id, id, milestoneId, body);
       return { success: true, escrowId: escrow.reference, milestoneId };
     });
 
@@ -288,7 +315,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const { amount } = walletSchema.parse(request.body);
       const cents = dollarsToCents(amount);
       const updatedUser = await adjustWalletBalance(secured.prisma, user.id, -cents);
-      await recordWalletTransaction(secured.prisma, user.id, cents, "WITHDRAW");
+      await recordWalletTransaction(secured.prisma, user.id, -cents, "WITHDRAW");
       return {
         success: true,
         amount,

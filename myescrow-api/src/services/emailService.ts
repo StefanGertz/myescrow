@@ -10,7 +10,7 @@ type ResendEmailPayload = {
   subject: string;
   html: string;
   text: string;
-  category: "verification" | "password_reset" | "escrow_invitation";
+  category: "verification" | "password_reset" | "escrow_invitation" | "milestone_change_request";
   logger: FastifyBaseLogger;
 };
 
@@ -74,6 +74,25 @@ type EscrowInvitationEmailPayload = {
   invitationStatus: "existing_user" | "signup_required" | "verification_required";
   logger: FastifyBaseLogger;
 };
+
+type MilestoneChangeRequestEmailPayload = {
+  to: string;
+  recipientName: string;
+  requesterName: string;
+  escrowTitle: string;
+  escrowReference: string;
+  milestoneTitle: string;
+  note?: string | undefined;
+  logger: FastifyBaseLogger;
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 
 const buildEmailHtml = (code: string, expiresAt: Date) => {
   const formattedExpiry = expiresAt.toLocaleString("en-US", {
@@ -298,4 +317,56 @@ export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPa
     category: "escrow_invitation",
     logger,
   });
+}
+
+export async function sendMilestoneChangeRequestEmail({
+  to,
+  recipientName,
+  requesterName,
+  escrowTitle,
+  escrowReference,
+  milestoneTitle,
+  note,
+  logger,
+}: MilestoneChangeRequestEmailPayload): Promise<"sent" | "skipped"> {
+  logger.info({ to, escrowReference, milestoneTitle }, "Milestone change request email issued");
+
+  if (!RESEND_API_KEY) {
+    logger.warn(
+      { to, escrowReference, milestoneTitle },
+      "RESEND_API_KEY not set; milestone change request email not sent externally.",
+    );
+    return "skipped";
+  }
+
+  const transactionLink = `${APP_URL.replace(/\/$/, "")}/?screen=transaction&tx=${encodeURIComponent(escrowReference)}`;
+  const safeRecipientName = escapeHtml(recipientName);
+  const safeRequesterName = escapeHtml(requesterName);
+  const safeEscrowTitle = escapeHtml(escrowTitle);
+  const safeEscrowReference = escapeHtml(escrowReference);
+  const safeMilestoneTitle = escapeHtml(milestoneTitle);
+  const safeNote = note ? escapeHtml(note) : null;
+
+  await sendResendEmail({
+    to,
+    subject: `${requesterName} requested changes to ${escrowReference}`,
+    html: `
+      <p>Hi ${safeRecipientName},</p>
+      <p><strong>${safeRequesterName}</strong> requested changes to the milestone <strong>${safeMilestoneTitle}</strong> in <strong>${safeEscrowTitle}</strong> (${safeEscrowReference}).</p>
+      ${safeNote ? `<p><strong>Note:</strong> ${safeNote}</p>` : ""}
+      <p>Review the original and proposed terms, edit them if needed, then accept the changes or keep the original milestone.</p>
+      <p><a href="${transactionLink}">Review requested changes</a></p>
+    `,
+    text: [
+      `Hi ${recipientName},`,
+      `${requesterName} requested changes to the milestone "${milestoneTitle}" in "${escrowTitle}" (${escrowReference}).`,
+      ...(note ? [`Note: ${note}`] : []),
+      "Review the original and proposed terms, edit them if needed, then accept the changes or keep the original milestone.",
+      `Review requested changes: ${transactionLink}`,
+    ].join("\n\n"),
+    category: "milestone_change_request",
+    logger,
+  });
+
+  return "sent";
 }
