@@ -49,9 +49,45 @@ export type EscrowResponse = {
   sellerSignatureDataUrl?: string;
   role: "buyer" | "seller";
   isOwner: boolean;
-  buyer: { id: string; name: string; email: string };
-  seller: { id: string; name: string; email: string };
+  buyer: PartyResponse;
+  seller: PartyResponse;
   milestones: EscrowMilestoneResponse[];
+};
+
+type PartyIdentityInput =
+  | { type: "individual" }
+  | {
+      type: "business";
+      business: {
+        legalName: string;
+        registrationCountry: string;
+        registrationNumber: string;
+        registeredAddress: string;
+        representativeTitle: string;
+      };
+    };
+
+type PartySnapshot = {
+  type: "individual" | "business";
+  legalName: string;
+  email: string;
+  representativeName?: string;
+  representativeTitle?: string;
+  registrationCountry?: string;
+  registrationNumber?: string;
+  registeredAddress?: string;
+};
+
+type PartyResponse = {
+  id: string;
+  name: string;
+  email: string;
+  partyType: "individual" | "business";
+  representativeName?: string;
+  representativeTitle?: string;
+  registrationCountry?: string;
+  registrationNumber?: string;
+  registeredAddress?: string;
 };
 
 type EscrowInvitationStatus = "existing_user" | "signup_required" | "verification_required";
@@ -87,6 +123,7 @@ type CreateEscrowInput = {
   counterpartyEmail: string;
   amount: number;
   creatorRole: "buyer" | "seller";
+  creatorParty: PartyIdentityInput;
   category?: string | undefined;
   description?: string | undefined;
   signatureDataUrl?: string | undefined;
@@ -96,6 +133,11 @@ type CreateEscrowInput = {
     description?: string | undefined;
     deadline?: string | undefined;
   }>;
+};
+
+type ApproveEscrowInput = {
+  signatureDataUrl?: string | undefined;
+  counterpartyParty: PartyIdentityInput;
 };
 
 type MilestoneChangeRequestInput = {
@@ -146,6 +188,61 @@ function getCounterpartName(record: EscrowWithRelations, userId: string) {
     return record.buyer?.name ?? record.counterpart;
   }
   return record.counterpart;
+}
+
+function buildPartySnapshot(
+  user: Pick<EscrowWithRelations["owner"], "name" | "email">,
+  party: PartyIdentityInput,
+): PartySnapshot {
+  if (party.type === "individual") {
+    return { type: "individual", legalName: user.name, email: user.email };
+  }
+  return {
+    type: "business",
+    legalName: party.business.legalName.trim(),
+    email: user.email,
+    representativeName: user.name,
+    representativeTitle: party.business.representativeTitle.trim(),
+    registrationCountry: party.business.registrationCountry.trim(),
+    registrationNumber: party.business.registrationNumber.trim(),
+    registeredAddress: party.business.registeredAddress.trim(),
+  };
+}
+
+function readPartySnapshot(value: Prisma.JsonValue | null, fallback: PartySnapshot): PartySnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+  const candidate = value as Record<string, unknown>;
+  if ((candidate.type !== "individual" && candidate.type !== "business") || typeof candidate.legalName !== "string") {
+    return fallback;
+  }
+  return candidate as PartySnapshot;
+}
+
+function partyResponse(id: string, snapshot: PartySnapshot): PartyResponse {
+  return {
+    id,
+    name: snapshot.legalName,
+    email: snapshot.email,
+    partyType: snapshot.type,
+    ...(snapshot.representativeName ? { representativeName: snapshot.representativeName } : {}),
+    ...(snapshot.representativeTitle ? { representativeTitle: snapshot.representativeTitle } : {}),
+    ...(snapshot.registrationCountry ? { registrationCountry: snapshot.registrationCountry } : {}),
+    ...(snapshot.registrationNumber ? { registrationNumber: snapshot.registrationNumber } : {}),
+    ...(snapshot.registeredAddress ? { registeredAddress: snapshot.registeredAddress } : {}),
+  };
+}
+
+async function saveBusinessProfile(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  party: PartyIdentityInput,
+) {
+  if (party.type !== "business") return;
+  await tx.businessProfile.upsert({
+    where: { userId },
+    create: { userId, ...party.business },
+    update: party.business,
+  });
 }
 
 function requireBuyerId(record: Pick<EscrowWithRelations, "buyerId">) {
@@ -241,13 +338,28 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     name: record.creatorRole === "buyer" ? record.counterpart : "Seller pending signup",
     email: record.creatorRole === "buyer" ? record.counterpartyEmail : "pending@myescrow.local",
   };
+  const creatorSnapshot = readPartySnapshot(record.creatorPartySnapshot, {
+    type: "individual",
+    legalName: record.owner.name,
+    email: record.owner.email,
+  });
+  const pendingCounterparty = record.creatorRole === "buyer" ? seller : buyer;
+  const counterpartySnapshot = readPartySnapshot(record.counterpartyPartySnapshot, {
+    type: "individual",
+    legalName: pendingCounterparty.name,
+    email: pendingCounterparty.email,
+  });
+  const buyerParty = record.creatorRole === "buyer" ? creatorSnapshot : counterpartySnapshot;
+  const sellerParty = record.creatorRole === "seller" ? creatorSnapshot : counterpartySnapshot;
+  const buyerResponse = partyResponse(buyer.id, buyerParty);
+  const sellerResponse = partyResponse(seller.id, sellerParty);
 
   return {
     escrowId: record.id,
     id: record.reference,
     title: record.title,
     ...(record.description ? { description: record.description } : {}),
-    counterpart: getCounterpartName(record, userId),
+    counterpart: getEscrowRole(record, userId) === "buyer" ? sellerResponse.name : buyerResponse.name,
     amount: formatCurrencyFromCents(record.amountCents),
     stage: deriveStage(record),
     due: deriveDueDescription(record),
@@ -277,16 +389,8 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
         }),
     role: getEscrowRole(record, userId),
     isOwner: record.ownerId === userId,
-    buyer: {
-      id: buyer.id,
-      name: buyer.name,
-      email: buyer.email,
-    },
-    seller: {
-      id: seller.id,
-      name: seller.name,
-      email: seller.email,
-    },
+    buyer: buyerResponse,
+    seller: sellerResponse,
     milestones: record.milestones.map((milestone) => ({
       id: milestone.id,
       title: milestone.title,
@@ -517,8 +621,10 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
   const buyerId = data.creatorRole === "buyer" ? userId : counterpartyReady ? counterpartyUser!.id : null;
   const sellerId = data.creatorRole === "seller" ? userId : counterpartyReady ? counterpartyUser!.id : null;
   const counterpartName = counterpartyUser?.name ?? normalizedCounterpartyEmail;
+  const creatorPartySnapshot = buildPartySnapshot(owner, data.creatorParty);
 
   const result = await prisma.$transaction(async (tx) => {
+    await saveBusinessProfile(tx, userId, data.creatorParty);
     const sequence = await getNextSequenceValue(tx, "escrow", 650);
     const reference = buildEscrowReference(sequence);
     const escrowData: Prisma.EscrowUncheckedCreateInput = {
@@ -542,6 +648,7 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
         category: data.category ?? null,
         description: data.description ?? null,
         creatorSignatureDataUrl: data.signatureDataUrl ?? null,
+        creatorPartySnapshot: creatorPartySnapshot as Prisma.InputJsonObject,
         milestones: {
           create: milestoneInputs.map((milestone, index) => ({
             title: milestone.title.trim(),
@@ -674,7 +781,7 @@ export async function approveEscrow(
   prisma: PrismaClient,
   userId: string,
   reference: string,
-  signatureDataUrl?: string,
+  data: ApproveEscrowInput,
 ) {
   const escrow = await findEscrowForUser(prisma, userId, reference);
   if (escrow.ownerId === userId) {
@@ -683,8 +790,14 @@ export async function approveEscrow(
   if (escrow.lifecycleStatus !== "pending_approval") {
     throw new AppError("This escrow is not awaiting approval.", 400);
   }
+  const user = escrow.buyerId === userId ? escrow.buyer : escrow.seller;
+  if (!user) {
+    throw new AppError("Counterparty account is not attached to this escrow.", 400);
+  }
+  const counterpartyPartySnapshot = buildPartySnapshot(user, data.counterpartyParty);
 
   return prisma.$transaction(async (tx) => {
+    await saveBusinessProfile(tx, userId, data.counterpartyParty);
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
@@ -694,7 +807,8 @@ export async function approveEscrow(
         dueDescription: "Buyer funding required",
         status: "warning",
         approvedAt: new Date(),
-        counterpartySignatureDataUrl: signatureDataUrl ?? null,
+        counterpartySignatureDataUrl: data.signatureDataUrl ?? null,
+        counterpartyPartySnapshot: counterpartyPartySnapshot as Prisma.InputJsonObject,
       },
       include: includeEscrowRelations,
     });

@@ -27,6 +27,20 @@ model User {
   walletTransactions  WalletTransaction[]
   verificationTokens  EmailVerificationToken[]
   passwordResetTokens PasswordResetToken[]
+  businessProfile     BusinessProfile?
+}
+
+model BusinessProfile {
+  id                    Int      @id @default(autoincrement())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName             String
+  registrationCountry   String
+  registrationNumber    String
+  registeredAddress     String
+  representativeTitle   String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model Escrow {
@@ -54,6 +68,8 @@ model Escrow {
   approvedAt                   DateTime?
   creatorSignatureDataUrl      String?           @db.Text
   counterpartySignatureDataUrl String?           @db.Text
+  creatorPartySnapshot         Json              @default("{}")
+  counterpartyPartySnapshot    Json?
   fundedAt                     DateTime?
   rejectedAt                   DateTime?
   cancelledAt                  DateTime?

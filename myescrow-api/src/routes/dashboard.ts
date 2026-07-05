@@ -33,11 +33,26 @@ const signatureDataUrlSchema = z
   .max(500_000)
   .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/, "Signature must be a PNG data URL.");
 
+const partyIdentitySchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("individual") }),
+  z.object({
+    type: z.literal("business"),
+    business: z.object({
+      legalName: z.string().trim().min(2),
+      registrationCountry: z.string().trim().min(2),
+      registrationNumber: z.string().trim().min(2),
+      registeredAddress: z.string().trim().min(5),
+      representativeTitle: z.string().trim().min(2),
+    }),
+  }),
+]);
+
 const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpartyEmail: z.string().email(),
   amount: z.number().positive(),
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
+  creatorParty: partyIdentitySchema.default({ type: "individual" }),
   category: z.string().optional(),
   description: z.string().optional(),
   signatureDataUrl: signatureDataUrlSchema.optional(),
@@ -104,6 +119,22 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       return { escrows };
     });
 
+    secured.get("/api/dashboard/business-profile", async (request) => {
+      const user = await requireUser(request);
+      const businessProfile = await secured.prisma.businessProfile.findUnique({ where: { userId: user.id } });
+      return {
+        businessProfile: businessProfile
+          ? {
+              legalName: businessProfile.legalName,
+              registrationCountry: businessProfile.registrationCountry,
+              registrationNumber: businessProfile.registrationNumber,
+              registeredAddress: businessProfile.registeredAddress,
+              representativeTitle: businessProfile.representativeTitle,
+            }
+          : null,
+      };
+    });
+
     secured.post("/api/dashboard/escrows/create", async (request, reply) => {
       const user = await requireUser(request);
       const body = createEscrowSchema.parse(request.body);
@@ -112,6 +143,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         counterpartyEmail: body.counterpartyEmail,
         amount: body.amount,
         creatorRole: body.creatorRole,
+        creatorParty: body.creatorParty,
         ...(body.category ? { category: body.category } : {}),
         ...(body.description ? { description: body.description } : {}),
         ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
@@ -157,8 +189,14 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/approve", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const body = z.object({ signatureDataUrl: signatureDataUrlSchema.optional() }).parse(request.body ?? {});
-      const escrow = await approveEscrow(secured.prisma, user.id, id, body.signatureDataUrl);
+      const body = z.object({
+        signatureDataUrl: signatureDataUrlSchema.optional(),
+        counterpartyParty: partyIdentitySchema.default({ type: "individual" }),
+      }).parse(request.body ?? {});
+      const escrow = await approveEscrow(secured.prisma, user.id, id, {
+        ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
+        counterpartyParty: body.counterpartyParty,
+      });
       return { success: true, escrowId: escrow.reference };
     });
 

@@ -234,6 +234,16 @@ describe("MyEscrow API", () => {
       title: "New project escrow",
       counterpartyEmail: "nora@example.com",
       creatorRole: "buyer",
+      creatorParty: {
+        type: "business",
+        business: {
+          legalName: "Scott Holdings Inc.",
+          registrationCountry: "Canada",
+          registrationNumber: "CA-12345",
+          registeredAddress: "100 King Street, Toronto, ON",
+          representativeTitle: "Director",
+        },
+      },
       amount: 1500,
       category: "Construction",
       signatureDataUrl: creatorSignature,
@@ -254,6 +264,30 @@ describe("MyEscrow API", () => {
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
     createdEscrowReference = body.reference;
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const createdEscrow = escrowsResponse.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(createdEscrow.buyer).toEqual(expect.objectContaining({
+      name: "Scott Holdings Inc.",
+      partyType: "business",
+      representativeName: "Scott",
+      representativeTitle: "Director",
+      registrationNumber: "CA-12345",
+    }));
+    const businessProfileResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/business-profile",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(businessProfileResponse.statusCode).toBe(200);
+    expect(businessProfileResponse.json().businessProfile).toEqual(expect.objectContaining({
+      legalName: "Scott Holdings Inc.",
+      registrationNumber: "CA-12345",
+      representativeTitle: "Director",
+    }));
   });
 
   it("supports milestone change requests before escrow approval", async () => {
@@ -471,10 +505,34 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/approve`,
       headers: { Authorization: `Bearer ${counterpartyToken}` },
-      payload: { signatureDataUrl: counterpartySignature },
+      payload: {
+        signatureDataUrl: counterpartySignature,
+        counterpartyParty: {
+          type: "business",
+          business: {
+            legalName: "Nora Studio Ltd.",
+            registrationCountry: "Canada",
+            registrationNumber: "ON-7788",
+            registeredAddress: "200 Queen Street, Toronto, ON",
+            representativeTitle: "Owner",
+          },
+        },
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().success).toBe(true);
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const approvedEscrow = escrowsResponse.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(approvedEscrow.seller).toEqual(expect.objectContaining({
+      name: "Nora Studio Ltd.",
+      partyType: "business",
+      representativeName: "Nora Studio",
+      representativeTitle: "Owner",
+    }));
   });
 
   it("funds the escrow as the buyer", async () => {
