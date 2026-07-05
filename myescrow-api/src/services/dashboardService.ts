@@ -203,9 +203,6 @@ function buildPartySnapshot(
     email: user.email,
     representativeName: user.name,
     representativeTitle: party.business.representativeTitle.trim(),
-    registrationCountry: party.business.registrationCountry.trim(),
-    registrationNumber: party.business.registrationNumber.trim(),
-    registeredAddress: party.business.registeredAddress.trim(),
   };
 }
 
@@ -238,10 +235,17 @@ async function saveBusinessProfile(
   party: PartyIdentityInput,
 ) {
   if (party.type !== "business") return;
+  const profile = {
+    legalName: party.business.legalName,
+    representativeTitle: party.business.representativeTitle,
+    registrationCountry: "",
+    registrationNumber: "",
+    registeredAddress: "",
+  };
   await tx.businessProfile.upsert({
     where: { userId },
-    create: { userId, ...party.business },
-    update: party.business,
+    create: { userId, ...profile },
+    update: profile,
   });
 }
 

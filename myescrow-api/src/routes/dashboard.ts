@@ -39,10 +39,10 @@ const partyIdentitySchema = z.discriminatedUnion("type", [
     type: z.literal("business"),
     business: z.object({
       legalName: z.string().trim().min(2),
-      registrationCountry: z.string().trim().min(2),
-      registrationNumber: z.string().trim().min(2),
-      registeredAddress: z.string().trim().min(5),
       representativeTitle: z.string().trim().min(2),
+      registrationCountry: z.string().trim().optional().default(""),
+      registrationNumber: z.string().trim().optional().default(""),
+      registeredAddress: z.string().trim().optional().default(""),
     }),
   }),
 ]);
@@ -126,9 +126,6 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         businessProfile: businessProfile
           ? {
               legalName: businessProfile.legalName,
-              registrationCountry: businessProfile.registrationCountry,
-              registrationNumber: businessProfile.registrationNumber,
-              registeredAddress: businessProfile.registeredAddress,
               representativeTitle: businessProfile.representativeTitle,
             }
           : null,

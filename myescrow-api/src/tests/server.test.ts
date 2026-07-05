@@ -238,9 +238,6 @@ describe("MyEscrow API", () => {
         type: "business",
         business: {
           legalName: "Scott Holdings Inc.",
-          registrationCountry: "Canada",
-          registrationNumber: "CA-12345",
-          registeredAddress: "100 King Street, Toronto, ON",
           representativeTitle: "Director",
         },
       },
@@ -275,7 +272,6 @@ describe("MyEscrow API", () => {
       partyType: "business",
       representativeName: "Scott",
       representativeTitle: "Director",
-      registrationNumber: "CA-12345",
     }));
     const businessProfileResponse = await server.inject({
       method: "GET",
@@ -283,11 +279,10 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(businessProfileResponse.statusCode).toBe(200);
-    expect(businessProfileResponse.json().businessProfile).toEqual(expect.objectContaining({
+    expect(businessProfileResponse.json().businessProfile).toEqual({
       legalName: "Scott Holdings Inc.",
-      registrationNumber: "CA-12345",
       representativeTitle: "Director",
-    }));
+    });
   });
 
   it("supports milestone change requests before escrow approval", async () => {
@@ -511,9 +506,6 @@ describe("MyEscrow API", () => {
           type: "business",
           business: {
             legalName: "Nora Studio Ltd.",
-            registrationCountry: "Canada",
-            registrationNumber: "ON-7788",
-            registeredAddress: "200 Queen Street, Toronto, ON",
             representativeTitle: "Owner",
           },
         },
