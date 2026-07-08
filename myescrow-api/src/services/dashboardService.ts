@@ -439,6 +439,26 @@ async function createNotification(
   });
 }
 
+async function dismissOpenNotificationsForEscrow(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  escrowId: number,
+  filters: { label?: string; detailContains?: string } = {},
+) {
+  await tx.notification.updateMany({
+    where: {
+      userId,
+      txId: escrowId,
+      dismissedAt: null,
+      ...(filters.label ? { label: filters.label } : {}),
+      ...(filters.detailContains ? { detail: { contains: filters.detailContains } } : {}),
+    },
+    data: {
+      dismissedAt: new Date(),
+    },
+  });
+}
+
 async function createTimeline(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -839,6 +859,7 @@ export async function approveEscrow(
       "Just now",
       updated.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
   });
@@ -882,6 +903,7 @@ export async function rejectEscrow(prisma: PrismaClient, userId: string, referen
       "Just now",
       updated.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
   });
@@ -944,6 +966,7 @@ export async function requestMilestoneChanges(
       "Just now",
       updated.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
     return updated;
   });
 }
@@ -1038,6 +1061,10 @@ export async function applyMilestoneChanges(
         updated.id,
       );
     }
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
+      label: "Milestone changes requested",
+      detailContains: milestone.title,
+    });
     return updated;
   });
 }
@@ -1078,6 +1105,7 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
         updated.id,
       );
     }
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
   });
@@ -1138,6 +1166,7 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
       "Just now",
       updated.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
   });
@@ -1202,6 +1231,7 @@ export async function releaseEscrow(prisma: PrismaClient, userId: string, refere
       "Just now",
       updated.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
   });
@@ -1288,6 +1318,10 @@ export async function approveMilestone(
       "Just now",
       updatedEscrow.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
+      label: "Milestone resubmitted",
+      detailContains: milestone.title,
+    });
 
     return {
       escrow: updatedEscrow,
@@ -1359,6 +1393,10 @@ export async function rejectMilestone(
       "Just now",
       updatedEscrow.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
+      label: "Milestone resubmitted",
+      detailContains: targetMilestone.title,
+    });
 
     return {
       escrow: updatedEscrow,
@@ -1429,6 +1467,10 @@ export async function resubmitMilestone(
       "Just now",
       updatedEscrow.id,
     );
+    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
+      label: "Milestone needs revision",
+      detailContains: targetMilestone.title,
+    });
 
     return {
       escrow: updatedEscrow,

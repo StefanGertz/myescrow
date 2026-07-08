@@ -328,6 +328,40 @@ describe("MyEscrow API", () => {
     expect(requestedEscrow.lifecycleStatus).toBe("changes_requested");
     expect(requestedEscrow.milestones[0].requestedTitle).toBe("Revised deposit wording");
 
+    const secondMilestone = requestedEscrow.milestones[1];
+    const secondRequestWhileFirstPending = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${secondMilestone.id}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { title: "Changed handoff", amount: 900, note: "Reduce this payment." },
+    });
+    expect(secondRequestWhileFirstPending.statusCode).toBe(200);
+
+    const ownerWithTwoRequestsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const ownerWithTwoRequests = ownerWithTwoRequestsResponse.json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(ownerWithTwoRequests.lifecycleStatus).toBe("changes_requested");
+    expect(ownerWithTwoRequests.milestones[0].requestedTitle).toBe("Revised deposit wording");
+    expect(ownerWithTwoRequests.milestones[1].requestedTitle).toBe("Changed handoff");
+
+    const ownerNotificationsWithTwoRequests = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const changeRequestNotifications = ownerNotificationsWithTwoRequests
+      .json()
+      .notifications.filter((notification: any) => notification.label === "Milestone changes requested");
+    expect(changeRequestNotifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ detail: expect.stringContaining("Deposit") }),
+        expect.objectContaining({ detail: expect.stringContaining("Final handoff") }),
+      ]),
+    );
+
     const applyResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestoneId}/apply-changes`,
@@ -348,7 +382,7 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${counterpartyToken}` },
     });
     const revisedEscrow = counterpartyAfterApply.json().escrows.find((item: any) => item.id === createdEscrowReference);
-    expect(revisedEscrow.lifecycleStatus).toBe("pending_approval");
+    expect(revisedEscrow.lifecycleStatus).toBe("changes_requested");
     expect(revisedEscrow.amount).toBe("$1,625.00");
     expect(revisedEscrow.milestones[0]).toEqual(
       expect.objectContaining({
@@ -357,16 +391,25 @@ describe("MyEscrow API", () => {
         deadline: "2026-08-20T00:00:00.000Z",
       }),
     );
+    expect(revisedEscrow.milestones[0].requestedTitle).toBeUndefined();
+    expect(revisedEscrow.milestones[1].requestedTitle).toBe("Changed handoff");
+
+    const ownerNotificationsAfterFirstApply = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const remainingChangeRequestNotifications = ownerNotificationsAfterFirstApply
+      .json()
+      .notifications.filter((notification: any) => notification.label === "Milestone changes requested");
+    expect(remainingChangeRequestNotifications).not.toContainEqual(
+      expect.objectContaining({ detail: expect.stringContaining("Deposit") }),
+    );
+    expect(remainingChangeRequestNotifications).toContainEqual(
+      expect.objectContaining({ detail: expect.stringContaining("Final handoff") }),
+    );
 
     const retainedMilestone = revisedEscrow.milestones[1];
-    const secondRequestResponse = await server.inject({
-      method: "POST",
-      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${retainedMilestone.id}/request-changes`,
-      headers: { Authorization: `Bearer ${counterpartyToken}` },
-      payload: { title: "Changed handoff", amount: 900, note: "Reduce this payment." },
-    });
-    expect(secondRequestResponse.statusCode).toBe(200);
-
     const rejectResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${retainedMilestone.id}/apply-changes`,
@@ -387,6 +430,18 @@ describe("MyEscrow API", () => {
       expect.objectContaining({ title: "Final handoff", amount: "$1,000.00" }),
     );
     expect(afterReject.milestones[1].requestedTitle).toBeUndefined();
+
+    const ownerNotificationsAfterSecondReview = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(ownerNotificationsAfterSecondReview.json().notifications).not.toContainEqual(
+      expect.objectContaining({
+        label: "Milestone changes requested",
+        detail: expect.stringContaining("Final handoff"),
+      }),
+    );
   });
 
   it("creates an escrow for a counterparty who has not signed up yet", async () => {
