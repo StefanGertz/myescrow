@@ -1507,7 +1507,10 @@ export async function listNotifications(prisma: PrismaClient, userId: string, in
     where: { userId, ...(includeDismissed ? {} : { dismissedAt: null }) },
     orderBy: { createdAt: "desc" },
   });
-  return notifications.map((notification) => ({
+  const activeNotifications = includeDismissed
+    ? notifications
+    : await filterResolvedMilestoneNotifications(prisma, notifications);
+  return activeNotifications.map((notification) => ({
     id: notification.id,
     label: notification.label,
     detail: notification.detail,
@@ -1515,6 +1518,86 @@ export async function listNotifications(prisma: PrismaClient, userId: string, in
     txId: notification.txId ?? undefined,
     createdAt: notification.createdAt.toISOString(),
   }));
+}
+
+type NotificationLike = {
+  id: string;
+  label: string;
+  detail: string;
+  meta: string;
+  txId: number | null;
+  createdAt: Date;
+  dismissedAt: Date | null;
+};
+
+const milestoneTitleFromNotification = (label: string, detail: string) => {
+  if (label === "Milestone changes requested") {
+    return detail.match(/requested changes to (.+?)\.$/)?.[1]?.trim() ?? null;
+  }
+  if (label === "Milestone resubmitted") {
+    return detail.match(/^(.+?) was resubmitted\b/)?.[1]?.trim() ?? null;
+  }
+  if (label === "Milestone needs revision") {
+    return detail.match(/^(.+?) was rejected\b/)?.[1]?.trim() ?? null;
+  }
+  return null;
+};
+
+const isMilestoneNotificationStillActionable = (
+  notification: NotificationLike,
+  milestones: Array<{ title: string; status: string; changeRequestedAt: Date | null }>,
+) => {
+  const title = milestoneTitleFromNotification(notification.label, notification.detail);
+  if (!title) return true;
+  const matchingMilestones = milestones.filter((milestone) => milestone.title === title);
+  if (notification.label === "Milestone changes requested") {
+    return matchingMilestones.some((milestone) => milestone.changeRequestedAt !== null);
+  }
+  if (notification.label === "Milestone resubmitted") {
+    return matchingMilestones.some((milestone) => milestone.status === "pending");
+  }
+  if (notification.label === "Milestone needs revision") {
+    return matchingMilestones.some((milestone) => milestone.status === "rejected");
+  }
+  return true;
+};
+
+async function filterResolvedMilestoneNotifications(
+  prisma: PrismaClient,
+  notifications: NotificationLike[],
+) {
+  const milestoneNotifications = notifications.filter((notification) =>
+    ["Milestone changes requested", "Milestone resubmitted", "Milestone needs revision"].includes(notification.label)
+    && notification.txId !== null
+  );
+  if (milestoneNotifications.length === 0) {
+    return notifications;
+  }
+  const escrowIds = [...new Set(milestoneNotifications.map((notification) => notification.txId!))];
+  const escrows = await prisma.escrow.findMany({
+    where: { id: { in: escrowIds } },
+    select: {
+      id: true,
+      milestones: {
+        select: {
+          title: true,
+          status: true,
+          changeRequestedAt: true,
+        },
+      },
+    },
+  });
+  const milestonesByEscrowId = new Map(escrows.map((escrow) => [escrow.id, escrow.milestones]));
+  return notifications.filter((notification) => {
+    if (!["Milestone changes requested", "Milestone resubmitted", "Milestone needs revision"].includes(notification.label)) {
+      return true;
+    }
+    if (notification.txId === null) {
+      return true;
+    }
+    const milestones = milestonesByEscrowId.get(notification.txId);
+    return milestones ? isMilestoneNotificationStillActionable(notification, milestones) : true;
+  });
 }
 
 export async function dismissNotification(prisma: PrismaClient, userId: string, notificationId: string) {
