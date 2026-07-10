@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   addTimelineEvent,
+  applyAgreementChanges,
   applyMilestoneChanges,
   approveEscrow,
   approveMilestone,
@@ -17,6 +18,7 @@ import {
   recordWalletTransaction,
   rejectEscrow,
   rejectMilestone,
+  requestAgreementChanges,
   requestMilestoneChanges,
   releaseEscrow,
   resubmitMilestone,
@@ -90,6 +92,24 @@ const milestoneChangeReviewSchema = z.object({
   description: z.string().optional(),
   amount: z.number().positive().optional(),
   deadline: z.string().datetime().nullable().optional(),
+});
+
+const agreementMilestoneChangeSchema = z.object({
+  milestoneId: z.coerce.number().int().positive().optional(),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  amount: z.number().positive(),
+  deadline: z.string().datetime().optional(),
+});
+
+const agreementChangeRequestSchema = z.object({
+  milestones: z.array(agreementMilestoneChangeSchema).min(1),
+  note: z.string().max(1000).optional(),
+});
+
+const agreementChangeReviewSchema = z.object({
+  decision: z.enum(["accept", "reject"]).default("accept"),
+  milestones: z.array(agreementMilestoneChangeSchema).optional(),
 });
 
 export async function dashboardRoutes(fastify: FastifyInstance) {
@@ -255,6 +275,40 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         escrowId: result.escrow.reference,
         milestoneId: result.milestone.id,
       };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/request-changes", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = agreementChangeRequestSchema.parse(request.body);
+      const escrow = await requestAgreementChanges(secured.prisma, user.id, id, body);
+      let emailNotification: "sent" | "skipped" | "failed" = "failed";
+      try {
+        emailNotification = await sendMilestoneChangeRequestEmail({
+          to: escrow.owner.email,
+          recipientName: escrow.owner.name,
+          requesterName: user.name,
+          escrowTitle: escrow.title,
+          escrowReference: escrow.reference,
+          milestoneTitle: "the agreement",
+          ...(body.note ? { note: body.note } : {}),
+          logger: request.log,
+        });
+      } catch (error) {
+        request.log.error(
+          { error, to: escrow.owner.email, escrowReference: escrow.reference },
+          "Agreement change request was saved, but its email notification failed",
+        );
+      }
+      return { success: true, escrowId: escrow.reference, emailNotification };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/apply-changes", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = agreementChangeReviewSchema.parse(request.body ?? {});
+      const escrow = await applyAgreementChanges(secured.prisma, user.id, id, body);
+      return { success: true, escrowId: escrow.reference };
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/request-changes", async (request) => {
