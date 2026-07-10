@@ -75,6 +75,19 @@ const signupSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().email(),
   password: strongPasswordSchema,
+  partyType: z.enum(["individual", "business"]).optional().default("individual"),
+  business: z.object({
+    legalName: z.string().trim().min(2).max(120),
+    representativeTitle: z.string().trim().min(2).max(80),
+  }).optional(),
+}).superRefine((value, ctx) => {
+  if (value.partyType === "business" && !value.business) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["business"],
+      message: "Business name and title are required.",
+    });
+  }
 });
 
 const verifyEmailSchema = z.object({
@@ -147,6 +160,9 @@ export async function authRoutes(fastify: FastifyInstance) {
       name: body.name,
       email: normalizedEmail,
       password: body.password,
+      ...(body.partyType === "business" && body.business
+        ? { businessProfile: body.business }
+        : {}),
     }, { emailVerified: !requireVerification });
 
     if (!requireVerification) {

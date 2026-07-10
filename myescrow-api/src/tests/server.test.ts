@@ -482,6 +482,11 @@ describe("MyEscrow API", () => {
         name: "Jamie Contractor",
         email: "jamie.contractor@example.com",
         password: "InviteFlowPass123!",
+        partyType: "business",
+        business: {
+          legalName: "Jamie Contractor LLC",
+          representativeTitle: "Owner",
+        },
       },
     });
     expect(signupResponse.statusCode).toBe(201);
@@ -500,6 +505,17 @@ describe("MyEscrow API", () => {
     expect(verifyResponse.statusCode).toBe(200);
     invitedCounterpartyToken = verifyResponse.json().token;
     expect(invitedCounterpartyToken).toBeDefined();
+
+    const businessProfileResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/business-profile",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(businessProfileResponse.statusCode).toBe(200);
+    expect(businessProfileResponse.json().businessProfile).toEqual({
+      legalName: "Jamie Contractor LLC",
+      representativeTitle: "Owner",
+    });
 
     const walletResponse = await server.inject({
       method: "GET",

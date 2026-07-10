@@ -22,6 +22,10 @@ export async function createUser(
     name: string;
     email: string;
     password: string;
+    businessProfile?: {
+      legalName: string;
+      representativeTitle: string;
+    };
   },
   options?: { emailVerified?: boolean },
 ): Promise<User> {
@@ -30,16 +34,31 @@ export async function createUser(
   if (existing) {
     throw new AppError("Email already in use.", 409);
   }
-  const userId = buildUserId(await getNextSequenceValue(prisma, "user", 1000));
-  const passwordHash = await bcrypt.hash(data.password, 10);
-  return prisma.user.create({
-    data: {
-      id: userId,
-      name: data.name,
-      email: normalized,
-      passwordHash,
-      emailVerified: options?.emailVerified ?? false,
-    },
+  return prisma.$transaction(async (tx) => {
+    const userId = buildUserId(await getNextSequenceValue(tx, "user", 1000));
+    const passwordHash = await bcrypt.hash(data.password, 10);
+    return tx.user.create({
+      data: {
+        id: userId,
+        name: data.name,
+        email: normalized,
+        passwordHash,
+        emailVerified: options?.emailVerified ?? false,
+        ...(data.businessProfile
+          ? {
+              businessProfile: {
+                create: {
+                  legalName: data.businessProfile.legalName,
+                  representativeTitle: data.businessProfile.representativeTitle,
+                  registrationCountry: "",
+                  registrationNumber: "",
+                  registeredAddress: "",
+                },
+              },
+            }
+          : {}),
+      },
+    });
   });
 }
 
