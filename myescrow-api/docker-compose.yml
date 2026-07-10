@@ -12,7 +12,7 @@ services:
       - ./tmp/postgres-data:/var/lib/postgresql/data
 
   api:
-    image: ghcr.io/stefangertz/myescrow-api:v1
+    image: ghcr.io/stefangertz/myescrow-api:latest
     restart: unless-stopped
     depends_on:
       - db
