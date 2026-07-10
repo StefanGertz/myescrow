@@ -1306,7 +1306,7 @@ canvas.signature {
       <label class="muted">
         Agreement (preview)
       </label>
-      <textarea id="agreement-text" readonly style="height:120px">
+      <textarea id="agreement-text" readonly style="min-height:120px; height:auto; overflow:hidden;">
         Standard escrow terms...
       </textarea>
       <div style="margin-top:12px;">
@@ -2709,6 +2709,8 @@ canvas.signature {
           .join('\n');
       }
       agreementText.value = preview;
+      agreementText.style.height = 'auto';
+      agreementText.style.height = `${agreementText.scrollHeight}px`;
     }
     renderAgreementMilestones(milestones);
 
@@ -2859,6 +2861,8 @@ canvas.signature {
             .join('\n');
         }
         agreementText.value = preview;
+        agreementText.style.height = 'auto';
+        agreementText.style.height = `${agreementText.scrollHeight}px`;
       }
       const fundAmount = document.getElementById('fund-amount');
       if (fundAmount) {
@@ -3179,5 +3183,3 @@ canvas.signature {
 </script>
 </body>
 </html>
-
-
