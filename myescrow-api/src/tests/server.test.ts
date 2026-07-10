@@ -285,6 +285,78 @@ describe("MyEscrow API", () => {
     });
   });
 
+  it("supports agreement-level change requests with added milestones", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        title: "Agreement route escrow",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 1500,
+        milestones: [
+          { title: "Discovery", amount: 750, description: "Initial review" },
+          { title: "Delivery", amount: 750, description: "Final package" },
+        ],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+
+    const counterpartyEscrows = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const escrow = counterpartyEscrows.json().escrows.find((item: any) => item.id === reference);
+    expect(escrow).toBeDefined();
+
+    const requestResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        milestones: [
+          {
+            milestoneId: escrow.milestones[0].id,
+            title: "Discovery",
+            description: "Initial review",
+            amount: 500,
+          },
+          {
+            milestoneId: escrow.milestones[1].id,
+            title: "Delivery",
+            description: "Final package",
+            amount: 700,
+          },
+          {
+            title: "Support",
+            description: "Post-launch support",
+            amount: 300,
+          },
+        ],
+        note: "Please add a support milestone.",
+      },
+    });
+
+    expect(requestResponse.statusCode).toBe(200);
+    const ownerEscrows = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const changedEscrow = ownerEscrows.json().escrows.find((item: any) => item.id === reference);
+    expect(changedEscrow.lifecycleStatus).toBe("changes_requested");
+    expect(changedEscrow.milestones).toContainEqual(
+      expect.objectContaining({
+        title: "Support",
+        requestedAmount: "$300.00",
+        changeRequestNote: "Please add a support milestone.",
+      }),
+    );
+  });
+
   it("supports milestone change requests before escrow approval", async () => {
     const counterpartyEscrows = await server.inject({
       method: "GET",

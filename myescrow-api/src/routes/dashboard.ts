@@ -23,6 +23,7 @@ import {
   releaseEscrow,
   resubmitMilestone,
   updateDispute,
+  updateDraftEscrow,
 } from "../services/dashboardService";
 import { sendEscrowInvitationEmail, sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { adjustWalletBalance, findUserById } from "../services/userService";
@@ -58,6 +59,21 @@ const createEscrowSchema = z.object({
   category: z.string().optional(),
   description: z.string().optional(),
   signatureDataUrl: signatureDataUrlSchema.optional(),
+  milestones: z.array(
+    z.object({
+      title: z.string().min(1),
+      amount: z.number().positive(),
+      description: z.string().optional(),
+      deadline: z.string().datetime().optional(),
+    }),
+  ).optional(),
+});
+
+const updateDraftEscrowSchema = z.object({
+  title: z.string().min(2),
+  counterpartyEmail: z.string().email(),
+  amount: z.number().positive(),
+  description: z.string().optional(),
   milestones: z.array(
     z.object({
       title: z.string().min(1),
@@ -184,6 +200,37 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         counterpart: result.escrow.counterpart,
         invitationStatus: result.invitationStatus,
         createdAt: result.escrow.createdAt,
+      };
+    });
+
+    secured.patch("/api/dashboard/escrows/:id", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = updateDraftEscrowSchema.parse(request.body);
+      const result = await updateDraftEscrow(secured.prisma, user.id, id, {
+        title: body.title,
+        counterpartyEmail: body.counterpartyEmail,
+        amount: body.amount,
+        ...(body.description ? { description: body.description } : {}),
+        ...(body.milestones ? { milestones: body.milestones } : {}),
+      });
+      await sendEscrowInvitationEmail({
+        to: result.invitedEmail,
+        recipientName: result.counterpartyUser?.name ?? result.invitedEmail,
+        creatorName: result.owner.name,
+        escrowTitle: result.escrow.title,
+        escrowReference: result.escrow.reference,
+        creatorRole: result.escrow.creatorRole as "buyer" | "seller",
+        invitationStatus: result.invitationStatus,
+        logger: secured.log,
+      });
+      return {
+        success: true,
+        escrowId: result.escrow.id,
+        reference: result.escrow.reference,
+        counterpart: result.escrow.counterpart,
+        invitationStatus: result.invitationStatus,
+        updatedAt: result.escrow.updatedAt,
       };
     });
 

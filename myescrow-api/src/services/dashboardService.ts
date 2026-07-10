@@ -135,6 +135,19 @@ type CreateEscrowInput = {
   }>;
 };
 
+type UpdateDraftEscrowInput = {
+  title: string;
+  counterpartyEmail: string;
+  amount: number;
+  description?: string | undefined;
+  milestones?: Array<{
+    title: string;
+    amount: number;
+    description?: string | undefined;
+    deadline?: string | undefined;
+  }>;
+};
+
 type ApproveEscrowInput = {
   signatureDataUrl?: string | undefined;
   counterpartyParty: PartyIdentityInput;
@@ -748,6 +761,121 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
     }
 
     return { escrow, owner, counterpartyUser, invitationStatus, invitedEmail: normalizedCounterpartyEmail };
+  });
+
+  return result;
+}
+
+export async function updateDraftEscrow(prisma: PrismaClient, userId: string, reference: string, data: UpdateDraftEscrowInput) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.ownerId !== userId) {
+    throw new AppError("Only the escrow creator can edit this draft.", 403);
+  }
+  if (escrow.lifecycleStatus !== "pending_counterparty_signup") {
+    throw new AppError("This escrow can only be edited before the counterparty gets involved.", 400);
+  }
+
+  const amountInCents = dollarsToCents(data.amount);
+  const milestoneInputs = data.milestones?.length
+    ? data.milestones
+    : [{ title: data.title, amount: data.amount, description: data.description }];
+  const milestoneTotal = milestoneInputs.reduce((sum, milestone) => sum + milestone.amount, 0);
+  if (Math.abs(milestoneTotal - data.amount) > 0.01) {
+    throw new AppError("Milestone total must match the escrow amount.", 400);
+  }
+
+  const owner = await prisma.user.findUnique({ where: { id: userId } });
+  if (!owner) {
+    throw new AppError("User not found.", 404);
+  }
+
+  const normalizedCounterpartyEmail = normalizeEmail(data.counterpartyEmail);
+  const counterpartyUser = await prisma.user.findUnique({
+    where: { email: normalizedCounterpartyEmail },
+  });
+  if (counterpartyUser?.id === userId) {
+    throw new AppError("You cannot create an escrow with your own account.", 400);
+  }
+
+  const invitationStatus: EscrowInvitationStatus = !counterpartyUser
+    ? "signup_required"
+    : counterpartyUser.emailVerified
+      ? "existing_user"
+      : "verification_required";
+  const counterpartyReady = invitationStatus === "existing_user";
+  const buyerId = escrow.creatorRole === "buyer" ? userId : counterpartyReady ? counterpartyUser!.id : null;
+  const sellerId = escrow.creatorRole === "seller" ? userId : counterpartyReady ? counterpartyUser!.id : null;
+  const counterpartName = counterpartyUser?.name ?? normalizedCounterpartyEmail;
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.escrowMilestone.deleteMany({ where: { escrowId: escrow.id } });
+    const updatedEscrow = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        title: data.title.trim(),
+        counterpartyEmail: normalizedCounterpartyEmail,
+        counterpart: counterpartName,
+        buyerId,
+        sellerId,
+        amountCents: amountInCents,
+        description: data.description?.trim() || null,
+        stage: counterpartyReady ? "Approval pending" : "Invitation pending",
+        dueDescription: counterpartyReady
+          ? `Waiting for ${counterpartName} to approve`
+          : `Waiting for ${counterpartName} to create and verify an account`,
+        status: "warning",
+        counterpartyApproved: false,
+        lifecycleStatus: counterpartyReady ? "pending_approval" : "pending_counterparty_signup",
+        milestones: {
+          create: milestoneInputs.map((milestone, index) => ({
+            title: milestone.title.trim(),
+            description: milestone.description?.trim() || null,
+            amountCents: dollarsToCents(milestone.amount),
+            deadline: milestone.deadline ? new Date(milestone.deadline) : null,
+            orderIndex: index,
+          })),
+        },
+      },
+      include: includeEscrowRelations,
+    });
+
+    await createTimeline(
+      tx,
+      userId,
+      `${updatedEscrow.reference} draft updated`,
+      `${updatedEscrow.title} is waiting on ${counterpartName}`,
+      "attention",
+    );
+    await createNotification(
+      tx,
+      userId,
+      "Escrow draft updated",
+      counterpartyReady
+        ? `${counterpartName} can now review ${updatedEscrow.title}.`
+        : `${counterpartName} must finish signup before the escrow can be reviewed.`,
+      "Just now",
+      updatedEscrow.id,
+    );
+
+    if (counterpartyUser && counterpartyReady) {
+      await createTimeline(
+        tx,
+        counterpartyUser.id,
+        `${owner.name} invited you to escrow`,
+        `${updatedEscrow.title} is awaiting your approval`,
+        "attention",
+      );
+      await createNotification(
+        tx,
+        counterpartyUser.id,
+        "Escrow approval requested",
+        `${owner.name} invited you to review ${updatedEscrow.title}.`,
+        "Just now",
+        updatedEscrow.id,
+      );
+    }
+
+    return { escrow: updatedEscrow, owner, counterpartyUser, invitationStatus, invitedEmail: normalizedCounterpartyEmail };
   });
 
   return result;
