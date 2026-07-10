@@ -324,7 +324,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       };
     });
 
-    secured.post("/api/dashboard/escrows/:id/request-changes", async (request) => {
+    const handleAgreementChangeRequest = async (request: FastifyRequest) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
       const body = agreementChangeRequestSchema.parse(request.body);
@@ -348,7 +348,10 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         );
       }
       return { success: true, escrowId: escrow.reference, emailNotification };
-    });
+    };
+
+    secured.post("/api/dashboard/escrows/:id/request-changes", handleAgreementChangeRequest);
+    secured.post("/api/dashboard/escrows/:id/agreement-changes", handleAgreementChangeRequest);
 
     secured.post("/api/dashboard/escrows/:id/apply-changes", async (request) => {
       const user = await requireUser(request);

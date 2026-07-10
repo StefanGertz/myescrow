@@ -314,7 +314,7 @@ describe("MyEscrow API", () => {
 
     const requestResponse = await server.inject({
       method: "POST",
-      url: `/api/dashboard/escrows/${reference}/request-changes`,
+      url: `/api/dashboard/escrows/${reference}/agreement-changes`,
       headers: { Authorization: `Bearer ${counterpartyToken}` },
       payload: {
         milestones: [
