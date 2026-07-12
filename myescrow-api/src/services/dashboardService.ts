@@ -208,6 +208,9 @@ const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
 const isProposedNewMilestone = (milestone: EscrowWithRelations["milestones"][number]) =>
   milestone.title === PROPOSED_NEW_MILESTONE_TITLE && milestone.amountCents === 0;
 
+const hasPendingAgreementChanges = (escrow: Pick<EscrowWithRelations, "milestones">) =>
+  escrow.milestones.some((milestone) => milestone.changeRequestedAt !== null);
+
 function statusWeight(status: string) {
   return status === "warning" ? 0 : 1;
 }
@@ -965,6 +968,9 @@ export async function approveEscrow(
   if (escrow.lifecycleStatus !== "pending_approval") {
     throw new AppError("This escrow is not awaiting approval.", 400);
   }
+  if (hasPendingAgreementChanges(escrow)) {
+    throw new AppError("Requested agreement changes must be reviewed before approval.", 400);
+  }
   const user = escrow.buyerId === userId ? escrow.buyer : escrow.seller;
   if (!user) {
     throw new AppError("Counterparty account is not attached to this escrow.", 400);
@@ -1493,6 +1499,9 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
   }
   if (escrow.lifecycleStatus !== "funding_pending") {
     throw new AppError("This escrow is not ready for funding.", 400);
+  }
+  if (hasPendingAgreementChanges(escrow)) {
+    throw new AppError("Requested agreement changes must be resolved before funding.", 400);
   }
 
   return prisma.$transaction(async (tx) => {

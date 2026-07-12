@@ -357,6 +357,143 @@ describe("MyEscrow API", () => {
     );
   });
 
+  const agreementFundingGateScenarios = [
+    {
+      name: "existing milestone terms change",
+      title: "Milestone edit approval gate",
+      expectedMilestone: { title: "Design revision", amount: "$650.00" },
+      kind: "edit",
+    },
+    {
+      name: "new milestone is added",
+      title: "Milestone addition approval gate",
+      expectedMilestone: { title: "Launch support", amount: "$300.00" },
+      kind: "add",
+    },
+  ] as const;
+
+  it.each(agreementFundingGateScenarios)(
+    "requires creator-reviewed agreement changes to be approved before funding when $name",
+    async (scenario) => {
+      const createResponse = await server.inject({
+        method: "POST",
+        url: "/api/dashboard/escrows/create",
+        headers: { Authorization: `Bearer ${token}` },
+        payload: {
+          title: scenario.title,
+          counterpartyEmail: "nora@example.com",
+          creatorRole: "buyer",
+          amount: 1500,
+          milestones: [
+            { title: "Design", amount: 500 },
+            { title: "Build", amount: 1000 },
+          ],
+        },
+      });
+      expect(createResponse.statusCode).toBe(201);
+      const reference = createResponse.json().reference;
+
+      const counterpartyEscrows = await server.inject({
+        method: "GET",
+        url: "/api/dashboard/escrows",
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      });
+      const counterpartyEscrow = counterpartyEscrows.json().escrows.find((item: any) => item.id === reference);
+      const originalMilestones = counterpartyEscrow.milestones as Array<{ id: number }>;
+      const firstMilestoneId = originalMilestones[0]?.id;
+      const secondMilestoneId = originalMilestones[1]?.id;
+      if (!firstMilestoneId || !secondMilestoneId) {
+        throw new Error("Expected two original milestones in funding gate scenario.");
+      }
+      const requestedMilestones = scenario.kind === "edit"
+        ? [
+            {
+              milestoneId: firstMilestoneId,
+              title: "Design revision",
+              amount: 650,
+            },
+            {
+              milestoneId: secondMilestoneId,
+              title: "Build revision",
+              amount: 850,
+            },
+          ]
+        : [
+            {
+              milestoneId: firstMilestoneId,
+              title: "Design",
+              amount: 500,
+            },
+            {
+              milestoneId: secondMilestoneId,
+              title: "Build",
+              amount: 700,
+            },
+            {
+              title: "Launch support",
+              amount: 300,
+            },
+          ];
+
+      const requestResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/request-changes`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+        payload: {
+          milestones: requestedMilestones,
+        },
+      });
+      expect(requestResponse.statusCode).toBe(200);
+
+      const acceptResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/apply-changes`,
+        headers: { Authorization: `Bearer ${token}` },
+        payload: { decision: "accept" },
+      });
+      expect(acceptResponse.statusCode).toBe(200);
+
+      const pendingApprovalEscrows = await server.inject({
+        method: "GET",
+        url: "/api/dashboard/escrows",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const pendingApprovalEscrow = pendingApprovalEscrows.json().escrows.find((item: any) => item.id === reference);
+      expect(pendingApprovalEscrow.lifecycleStatus).toBe("pending_approval");
+      expect(pendingApprovalEscrow.counterpartyApproved).toBe(false);
+      expect(pendingApprovalEscrow.milestones).toContainEqual(
+        expect.objectContaining({
+          title: scenario.expectedMilestone.title,
+          amount: scenario.expectedMilestone.amount,
+        }),
+      );
+
+      const fundBeforeApprovalResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/fund`,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(fundBeforeApprovalResponse.statusCode).toBe(400);
+      expect(fundBeforeApprovalResponse.json().error).toBe("This escrow is not ready for funding.");
+
+      const approveResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/approve`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+        payload: { signatureDataUrl: counterpartySignature },
+      });
+      expect(approveResponse.statusCode).toBe(200);
+
+      const fundAfterApprovalResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/fund`,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(fundAfterApprovalResponse.statusCode).toBe(200);
+      expect(fundAfterApprovalResponse.json().success).toBe(true);
+    },
+  );
+
   it("supports milestone change requests before escrow approval", async () => {
     const counterpartyEscrows = await server.inject({
       method: "GET",
