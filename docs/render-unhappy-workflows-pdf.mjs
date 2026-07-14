@@ -39,7 +39,8 @@ const pageDescriptions = [
   "Invitation delivery, onboarding, negotiation, and signature integrity",
   "Money movement paths that can lose or over-release held funds",
   "Rejection, resubmission, evidence, and escalation gaps",
-  "Proposed lifecycle in which every non-terminal state has a recovery path",
+  "Versioned consent, reliable invitation delivery, and recoverable funding",
+  "Evidence-based review, dispute resolution, settlement, and refunds",
 ];
 
 const pages = sections
@@ -81,18 +82,17 @@ const html = `<!doctype html>
       html, body { margin: 0; padding: 0; background: #e8eef3; color: #0b3553; }
       body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .page {
-        width: 420mm;
-        height: 297mm;
+        width: 419mm;
+        height: 296mm;
         padding: 12mm 14mm 9mm;
         background: #f8fbfc;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto;
         gap: 5mm;
-        break-after: page;
-        page-break-after: always;
+        break-inside: avoid;
+        page-break-inside: avoid;
         overflow: hidden;
       }
-      .page:last-child { break-after: auto; page-break-after: auto; }
       .page-header { display: flex; justify-content: space-between; gap: 12mm; align-items: flex-end; }
       .eyebrow { color: #66788a; font-size: 8.5pt; font-weight: 750; letter-spacing: 0.16em; }
       h1 { margin: 2.2mm 0 1mm; font-size: 21pt; line-height: 1.08; color: #073b5c; }
@@ -117,7 +117,6 @@ const html = `<!doctype html>
         border: 0.35mm solid #d8e3e9;
         border-radius: 4mm;
         background: #ffffff;
-        box-shadow: 0 1.5mm 5mm rgba(7, 59, 92, 0.06);
         display: flex;
         align-items: center;
         justify-content: center;

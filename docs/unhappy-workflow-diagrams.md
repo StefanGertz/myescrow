@@ -158,7 +158,7 @@ flowchart TD
     class H,I,J,E1,G1,B1,B2 danger;
 ```
 
-## 5. Target recoverable escrow process
+## 5. Target recoverable agreement and funding process
 
 ```mermaid
 flowchart TD
@@ -184,35 +184,44 @@ flowchart TD
     J1 --> J
     J -->|Timeout| J2[Cancel without moving funds]
     J -->|Success| K[Create held-funds ledger balance]
-
-    K --> L[Seller submits milestone deliverable and evidence]
-    L --> M{Buyer response window}
-    M -->|Approve| N[Atomically release remaining milestone balance]
-    M -->|Request revision with reason| O[Seller revises and resubmits]
-    O --> L
-    M -->|No response| P[Reminder then policy-based auto-release or escalation]
-    M -->|Dispute| Q[Freeze affected milestone funds]
-
-    Q --> R[Both parties provide evidence]
-    R --> S{Resolution}
-    S -->|Seller prevails| N
-    S -->|Buyer prevails| T[Refund affected balance]
-    S -->|Settlement| U[Split release and refund]
-
-    N --> V{Held balance remaining?}
-    T --> V
-    U --> V
-    V -->|Yes| L
-    V -->|No| W[Complete with immutable audit trail]
-
-    K -->|Mutual cancellation| X[Freeze new releases]
-    X --> Y[Refund unreleased balance]
-    Y --> W
+    K --> L[Agreement funded and ready for execution]
 
     classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d;
     classDef warning fill:#fef3c7,stroke:#d97706,color:#78350f;
-    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y safe;
+    class A,B,C,D,E,F,G,H,I,J,K,L safe;
     class D1,E1,J1,J2 warning;
+```
+
+## 6. Target recoverable milestone and dispute process
+
+```mermaid
+flowchart TD
+    A[Held-funds ledger balance] --> B[Seller submits milestone deliverable and evidence]
+    B --> C{Buyer response window}
+    C -->|Approve| D[Atomically release remaining milestone balance]
+    C -->|Request revision with reason| E[Seller revises and resubmits]
+    E --> B
+    C -->|No response| F[Reminder then policy-based auto-release or escalation]
+    C -->|Dispute| G[Freeze affected milestone funds]
+
+    G --> H[Both parties provide evidence]
+    H --> I{Resolution}
+    I -->|Seller prevails| D
+    I -->|Buyer prevails| J[Refund affected balance]
+    I -->|Settlement| K[Split release and refund]
+
+    D --> L{Held balance remaining?}
+    J --> L
+    K --> L
+    L -->|Yes| B
+    L -->|No| M[Complete with immutable audit trail]
+
+    A -->|Mutual cancellation| N[Freeze new releases]
+    N --> O[Refund unreleased balance]
+    O --> M
+
+    classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d;
+    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O safe;
 ```
 
 ## Recommended implementation order
