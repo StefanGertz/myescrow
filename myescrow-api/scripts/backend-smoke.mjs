@@ -57,15 +57,21 @@ async function createEscrow(token, payload) {
   });
 }
 
-async function releaseEscrow(token, reference) {
-  return request(`/api/dashboard/escrows/${reference}/release`, {
+async function escrowAction(token, reference, action) {
+  return request(`/api/dashboard/escrows/${reference}/${action}`, {
     method: 'POST',
     headers: authHeaders(token)
   });
 }
 
-async function escrowAction(token, reference, action) {
-  return request(`/api/dashboard/escrows/${reference}/${action}`, {
+async function listEscrows(token) {
+  return request('/api/dashboard/escrows', {
+    headers: authHeaders(token)
+  });
+}
+
+async function approveMilestone(token, reference, milestoneId) {
+  return request(`/api/dashboard/escrows/${reference}/milestones/${milestoneId}/approve`, {
     method: 'POST',
     headers: authHeaders(token)
   });
@@ -158,9 +164,15 @@ function ensure(condition, message) {
   const fundingResult = await escrowAction(token, createResult.reference, 'fund');
   ensure(fundingResult?.success, 'Fund endpoint did not return success');
 
-  console.log('Triggering release on created escrow');
-  const releaseResult = await releaseEscrow(token, createResult.reference);
-  ensure(releaseResult?.success, 'Release endpoint did not return success');
+  console.log('Approving each milestone on the funded escrow');
+  const escrowsResult = await listEscrows(token);
+  const fundedEscrow = escrowsResult.escrows?.find((escrow) => escrow.id === createResult.reference);
+  ensure(fundedEscrow, 'Funded escrow not present in escrow list');
+  ensure(fundedEscrow.milestones?.length, 'Funded escrow has no milestones to approve');
+  for (const milestone of fundedEscrow.milestones) {
+    const releaseResult = await approveMilestone(token, createResult.reference, milestone.id);
+    ensure(releaseResult?.success, `Milestone ${milestone.id} approval did not return success`);
+  }
 
   console.log('Testing wallet top-up and withdraw flows');
   const topupAmount = 250;

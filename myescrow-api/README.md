@@ -86,7 +86,7 @@ Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/aut
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
 | GET | `/api/dashboard/escrows` | Escrows requiring review. |
 | POST | `/api/dashboard/escrows/create` | Create a new escrow draft. |
-| POST | `/api/dashboard/escrows/:id/release` | Queue release for escrow `:id` (reference). |
+| POST | `/api/dashboard/escrows/:id/release` | Disabled compatibility route; use milestone approval to release funds. |
 | POST | `/api/dashboard/escrows/:id/approve` | Mark escrow as approved. |
 | POST | `/api/dashboard/escrows/:id/reject` | Reject an escrow. |
 | POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow. |

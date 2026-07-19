@@ -1454,13 +1454,25 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
   if (escrow.ownerId !== userId) {
     throw new AppError("Only the creator can cancel this escrow.", 403);
   }
-  if (escrow.lifecycleStatus === "completed") {
-    throw new AppError("Completed escrows cannot be cancelled.", 400);
+  const cancellableStates = ["pending_counterparty_signup", "pending_approval", "changes_requested"];
+  if (escrow.fundingStatus === "funded" || ["funded", "completed"].includes(escrow.lifecycleStatus)) {
+    throw new AppError(
+      "Funded escrows cannot be cancelled until the refund workflow is available.",
+      409,
+    );
+  }
+  if (!cancellableStates.includes(escrow.lifecycleStatus)) {
+    throw new AppError("This escrow can no longer be cancelled.", 409);
   }
 
   return prisma.$transaction(async (tx) => {
-    const updated = await tx.escrow.update({
-      where: { id: escrow.id },
+    const transition = await tx.escrow.updateMany({
+      where: {
+        id: escrow.id,
+        ownerId: userId,
+        lifecycleStatus: { in: cancellableStates },
+        fundingStatus: "not_funded",
+      },
       data: {
         lifecycleStatus: "cancelled",
         stage: "Cancelled",
@@ -1468,8 +1480,18 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
         status: "warning",
         cancelledAt: new Date(),
       },
+    });
+    if (transition.count !== 1) {
+      throw new AppError("The escrow changed before it could be cancelled. Refresh and try again.", 409);
+    }
+
+    const updated = await tx.escrow.findUnique({
+      where: { id: escrow.id },
       include: includeEscrowRelations,
     });
+    if (!updated) {
+      throw new AppError("Escrow not found.", 404);
+    }
 
     const counterpartId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
     if (counterpartId) {
@@ -1498,6 +1520,9 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
     throw new AppError("Only the buyer can fund this escrow.", 403);
   }
   if (escrow.lifecycleStatus !== "funding_pending") {
+    if (escrow.fundingStatus === "funded") {
+      throw new AppError("This escrow has already been funded.", 409);
+    }
     throw new AppError("This escrow is not ready for funding.", 400);
   }
   if (hasPendingAgreementChanges(escrow)) {
@@ -1505,28 +1530,12 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
   }
 
   return prisma.$transaction(async (tx) => {
-    const buyer = await tx.user.findUnique({ where: { id: userId } });
-    if (!buyer) {
-      throw new AppError("Buyer not found.", 404);
-    }
-    if (buyer.walletBalanceCents < escrow.amountCents) {
-      throw new AppError("Insufficient wallet balance.", 400);
-    }
-
-    await tx.user.update({
-      where: { id: buyer.id },
-      data: { walletBalanceCents: buyer.walletBalanceCents - escrow.amountCents },
-    });
-    await tx.walletTransaction.create({
-      data: {
-        userId: buyer.id,
-        amountCents: -escrow.amountCents,
-        type: "FUND",
+    const transition = await tx.escrow.updateMany({
+      where: {
+        id: escrow.id,
+        lifecycleStatus: "funding_pending",
+        fundingStatus: "not_funded",
       },
-    });
-
-    const updated = await tx.escrow.update({
-      where: { id: escrow.id },
       data: {
         lifecycleStatus: "funded",
         fundingStatus: "funded",
@@ -1535,11 +1544,40 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
         status: "success",
         fundedAt: new Date(),
       },
-      include: includeEscrowRelations,
+    });
+    if (transition.count !== 1) {
+      throw new AppError("This escrow was already funded or its state changed. Refresh and try again.", 409);
+    }
+
+    const debit = await tx.user.updateMany({
+      where: {
+        id: userId,
+        walletBalanceCents: { gte: escrow.amountCents },
+      },
+      data: { walletBalanceCents: { decrement: escrow.amountCents } },
+    });
+    if (debit.count !== 1) {
+      throw new AppError("Insufficient wallet balance.", 400);
+    }
+
+    await tx.walletTransaction.create({
+      data: {
+        userId,
+        amountCents: -escrow.amountCents,
+        type: "FUND",
+      },
     });
 
+    const updated = await tx.escrow.findUnique({
+      where: { id: escrow.id },
+      include: includeEscrowRelations,
+    });
+    if (!updated) {
+      throw new AppError("Escrow not found.", 404);
+    }
+
     const sellerId = requireSellerId(updated);
-    await createTimeline(tx, buyer.id, `${updated.reference} funded`, "Funds secured in escrow", "funding");
+    await createTimeline(tx, userId, `${updated.reference} funded`, "Funds secured in escrow", "funding");
     await createTimeline(tx, sellerId, `${updated.reference} funded`, "Work can begin", "funding");
     await createNotification(
       tx,
@@ -1561,63 +1599,10 @@ export async function releaseEscrow(prisma: PrismaClient, userId: string, refere
   if (buyerId !== userId) {
     throw new AppError("Only the buyer can release this escrow.", 403);
   }
-  if (escrow.lifecycleStatus !== "funded") {
-    throw new AppError("Only funded escrows can be released.", 400);
-  }
-
-  return prisma.$transaction(async (tx) => {
-    const seller = await tx.user.findUnique({ where: { id: requireSellerId(escrow) } });
-    if (!seller) {
-      throw new AppError("Seller not found.", 404);
-    }
-
-    await tx.user.update({
-      where: { id: seller.id },
-      data: { walletBalanceCents: seller.walletBalanceCents + escrow.amountCents },
-    });
-    await tx.walletTransaction.create({
-      data: {
-        userId: seller.id,
-        amountCents: escrow.amountCents,
-        type: "RELEASE",
-      },
-    });
-    await tx.escrowMilestone.updateMany({
-      where: {
-        escrowId: escrow.id,
-        status: "pending",
-      },
-      data: {
-        status: "released",
-        releasedAt: new Date(),
-      },
-    });
-
-    const updated = await tx.escrow.update({
-      where: { id: escrow.id },
-      data: {
-        lifecycleStatus: "completed",
-        stage: "Released",
-        dueDescription: "All funds released",
-        status: "success",
-      },
-      include: includeEscrowRelations,
-    });
-
-    await createTimeline(tx, seller.id, `Release approved for ${updated.reference}`, `${updated.title} payout sent`, "released");
-    await createTimeline(tx, requireBuyerId(updated), `Release approved for ${updated.reference}`, `${updated.counterpart} payout sent`, "released");
-    await createNotification(
-      tx,
-      seller.id,
-      "Escrow payout released",
-      `${updated.title} funds were released to your wallet.`,
-      "Just now",
-      updated.id,
-    );
-    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
-
-    return updated;
-  });
+  throw new AppError(
+    "Full escrow release is disabled. Approve each milestone separately.",
+    409,
+  );
 }
 
 export async function approveMilestone(
@@ -1632,38 +1617,51 @@ export async function approveMilestone(
     throw new AppError("Only the buyer can approve milestone releases.", 403);
   }
   if (escrow.lifecycleStatus !== "funded") {
+    if (escrow.lifecycleStatus === "completed") {
+      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+    }
     throw new AppError("Milestones can only be approved after funding.", 400);
   }
 
   const targetMilestone = getMilestoneById(escrow, milestoneId);
   if (targetMilestone.status !== "pending") {
-    throw new AppError("Only pending milestones can be approved.", 400);
+    throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
   }
 
   return prisma.$transaction(async (tx) => {
-    const seller = await tx.user.findUnique({ where: { id: requireSellerId(escrow) } });
-    if (!seller) {
-      throw new AppError("Seller not found.", 404);
+    const escrowLock = await tx.escrow.updateMany({
+      where: { id: escrow.id, lifecycleStatus: "funded" },
+      data: { updatedAt: new Date() },
+    });
+    if (escrowLock.count !== 1) {
+      throw new AppError("The escrow changed before this milestone could be released. Refresh and try again.", 409);
     }
 
     const releasedAt = new Date();
-    const milestone = await tx.escrowMilestone.update({
-      where: { id: milestoneId },
+    const milestoneTransition = await tx.escrowMilestone.updateMany({
+      where: {
+        id: milestoneId,
+        escrowId: escrow.id,
+        status: "pending",
+      },
       data: {
         status: "released",
         releasedAt,
         rejectedAt: null,
       },
     });
+    if (milestoneTransition.count !== 1) {
+      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+    }
 
     await tx.user.update({
-      where: { id: seller.id },
-      data: { walletBalanceCents: seller.walletBalanceCents + milestone.amountCents },
+      where: { id: requireSellerId(escrow) },
+      data: { walletBalanceCents: { increment: targetMilestone.amountCents } },
     });
     await tx.walletTransaction.create({
       data: {
-        userId: seller.id,
-        amountCents: milestone.amountCents,
+        userId: requireSellerId(escrow),
+        amountCents: targetMilestone.amountCents,
         type: "RELEASE",
       },
     });
@@ -1681,29 +1679,29 @@ export async function approveMilestone(
 
     await createTimeline(
       tx,
-      seller.id,
+      requireSellerId(updatedEscrow),
       `Milestone released for ${updatedEscrow.reference}`,
-      `${milestone.title} paid out`,
+      `${targetMilestone.title} paid out`,
       "released",
     );
     await createTimeline(
       tx,
       requireBuyerId(updatedEscrow),
-      `You released ${milestone.title}`,
-      `${formatCurrencyFromCents(milestone.amountCents)} sent to ${updatedEscrow.seller?.name ?? updatedEscrow.counterpart}`,
+      `You released ${targetMilestone.title}`,
+      `${formatCurrencyFromCents(targetMilestone.amountCents)} sent to ${updatedEscrow.seller?.name ?? updatedEscrow.counterpart}`,
       "released",
     );
     await createNotification(
       tx,
-      seller.id,
+      requireSellerId(updatedEscrow),
       "Milestone released",
-      `${milestone.title} funds were released to your wallet.`,
+      `${targetMilestone.title} funds were released to your wallet.`,
       "Just now",
       updatedEscrow.id,
     );
     await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
       label: "Milestone resubmitted",
-      detailContains: milestone.title,
+      detailContains: targetMilestone.title,
     });
 
     return {
@@ -1725,23 +1723,41 @@ export async function rejectMilestone(
     throw new AppError("Only the buyer can reject milestones.", 403);
   }
   if (escrow.lifecycleStatus !== "funded") {
+    if (escrow.lifecycleStatus === "completed") {
+      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+    }
     throw new AppError("Milestones can only be reviewed after funding.", 400);
   }
 
   const targetMilestone = getMilestoneById(escrow, milestoneId);
   if (targetMilestone.status !== "pending") {
-    throw new AppError("Only pending milestones can be rejected.", 400);
+    throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
   }
 
   return prisma.$transaction(async (tx) => {
+    const escrowLock = await tx.escrow.updateMany({
+      where: { id: escrow.id, lifecycleStatus: "funded" },
+      data: { updatedAt: new Date() },
+    });
+    if (escrowLock.count !== 1) {
+      throw new AppError("The escrow changed before this milestone could be rejected. Refresh and try again.", 409);
+    }
+
     const rejectedAt = new Date();
-    await tx.escrowMilestone.update({
-      where: { id: milestoneId },
+    const milestoneTransition = await tx.escrowMilestone.updateMany({
+      where: {
+        id: milestoneId,
+        escrowId: escrow.id,
+        status: "pending",
+      },
       data: {
         status: "rejected",
         rejectedAt,
       },
     });
+    if (milestoneTransition.count !== 1) {
+      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+    }
 
     const milestones = await tx.escrowMilestone.findMany({
       where: { escrowId: escrow.id },
@@ -1805,17 +1821,32 @@ export async function resubmitMilestone(
 
   const targetMilestone = getMilestoneById(escrow, milestoneId);
   if (targetMilestone.status !== "rejected") {
-    throw new AppError("Only rejected milestones can be resubmitted.", 400);
+    throw new AppError("This milestone is no longer awaiting resubmission. Refresh to see its current state.", 409);
   }
 
   return prisma.$transaction(async (tx) => {
-    await tx.escrowMilestone.update({
-      where: { id: milestoneId },
+    const escrowLock = await tx.escrow.updateMany({
+      where: { id: escrow.id, lifecycleStatus: "funded" },
+      data: { updatedAt: new Date() },
+    });
+    if (escrowLock.count !== 1) {
+      throw new AppError("The escrow changed before this milestone could be resubmitted. Refresh and try again.", 409);
+    }
+
+    const milestoneTransition = await tx.escrowMilestone.updateMany({
+      where: {
+        id: milestoneId,
+        escrowId: escrow.id,
+        status: "rejected",
+      },
       data: {
         status: "pending",
         rejectedAt: null,
       },
     });
+    if (milestoneTransition.count !== 1) {
+      throw new AppError("This milestone is no longer awaiting resubmission. Refresh to see its current state.", 409);
+    }
 
     const milestones = await tx.escrowMilestone.findMany({
       where: { escrowId: escrow.id },

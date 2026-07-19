@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
-  addTimelineEvent,
   applyAgreementChanges,
   applyMilestoneChanges,
   approveEscrow,
@@ -237,17 +236,8 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/release", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const escrow = await releaseEscrow(secured.prisma, user.id, id);
-      await addTimelineEvent(secured.prisma, user.id, {
-        title: `Release approved for ${escrow.reference}`,
-        meta: `${escrow.counterpart} payout sent`,
-        status: "released",
-      });
-      return {
-        success: true,
-        escrowId: escrow.reference,
-        releasedAt: nowIso(),
-      };
+      await releaseEscrow(secured.prisma, user.id, id);
+      return { success: false };
     });
 
     secured.post("/api/dashboard/escrows/:id/approve", async (request) => {

@@ -807,17 +807,66 @@ describe("MyEscrow API", () => {
     }));
   });
 
-  it("funds the escrow as the buyer", async () => {
-    const response = await server.inject({
-      method: "POST",
-      url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
-      headers: { Authorization: `Bearer ${token}` },
+  it("funds the escrow only once when duplicate requests arrive together", async () => {
+    const buyerBefore = await server.prisma.user.findUniqueOrThrow({
+      where: { email: "scott@example.com" },
     });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().success).toBe(true);
+    const escrowBefore = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: createdEscrowReference },
+    });
+    const fundingEntriesBefore = await server.prisma.walletTransaction.count({
+      where: { userId: buyerBefore.id, type: "FUND", amountCents: -escrowBefore.amountCents },
+    });
+
+    const responses = await Promise.all([
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(responses.find((response) => response.statusCode === 200)?.json().success).toBe(true);
+
+    const buyerAfter = await server.prisma.user.findUniqueOrThrow({
+      where: { id: buyerBefore.id },
+    });
+    const fundingEntriesAfter = await server.prisma.walletTransaction.count({
+      where: { userId: buyerBefore.id, type: "FUND", amountCents: -escrowBefore.amountCents },
+    });
+    expect(buyerAfter.walletBalanceCents).toBe(buyerBefore.walletBalanceCents - escrowBefore.amountCents);
+    expect(fundingEntriesAfter).toBe(fundingEntriesBefore + 1);
   });
 
-  it("releases a single milestone from the funded escrow", async () => {
+  it("blocks legacy full release and cancellation after funding", async () => {
+    const releaseResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/release`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(releaseResponse.statusCode).toBe(409);
+    expect(releaseResponse.json().error).toBe(
+      "Full escrow release is disabled. Approve each milestone separately.",
+    );
+
+    const cancelResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/cancel`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(cancelResponse.statusCode).toBe(409);
+    expect(cancelResponse.json().error).toBe(
+      "Funded escrows cannot be cancelled until the refund workflow is available.",
+    );
+  });
+
+  it("releases a milestone only once when duplicate requests arrive together", async () => {
     const escrowsResponse = await server.inject({
       method: "GET",
       url: "/api/dashboard/escrows",
@@ -834,13 +883,40 @@ describe("MyEscrow API", () => {
     expect(targetEscrow.approvedAt).toBeTruthy();
     createdMilestoneId = targetEscrow.milestones[0].id;
 
-    const response = await server.inject({
-      method: "POST",
-      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
-      headers: { Authorization: `Bearer ${token}` },
+    const sellerBefore = await server.prisma.user.findUniqueOrThrow({
+      where: { email: "nora@example.com" },
     });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().success).toBe(true);
+    const milestoneBefore = await server.prisma.escrowMilestone.findUniqueOrThrow({
+      where: { id: createdMilestoneId },
+    });
+    const releaseEntriesBefore = await server.prisma.walletTransaction.count({
+      where: { userId: sellerBefore.id, type: "RELEASE", amountCents: milestoneBefore.amountCents },
+    });
+
+    const responses = await Promise.all([
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(responses.find((response) => response.statusCode === 200)?.json().success).toBe(true);
+
+    const sellerAfter = await server.prisma.user.findUniqueOrThrow({
+      where: { id: sellerBefore.id },
+    });
+    const releaseEntriesAfter = await server.prisma.walletTransaction.count({
+      where: { userId: sellerBefore.id, type: "RELEASE", amountCents: milestoneBefore.amountCents },
+    });
+    expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents + milestoneBefore.amountCents);
+    expect(releaseEntriesAfter).toBe(releaseEntriesBefore + 1);
   });
 
   it("keeps the escrow funded until all milestones are released", async () => {
@@ -857,6 +933,58 @@ describe("MyEscrow API", () => {
     expect(targetEscrow.stage).toBe("Milestones active");
     expect(targetEscrow.milestones[0].status).toBe("released");
     expect(targetEscrow.milestones[1].status).toBe("pending");
+  });
+
+  it("allows only one outcome when milestone approval and rejection race", async () => {
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: createdEscrowReference },
+      include: { milestones: { orderBy: { orderIndex: "asc" } } },
+    });
+    const milestone = escrow.milestones[1];
+    expect(milestone?.status).toBe("pending");
+    if (!milestone) throw new Error("Expected a second milestone.");
+
+    const sellerBefore = await server.prisma.user.findUniqueOrThrow({
+      where: { email: "nora@example.com" },
+    });
+    const releaseEntriesBefore = await server.prisma.walletTransaction.count({
+      where: { userId: sellerBefore.id, type: "RELEASE", amountCents: milestone.amountCents },
+    });
+
+    const [approveResponse, rejectResponse] = await Promise.all([
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestone.id}/approve`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestone.id}/reject`,
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+
+    expect([approveResponse.statusCode, rejectResponse.statusCode].sort()).toEqual([200, 409]);
+
+    const milestoneAfter = await server.prisma.escrowMilestone.findUniqueOrThrow({
+      where: { id: milestone.id },
+    });
+    const sellerAfter = await server.prisma.user.findUniqueOrThrow({
+      where: { id: sellerBefore.id },
+    });
+    const releaseEntriesAfter = await server.prisma.walletTransaction.count({
+      where: { userId: sellerBefore.id, type: "RELEASE", amountCents: milestone.amountCents },
+    });
+
+    if (approveResponse.statusCode === 200) {
+      expect(milestoneAfter.status).toBe("released");
+      expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents + milestone.amountCents);
+      expect(releaseEntriesAfter).toBe(releaseEntriesBefore + 1);
+    } else {
+      expect(milestoneAfter.status).toBe("rejected");
+      expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents);
+      expect(releaseEntriesAfter).toBe(releaseEntriesBefore);
+    }
   });
 
   it("creates another funded escrow for rejection and resubmission checks", async () => {
