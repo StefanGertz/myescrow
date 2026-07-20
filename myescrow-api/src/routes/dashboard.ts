@@ -9,12 +9,12 @@ import {
   createEscrow,
   dismissNotification,
   fundEscrow,
+  getEscrowLedgerHistory,
   getOverview,
   listDisputes,
   listEscrows,
   listNotifications,
   listWalletTransactions,
-  recordWalletTransaction,
   rejectEscrow,
   rejectMilestone,
   requestAgreementChanges,
@@ -25,7 +25,8 @@ import {
   updateDraftEscrow,
 } from "../services/dashboardService";
 import { sendEscrowInvitationEmail, sendMilestoneChangeRequestEmail } from "../services/emailService";
-import { adjustWalletBalance, findUserById } from "../services/userService";
+import { findUserById } from "../services/userService";
+import { recordStandaloneWalletTransfer } from "../services/moneyIntegrityService";
 import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
 import { nowIso } from "../utils/dates";
@@ -143,6 +144,14 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       return user;
     };
 
+    const requireIdempotencyKey = (request: FastifyRequest) => {
+      const value = request.headers["idempotency-key"];
+      if (typeof value !== "string" || value.trim().length < 8 || value.length > 200) {
+        throw new AppError("A valid Idempotency-Key header is required for this command.", 400);
+      }
+      return value.trim();
+    };
+
     secured.get("/api/dashboard/overview", async (request) => {
       const user = await requireUser(request);
       return getOverview(secured.prisma, user.id);
@@ -152,6 +161,12 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const escrows = await listEscrows(secured.prisma, user.id);
       return { escrows };
+    });
+
+    secured.get("/api/dashboard/escrows/:id/ledger", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      return getEscrowLedgerHistory(secured.prisma, user.id, id);
     });
 
     secured.get("/api/dashboard/business-profile", async (request) => {
@@ -180,25 +195,27 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         ...(body.description ? { description: body.description } : {}),
         ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
         ...(body.milestones ? { milestones: body.milestones } : {}),
-      });
-      await sendEscrowInvitationEmail({
-        to: result.invitedEmail,
-        recipientName: result.counterpartyUser?.name ?? result.invitedEmail,
-        creatorName: result.owner.name,
-        escrowTitle: result.escrow.title,
-        escrowReference: result.escrow.reference,
-        creatorRole: body.creatorRole,
-        invitationStatus: result.invitationStatus,
-        logger: secured.log,
-      });
+      }, requireIdempotencyKey(request));
+      if (!result.replayed) {
+        await sendEscrowInvitationEmail({
+          to: result.invitedEmail,
+          recipientName: result.recipientName,
+          creatorName: result.creatorName,
+          escrowTitle: result.escrowTitle,
+          escrowReference: result.reference,
+          creatorRole: result.creatorRole,
+          invitationStatus: result.invitationStatus,
+          logger: secured.log,
+        });
+      }
       reply.code(201);
       return {
         success: true,
-        escrowId: result.escrow.id,
-        reference: result.escrow.reference,
-        counterpart: result.escrow.counterpart,
+        escrowId: result.escrowId,
+        reference: result.reference,
+        counterpart: result.counterpart,
         invitationStatus: result.invitationStatus,
-        createdAt: result.escrow.createdAt,
+        createdAt: result.createdAt,
       };
     });
 
@@ -271,24 +288,19 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/fund", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const escrow = await fundEscrow(secured.prisma, user.id, id);
-      return {
-        success: true,
-        escrowId: escrow.reference,
-        fundedAt: escrow.fundedAt?.toISOString() ?? nowIso(),
-      };
+      return fundEscrow(secured.prisma, user.id, id, requireIdempotencyKey(request));
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/approve", async (request) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
-      const result = await approveMilestone(secured.prisma, user.id, id, milestoneId);
-      return {
-        success: true,
-        escrowId: result.escrow.reference,
-        milestoneId: result.milestone.id,
-        releasedAt: result.milestone.releasedAt?.toISOString() ?? nowIso(),
-      };
+      return approveMilestone(
+        secured.prisma,
+        user.id,
+        id,
+        milestoneId,
+        requireIdempotencyKey(request),
+      );
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/reject", async (request) => {
@@ -430,12 +442,15 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const { amount } = walletSchema.parse(request.body);
       const cents = dollarsToCents(amount);
-      const updatedUser = await adjustWalletBalance(secured.prisma, user.id, cents);
-      await recordWalletTransaction(secured.prisma, user.id, cents, "TOPUP");
+      const updatedUser = await recordStandaloneWalletTransfer(secured.prisma, {
+        userId: user.id,
+        amountCents: cents,
+        type: "TOPUP",
+      }, requireIdempotencyKey(request));
       return {
         success: true,
         amount,
-        balance: Number((updatedUser.walletBalanceCents / 100).toFixed(2)),
+        balance: Number((updatedUser.balanceCents / 100).toFixed(2)),
       };
     });
 
@@ -443,12 +458,15 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const { amount } = walletSchema.parse(request.body);
       const cents = dollarsToCents(amount);
-      const updatedUser = await adjustWalletBalance(secured.prisma, user.id, -cents);
-      await recordWalletTransaction(secured.prisma, user.id, -cents, "WITHDRAW");
+      const updatedUser = await recordStandaloneWalletTransfer(secured.prisma, {
+        userId: user.id,
+        amountCents: -cents,
+        type: "WITHDRAW",
+      }, requireIdempotencyKey(request));
       return {
         success: true,
         amount,
-        balance: Number((updatedUser.walletBalanceCents / 100).toFixed(2)),
+        balance: Number((updatedUser.balanceCents / 100).toFixed(2)),
       };
     });
 

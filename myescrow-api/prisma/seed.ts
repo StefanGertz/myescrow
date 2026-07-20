@@ -12,6 +12,8 @@ async function main() {
   const data = JSON.parse(raw) as DatabaseSchema;
 
   await prisma.$transaction([
+    prisma.idempotencyRecord.deleteMany(),
+    prisma.escrowLedgerEntry.deleteMany(),
     prisma.walletTransaction.deleteMany(),
     prisma.escrowMilestone.deleteMany(),
     prisma.timelineEvent.deleteMany(),
@@ -129,6 +131,40 @@ async function main() {
       createdAt: new Date(transaction.createdAt),
     })),
   });
+
+  const fundedEscrows = await prisma.escrow.findMany({
+    where: { fundingStatus: "funded", buyerId: { not: null } },
+    include: { milestones: true },
+  });
+  for (const escrow of fundedEscrows) {
+    await prisma.escrowLedgerEntry.create({
+      data: {
+        escrowId: escrow.id,
+        movementType: "fund",
+        amountCents: escrow.amountCents,
+        idempotencyKey: `seed:fund:${escrow.reference}`,
+        businessReference: `escrow:${escrow.reference}:fund`,
+        actorId: escrow.buyerId!,
+        sourceCommand: "seed_backfill",
+        createdAt: escrow.fundedAt ?? escrow.updatedAt,
+      },
+    });
+    for (const milestone of escrow.milestones.filter((item) => item.status === "released")) {
+      await prisma.escrowLedgerEntry.create({
+        data: {
+          escrowId: escrow.id,
+          milestoneId: milestone.id,
+          movementType: "release",
+          amountCents: -milestone.amountCents,
+          idempotencyKey: `seed:release:${milestone.id}`,
+          businessReference: `escrow:${escrow.reference}:milestone:${milestone.id}:release`,
+          actorId: escrow.buyerId!,
+          sourceCommand: "seed_backfill",
+          createdAt: milestone.releasedAt ?? milestone.updatedAt,
+        },
+      });
+    }
+  }
 
   await prisma.sequence.createMany({
     data: [

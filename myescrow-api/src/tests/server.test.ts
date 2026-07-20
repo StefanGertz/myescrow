@@ -3,6 +3,7 @@ import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
+import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 
 let server: FastifyInstance;
 let token: string;
@@ -230,6 +231,7 @@ describe("MyEscrow API", () => {
   });
 
   it("creates a new escrow", async () => {
+    const emailsBefore = sentEmails.length;
     const payload = {
       title: "New project escrow",
       counterpartyEmail: "nora@example.com",
@@ -252,7 +254,7 @@ describe("MyEscrow API", () => {
     const response = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-main-escrow" },
       payload,
     });
     expect(response.statusCode).toBe(201);
@@ -261,6 +263,16 @@ describe("MyEscrow API", () => {
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
     createdEscrowReference = body.reference;
+    const replay = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-main-escrow" },
+      payload,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json()).toEqual(body);
+    expect(await server.prisma.escrow.count({ where: { reference: createdEscrowReference } })).toBe(1);
+    expect(sentEmails).toHaveLength(emailsBefore + 1);
     const escrowsResponse = await server.inject({
       method: "GET",
       url: "/api/dashboard/escrows",
@@ -289,7 +301,7 @@ describe("MyEscrow API", () => {
     const createResponse = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-agreement-route" },
       payload: {
         title: "Agreement route escrow",
         counterpartyEmail: "nora@example.com",
@@ -378,7 +390,7 @@ describe("MyEscrow API", () => {
       const createResponse = await server.inject({
         method: "POST",
         url: "/api/dashboard/escrows/create",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `create-agreement-${scenario.name}` },
         payload: {
           title: scenario.title,
           counterpartyEmail: "nora@example.com",
@@ -471,7 +483,7 @@ describe("MyEscrow API", () => {
       const fundBeforeApprovalResponse = await server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${reference}/fund`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `fund-before-${reference}` },
       });
       expect(fundBeforeApprovalResponse.statusCode).toBe(400);
       expect(fundBeforeApprovalResponse.json().error).toBe("This escrow is not ready for funding.");
@@ -487,7 +499,7 @@ describe("MyEscrow API", () => {
       const fundAfterApprovalResponse = await server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${reference}/fund`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `fund-after-${reference}` },
       });
       expect(fundAfterApprovalResponse.statusCode).toBe(200);
       expect(fundAfterApprovalResponse.json().success).toBe(true);
@@ -657,7 +669,7 @@ describe("MyEscrow API", () => {
     const response = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-invite-first" },
       payload: {
         title: "Invite-first escrow",
         counterpartyEmail: "jamie.contractor@example.com",
@@ -818,21 +830,22 @@ describe("MyEscrow API", () => {
       where: { userId: buyerBefore.id, type: "FUND", amountCents: -escrowBefore.amountCents },
     });
 
+    const idempotencyKey = `fund-${createdEscrowReference}`;
     const responses = await Promise.all([
       server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
       }),
       server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/fund`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
-    expect(responses.find((response) => response.statusCode === 200)?.json().success).toBe(true);
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(responses[0].json()).toEqual(responses[1].json());
 
     const buyerAfter = await server.prisma.user.findUniqueOrThrow({
       where: { id: buyerBefore.id },
@@ -842,6 +855,22 @@ describe("MyEscrow API", () => {
     });
     expect(buyerAfter.walletBalanceCents).toBe(buyerBefore.walletBalanceCents - escrowBefore.amountCents);
     expect(fundingEntriesAfter).toBe(fundingEntriesBefore + 1);
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { escrowId: escrowBefore.id, movementType: "fund" },
+    })).toBe(1);
+    const fundedView = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(fundedView.balances).toEqual({
+      currency: "USD",
+      fundedCents: escrowBefore.amountCents,
+      heldCents: escrowBefore.amountCents,
+      releasedCents: 0,
+      refundedCents: 0,
+      disputedCents: 0,
+    });
   });
 
   it("blocks legacy full release and cancellation after funding", async () => {
@@ -893,21 +922,22 @@ describe("MyEscrow API", () => {
       where: { userId: sellerBefore.id, type: "RELEASE", amountCents: milestoneBefore.amountCents },
     });
 
+    const idempotencyKey = `release-${createdEscrowReference}-${createdMilestoneId}`;
     const responses = await Promise.all([
       server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
       }),
       server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${createdMilestoneId}/approve`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
-    expect(responses.find((response) => response.statusCode === 200)?.json().success).toBe(true);
+    expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+    expect(responses[0].json()).toEqual(responses[1].json());
 
     const sellerAfter = await server.prisma.user.findUniqueOrThrow({
       where: { id: sellerBefore.id },
@@ -917,6 +947,46 @@ describe("MyEscrow API", () => {
     });
     expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents + milestoneBefore.amountCents);
     expect(releaseEntriesAfter).toBe(releaseEntriesBefore + 1);
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { milestoneId: createdMilestoneId, movementType: "release" },
+    })).toBe(1);
+    const releasedView = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(releasedView.balances.fundedCents).toBe(
+      releasedView.balances.heldCents
+      + releasedView.balances.releasedCents
+      + releasedView.balances.refundedCents,
+    );
+    expect(releasedView.balances.releasedCents).toBe(milestoneBefore.amountCents);
+
+    const reusedKeyResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${targetEscrow.milestones[1].id}/approve`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
+    });
+    expect(reusedKeyResponse.statusCode).toBe(409);
+    expect(reusedKeyResponse.json().error).toBe(
+      "This idempotency key was already used for a different request.",
+    );
+
+    const ledgerHistory = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/ledger`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(ledgerHistory.statusCode).toBe(200);
+    expect(ledgerHistory.json().balances).toEqual(releasedView.balances);
+    expect(ledgerHistory.json().entries).toEqual([
+      expect.objectContaining({ movementType: "fund", amountCents: releasedView.balances.fundedCents }),
+      expect.objectContaining({
+        movementType: "release",
+        amountCents: -milestoneBefore.amountCents,
+        milestone: expect.objectContaining({ id: createdMilestoneId }),
+      }),
+    ]);
   });
 
   it("keeps the escrow funded until all milestones are released", async () => {
@@ -955,7 +1025,10 @@ describe("MyEscrow API", () => {
       server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestone.id}/approve`,
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `race-approve-${createdEscrowReference}-${milestone.id}`,
+        },
       }),
       server.inject({
         method: "POST",
@@ -991,7 +1064,10 @@ describe("MyEscrow API", () => {
     const createResponse = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-revision-workflow",
+      },
       payload: {
         title: "Revision workflow escrow",
         counterpartyEmail: "nora@example.com",
@@ -1016,7 +1092,10 @@ describe("MyEscrow API", () => {
     const fundResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/fund`,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-${secondMilestoneEscrowReference}`,
+      },
     });
     expect(fundResponse.statusCode).toBe(200);
   });
@@ -1061,21 +1140,35 @@ describe("MyEscrow API", () => {
   });
 
   it("tops up the wallet", async () => {
+    const key = "wallet-topup-test";
+    const transactionsBefore = await server.prisma.walletTransaction.count({
+      where: { type: "TOPUP" },
+    });
     const response = await server.inject({
       method: "POST",
       url: "/api/dashboard/wallet/topup",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": key },
       payload: { amount: 2500 },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().balance).toBeGreaterThan(0);
+    const replay = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/wallet/topup",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": key },
+      payload: { amount: 2500 },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(response.json());
+    expect(await server.prisma.walletTransaction.count({ where: { type: "TOPUP" } }))
+      .toBe(transactionsBefore + 1);
   });
 
   it("records wallet withdrawals as debits", async () => {
     const withdrawResponse = await server.inject({
       method: "POST",
       url: "/api/dashboard/wallet/withdraw",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "wallet-withdraw-test" },
       payload: { amount: 100 },
     });
     expect(withdrawResponse.statusCode).toBe(200);
@@ -1121,5 +1214,11 @@ describe("MyEscrow API", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().disputeId).toBe(target.id);
+  });
+
+  it("reconciles every funded escrow against its immutable ledger", async () => {
+    const report = await reconcileEscrowLedger(server.prisma);
+    expect(report.checkedEscrows).toBeGreaterThan(0);
+    expect(report.exceptions).toEqual([]);
   });
 });

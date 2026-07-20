@@ -25,33 +25,35 @@ model User {
   notifications       Notification[]
   timelineEvents      TimelineEvent[]
   walletTransactions  WalletTransaction[]
+  escrowLedgerEntries EscrowLedgerEntry[]      @relation("LedgerActor")
+  idempotencyRecords  IdempotencyRecord[]
   verificationTokens  EmailVerificationToken[]
   passwordResetTokens PasswordResetToken[]
   businessProfile     BusinessProfile?
 }
 
 model BusinessProfile {
-  id                    Int      @id @default(autoincrement())
-  userId                String   @unique
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  legalName             String
-  registrationCountry   String
-  registrationNumber    String
-  registeredAddress     String
-  representativeTitle   String
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                  Int      @id @default(autoincrement())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName           String
+  registrationCountry String
+  registrationNumber  String
+  registeredAddress   String
+  representativeTitle String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Escrow {
-  id                           Int               @id @default(autoincrement())
-  reference                    String            @unique
+  id                           Int                 @id @default(autoincrement())
+  reference                    String              @unique
   ownerId                      String
-  owner                        User              @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  owner                        User                @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   buyerId                      String?
-  buyer                        User?             @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer                        User?               @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
   sellerId                     String?
-  seller                       User?             @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  seller                       User?               @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
   creatorRole                  String
   counterpartyEmail            String
   title                        String
@@ -60,22 +62,23 @@ model Escrow {
   stage                        String
   dueDescription               String
   status                       String
-  counterpartyApproved         Boolean           @default(false)
-  lifecycleStatus              String            @default("pending_approval")
-  fundingStatus                String            @default("not_funded")
+  counterpartyApproved         Boolean             @default(false)
+  lifecycleStatus              String              @default("pending_approval")
+  fundingStatus                String              @default("not_funded")
   category                     String?
   description                  String?
   approvedAt                   DateTime?
-  creatorSignatureDataUrl      String?           @db.Text
-  counterpartySignatureDataUrl String?           @db.Text
-  creatorPartySnapshot         Json              @default("{}")
+  creatorSignatureDataUrl      String?             @db.Text
+  counterpartySignatureDataUrl String?             @db.Text
+  creatorPartySnapshot         Json                @default("{}")
   counterpartyPartySnapshot    Json?
   fundedAt                     DateTime?
   rejectedAt                   DateTime?
   cancelledAt                  DateTime?
-  createdAt                    DateTime          @default(now())
-  updatedAt                    DateTime          @updatedAt
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
   milestones                   EscrowMilestone[]
+  ledgerEntries                EscrowLedgerEntry[]
 
   @@index([ownerId])
   @@index([buyerId])
@@ -85,15 +88,15 @@ model Escrow {
 }
 
 model EscrowMilestone {
-  id                   Int       @id @default(autoincrement())
+  id                   Int                 @id @default(autoincrement())
   escrowId             Int
-  escrow               Escrow    @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  escrow               Escrow              @relation(fields: [escrowId], references: [id], onDelete: Cascade)
   title                String
   description          String?
   amountCents          Int
   deadline             DateTime?
   orderIndex           Int
-  status               String    @default("pending")
+  status               String              @default("pending")
   requestedTitle       String?
   requestedDescription String?
   requestedAmountCents Int?
@@ -102,8 +105,9 @@ model EscrowMilestone {
   changeRequestedAt    DateTime?
   releasedAt           DateTime?
   rejectedAt           DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  ledgerEntries        EscrowLedgerEntry[]
 
   @@index([escrowId, orderIndex])
 }
@@ -148,12 +152,53 @@ model TimelineEvent {
 }
 
 model WalletTransaction {
-  id          Int      @id @default(autoincrement())
+  id          Int                @id @default(autoincrement())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   amountCents Int
   type        String
-  createdAt   DateTime @default(now())
+  createdAt   DateTime           @default(now())
+  ledgerEntry EscrowLedgerEntry?
+}
+
+model EscrowLedgerEntry {
+  id                  Int                @id @default(autoincrement())
+  escrowId            Int
+  escrow              Escrow             @relation(fields: [escrowId], references: [id], onDelete: Restrict)
+  milestoneId         Int?
+  milestone           EscrowMilestone?   @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
+  movementType        String
+  amountCents         Int
+  currency            String             @default("USD")
+  idempotencyKey      String
+  businessReference   String             @unique
+  actorId             String
+  actor               User               @relation("LedgerActor", fields: [actorId], references: [id], onDelete: Restrict)
+  sourceCommand       String
+  paymentProviderRef  String?
+  walletTransactionId Int?               @unique
+  walletTransaction   WalletTransaction? @relation(fields: [walletTransactionId], references: [id], onDelete: Restrict)
+  createdAt           DateTime           @default(now())
+
+  @@unique([escrowId, idempotencyKey])
+  @@index([escrowId, createdAt])
+  @@index([milestoneId])
+  @@index([actorId])
+}
+
+model IdempotencyRecord {
+  id           Int      @id @default(autoincrement())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key          String
+  command      String
+  requestHash  String
+  responseJson Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([createdAt])
 }
 
 model Sequence {

@@ -63,6 +63,8 @@ These rules apply across every phase:
 
 ## Phase 1 — Establish the money-integrity foundation
 
+**Implementation status (2026-07-19):** The database migration, legacy backfill, immutable ledger, atomic transfer service, derived balances, idempotency enforcement for create/fund/milestone approval, and reconciliation command are implemented locally. Production rollout still requires staging reconciliation with zero unexplained variance. Refund and settlement movements will begin using the same transfer service when their Phase 4 workflows are introduced.
+
 ### Data model
 
 Introduce an immutable ledger entry for each escrow movement. Each entry should include:

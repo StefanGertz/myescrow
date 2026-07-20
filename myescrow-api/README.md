@@ -71,11 +71,13 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run db:migrate` - `prisma migrate dev` against `DATABASE_URL`.
 - `npm run db:push` - sync schema without migrations.
 - `npm run db:generate` - regenerate the Prisma client.
-- `npm run smoke` - end-to-end smoke test (signup -> overview -> escrow release -> wallet/disputes).
+- `npm run smoke` - end-to-end smoke test (signup -> overview -> milestone releases -> wallet/disputes).
+- `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
 
 ## API surface
 
 Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
+Escrow creation, funding, milestone approval, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -84,7 +86,8 @@ Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/aut
 | POST | `/api/auth/verify-email` | Submit the 6-digit code emailed during signup. |
 | POST | `/api/auth/resend-verification` | Send another verification email if the previous code expired. |
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
-| GET | `/api/dashboard/escrows` | Escrows requiring review. |
+| GET | `/api/dashboard/escrows` | Escrows requiring review, including derived funded, held, released, refunded, and disputed balances. |
+| GET | `/api/dashboard/escrows/:id/ledger` | Immutable escrow balance history for either party. |
 | POST | `/api/dashboard/escrows/create` | Create a new escrow draft. |
 | POST | `/api/dashboard/escrows/:id/release` | Disabled compatibility route; use milestone approval to release funds. |
 | POST | `/api/dashboard/escrows/:id/approve` | Mark escrow as approved. |

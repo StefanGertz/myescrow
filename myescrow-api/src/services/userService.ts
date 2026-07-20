@@ -62,23 +62,6 @@ export async function createUser(
   });
 }
 
-export async function adjustWalletBalance(prisma: PrismaClient, userId: string, deltaCents: number) {
-  return prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new AppError("User not found.", 404);
-    }
-    const nextBalance = user.walletBalanceCents + deltaCents;
-    if (nextBalance < 0) {
-      throw new AppError("Insufficient wallet balance.", 400);
-    }
-    return tx.user.update({
-      where: { id: userId },
-      data: { walletBalanceCents: nextBalance },
-    });
-  });
-}
-
 export async function verifyPassword(
   user: User,
   password: string,

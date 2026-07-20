@@ -42,6 +42,10 @@ async function verifyEmail(email, code) {
 }
 
 const authHeaders = (token) => ({ Authorization: `Bearer ${token}` });
+const commandHeaders = (token) => ({
+  ...authHeaders(token),
+  'Idempotency-Key': crypto.randomUUID(),
+});
 
 async function overview(token) {
   return request('/api/dashboard/overview', {
@@ -52,7 +56,7 @@ async function overview(token) {
 async function createEscrow(token, payload) {
   return request('/api/dashboard/escrows/create', {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: commandHeaders(token),
     body: JSON.stringify(payload)
   });
 }
@@ -60,7 +64,7 @@ async function createEscrow(token, payload) {
 async function escrowAction(token, reference, action) {
   return request(`/api/dashboard/escrows/${reference}/${action}`, {
     method: 'POST',
-    headers: authHeaders(token)
+    headers: commandHeaders(token)
   });
 }
 
@@ -73,14 +77,14 @@ async function listEscrows(token) {
 async function approveMilestone(token, reference, milestoneId) {
   return request(`/api/dashboard/escrows/${reference}/milestones/${milestoneId}/approve`, {
     method: 'POST',
-    headers: authHeaders(token)
+    headers: commandHeaders(token)
   });
 }
 
 async function walletAction(token, path, amount) {
   return request(`/api/dashboard/wallet/${path}`, {
     method: 'POST',
-    headers: authHeaders(token),
+    headers: commandHeaders(token),
     body: JSON.stringify({ amount })
   });
 }

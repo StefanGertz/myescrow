@@ -4,6 +4,15 @@ import { formatAmountWithSuffix, formatCurrencyFromCents, dollarsToCents } from 
 import { AppError } from "../utils/errors";
 import { getNextSequenceValue } from "./sequenceService";
 import { normalizeEmail } from "./userService";
+import {
+  executeIdempotentCommand,
+  executeIdempotentCommandWithMetadata,
+} from "./idempotencyService";
+import {
+  applyEscrowTransfer,
+  deriveLedgerBalances,
+  type LedgerBalances,
+} from "./moneyIntegrityService";
 
 export type SummaryMetric = {
   id: string;
@@ -52,6 +61,7 @@ export type EscrowResponse = {
   buyer: PartyResponse;
   seller: PartyResponse;
   milestones: EscrowMilestoneResponse[];
+  balances: LedgerBalances;
 };
 
 type PartyIdentityInput =
@@ -115,6 +125,7 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
     buyer: true;
     seller: true;
     milestones: { orderBy: { orderIndex: "asc" } };
+    ledgerEntries: { select: { movementType: true; amountCents: true } };
   };
 }>;
 
@@ -201,6 +212,7 @@ const includeEscrowRelations = {
   buyer: true,
   seller: true,
   milestones: { orderBy: { orderIndex: "asc" as const } },
+  ledgerEntries: { select: { movementType: true, amountCents: true } },
 };
 
 const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
@@ -434,6 +446,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     isOwner: record.ownerId === userId,
     buyer: buyerResponse,
     seller: sellerResponse,
+    balances: deriveLedgerBalances(record.ledgerEntries),
     milestones: record.milestones.map((milestone) => ({
       id: milestone.id,
       title: isProposedNewMilestone(milestone) ? milestone.requestedTitle ?? "New milestone" : milestone.title,
@@ -544,12 +557,15 @@ function getMilestoneById(
   return milestone;
 }
 
-function getEscrowStateFromMilestones(milestones: EscrowWithRelations["milestones"]) {
+function getEscrowStateFromMilestones(
+  milestones: EscrowWithRelations["milestones"],
+  heldCents?: number,
+) {
   const remainingPending = milestones.filter((milestone) => milestone.status === "pending").length;
   const rejectedCount = milestones.filter((milestone) => milestone.status === "rejected").length;
   const allReleased = milestones.length > 0 && milestones.every((milestone) => milestone.status === "released");
 
-  if (allReleased) {
+  if (allReleased && heldCents === 0) {
     return {
       lifecycleStatus: "completed",
       stage: "Released",
@@ -651,7 +667,47 @@ export async function listEscrows(prisma: PrismaClient, userId: string): Promise
   return records.map((record) => mapEscrow(record, userId));
 }
 
-export async function createEscrow(prisma: PrismaClient, userId: string, data: CreateEscrowInput) {
+export async function getEscrowLedgerHistory(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+) {
+  const escrow = await prisma.escrow.findFirst({
+    where: { reference, ...visibleEscrowWhere(userId) },
+    select: { id: true, reference: true },
+  });
+  if (!escrow) throw new AppError("Escrow not found.", 404);
+  const entries = await prisma.escrowLedgerEntry.findMany({
+    where: { escrowId: escrow.id },
+    include: { milestone: { select: { id: true, title: true } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  return {
+    escrowId: escrow.reference,
+    balances: deriveLedgerBalances(entries),
+    entries: entries.map((entry) => ({
+      id: entry.id,
+      movementType: entry.movementType,
+      amountCents: entry.amountCents,
+      currency: entry.currency,
+      businessReference: entry.businessReference,
+      sourceCommand: entry.sourceCommand,
+      actorId: entry.actorId,
+      ...(entry.milestone
+        ? { milestone: { id: entry.milestone.id, title: entry.milestone.title } }
+        : {}),
+      ...(entry.paymentProviderRef ? { paymentProviderRef: entry.paymentProviderRef } : {}),
+      createdAt: entry.createdAt.toISOString(),
+    })),
+  };
+}
+
+export async function createEscrow(
+  prisma: PrismaClient,
+  userId: string,
+  data: CreateEscrowInput,
+  idempotencyKey: string,
+) {
   const amountInCents = dollarsToCents(data.amount);
   const milestoneInputs = data.milestones?.length
     ? data.milestones
@@ -686,7 +742,15 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
   const counterpartName = counterpartyUser?.name ?? normalizedCounterpartyEmail;
   const creatorPartySnapshot = buildPartySnapshot(owner, data.creatorParty);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await executeIdempotentCommandWithMetadata(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "create_escrow",
+      payload: data,
+    },
+    async (tx) => {
     await saveBusinessProfile(tx, userId, data.creatorParty);
     const sequence = await getNextSequenceValue(tx, "escrow", 650);
     const reference = buildEscrowReference(sequence);
@@ -763,10 +827,22 @@ export async function createEscrow(prisma: PrismaClient, userId: string, data: C
       );
     }
 
-    return { escrow, owner, counterpartyUser, invitationStatus, invitedEmail: normalizedCounterpartyEmail };
-  });
-
-  return result;
+      return {
+        success: true,
+        escrowId: escrow.id,
+        reference: escrow.reference,
+        counterpart: escrow.counterpart,
+        invitationStatus,
+        createdAt: escrow.createdAt.toISOString(),
+        invitedEmail: normalizedCounterpartyEmail,
+        recipientName: counterpartyUser?.name ?? normalizedCounterpartyEmail,
+        creatorName: owner.name,
+        escrowTitle: escrow.title,
+        creatorRole: data.creatorRole,
+      };
+    },
+  );
+  return { ...result.value, replayed: result.replayed };
 }
 
 export async function updateDraftEscrow(prisma: PrismaClient, userId: string, reference: string, data: UpdateDraftEscrowInput) {
@@ -1513,23 +1589,41 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
   });
 }
 
-export async function fundEscrow(prisma: PrismaClient, userId: string, reference: string) {
-  const escrow = await findEscrowForUser(prisma, userId, reference);
-  const buyerId = requireBuyerId(escrow);
-  if (buyerId !== userId) {
-    throw new AppError("Only the buyer can fund this escrow.", 403);
-  }
-  if (escrow.lifecycleStatus !== "funding_pending") {
-    if (escrow.fundingStatus === "funded") {
-      throw new AppError("This escrow has already been funded.", 409);
-    }
-    throw new AppError("This escrow is not ready for funding.", 400);
-  }
-  if (hasPendingAgreementChanges(escrow)) {
-    throw new AppError("Requested agreement changes must be resolved before funding.", 400);
-  }
+export async function fundEscrow(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  idempotencyKey: string,
+) {
+  return executeIdempotentCommand(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "fund_escrow",
+      payload: { reference },
+    },
+    async (tx) => {
+      const escrow = await tx.escrow.findFirst({
+        where: { reference, ...visibleEscrowWhere(userId) },
+        include: includeEscrowRelations,
+      });
+      if (!escrow) throw new AppError("Escrow not found.", 404);
+      const buyerId = requireBuyerId(escrow);
+      if (buyerId !== userId) {
+        throw new AppError("Only the buyer can fund this escrow.", 403);
+      }
+      if (escrow.lifecycleStatus !== "funding_pending") {
+        if (escrow.fundingStatus === "funded") {
+          throw new AppError("This escrow has already been funded.", 409);
+        }
+        throw new AppError("This escrow is not ready for funding.", 400);
+      }
+      if (hasPendingAgreementChanges(escrow)) {
+        throw new AppError("Requested agreement changes must be resolved before funding.", 400);
+      }
 
-  return prisma.$transaction(async (tx) => {
+      const fundedAt = new Date();
     const transition = await tx.escrow.updateMany({
       where: {
         id: escrow.id,
@@ -1542,55 +1636,51 @@ export async function fundEscrow(prisma: PrismaClient, userId: string, reference
         stage: "Milestones active",
         dueDescription: "Funds secured in escrow",
         status: "success",
-        fundedAt: new Date(),
+        fundedAt,
       },
     });
     if (transition.count !== 1) {
       throw new AppError("This escrow was already funded or its state changed. Refresh and try again.", 409);
     }
 
-    const debit = await tx.user.updateMany({
-      where: {
-        id: userId,
-        walletBalanceCents: { gte: escrow.amountCents },
-      },
-      data: { walletBalanceCents: { decrement: escrow.amountCents } },
+      await applyEscrowTransfer(tx, {
+        escrowId: escrow.id,
+        movementType: "fund",
+        amountCents: escrow.amountCents,
+        idempotencyKey,
+        businessReference: `escrow:${escrow.reference}:fund`,
+        actorId: userId,
+        sourceCommand: "fund_escrow",
+        walletUserId: userId,
+      });
+
+      const updated = await tx.escrow.findUnique({
+        where: { id: escrow.id },
+        include: includeEscrowRelations,
+      });
+      if (!updated) {
+        throw new AppError("Escrow not found.", 404);
+      }
+
+      const sellerId = requireSellerId(updated);
+      await createTimeline(tx, userId, `${updated.reference} funded`, "Funds secured in escrow", "funding");
+      await createTimeline(tx, sellerId, `${updated.reference} funded`, "Work can begin", "funding");
+      await createNotification(
+        tx,
+        sellerId,
+        "Escrow funded",
+        `${updated.title} is funded and ready for milestone work.`,
+        "Just now",
+        updated.id,
+      );
+      await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
+
+      return {
+        success: true,
+        escrowId: updated.reference,
+        fundedAt: fundedAt.toISOString(),
+      };
     });
-    if (debit.count !== 1) {
-      throw new AppError("Insufficient wallet balance.", 400);
-    }
-
-    await tx.walletTransaction.create({
-      data: {
-        userId,
-        amountCents: -escrow.amountCents,
-        type: "FUND",
-      },
-    });
-
-    const updated = await tx.escrow.findUnique({
-      where: { id: escrow.id },
-      include: includeEscrowRelations,
-    });
-    if (!updated) {
-      throw new AppError("Escrow not found.", 404);
-    }
-
-    const sellerId = requireSellerId(updated);
-    await createTimeline(tx, userId, `${updated.reference} funded`, "Funds secured in escrow", "funding");
-    await createTimeline(tx, sellerId, `${updated.reference} funded`, "Work can begin", "funding");
-    await createNotification(
-      tx,
-      sellerId,
-      "Escrow funded",
-      `${updated.title} is funded and ready for milestone work.`,
-      "Just now",
-      updated.id,
-    );
-    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
-
-    return updated;
-  });
 }
 
 export async function releaseEscrow(prisma: PrismaClient, userId: string, reference: string) {
@@ -1610,25 +1700,38 @@ export async function approveMilestone(
   userId: string,
   reference: string,
   milestoneId: number,
-): Promise<MilestoneActionResult> {
-  const escrow = await findEscrowForUser(prisma, userId, reference);
-  const buyerId = requireBuyerId(escrow);
-  if (buyerId !== userId) {
-    throw new AppError("Only the buyer can approve milestone releases.", 403);
-  }
-  if (escrow.lifecycleStatus !== "funded") {
-    if (escrow.lifecycleStatus === "completed") {
-      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
-    }
-    throw new AppError("Milestones can only be approved after funding.", 400);
-  }
+  idempotencyKey: string,
+) {
+  return executeIdempotentCommand(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "approve_milestone",
+      payload: { reference, milestoneId },
+    },
+    async (tx) => {
+      const escrow = await tx.escrow.findFirst({
+        where: { reference, ...visibleEscrowWhere(userId) },
+        include: includeEscrowRelations,
+      });
+      if (!escrow) throw new AppError("Escrow not found.", 404);
+      const buyerId = requireBuyerId(escrow);
+      if (buyerId !== userId) {
+        throw new AppError("Only the buyer can approve milestone releases.", 403);
+      }
+      if (escrow.lifecycleStatus !== "funded") {
+        if (escrow.lifecycleStatus === "completed") {
+          throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+        }
+        throw new AppError("Milestones can only be approved after funding.", 400);
+      }
 
-  const targetMilestone = getMilestoneById(escrow, milestoneId);
-  if (targetMilestone.status !== "pending") {
-    throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
-  }
+      const targetMilestone = getMilestoneById(escrow, milestoneId);
+      if (targetMilestone.status !== "pending") {
+        throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+      }
 
-  return prisma.$transaction(async (tx) => {
     const escrowLock = await tx.escrow.updateMany({
       where: { id: escrow.id, lifecycleStatus: "funded" },
       data: { updatedAt: new Date() },
@@ -1654,61 +1757,63 @@ export async function approveMilestone(
       throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
     }
 
-    await tx.user.update({
-      where: { id: requireSellerId(escrow) },
-      data: { walletBalanceCents: { increment: targetMilestone.amountCents } },
-    });
-    await tx.walletTransaction.create({
-      data: {
-        userId: requireSellerId(escrow),
+      const transfer = await applyEscrowTransfer(tx, {
+        escrowId: escrow.id,
+        milestoneId,
+        movementType: "release",
         amountCents: targetMilestone.amountCents,
-        type: "RELEASE",
-      },
-    });
+        idempotencyKey,
+        businessReference: `escrow:${escrow.reference}:milestone:${milestoneId}:release`,
+        actorId: userId,
+        sourceCommand: "approve_milestone",
+        walletUserId: requireSellerId(escrow),
+      });
 
-    const milestones = await tx.escrowMilestone.findMany({
-      where: { escrowId: escrow.id },
-      orderBy: { orderIndex: "asc" },
-    });
-    const state = getEscrowStateFromMilestones(milestones);
-    const updatedEscrow = await tx.escrow.update({
-      where: { id: escrow.id },
-      data: state,
-      include: includeEscrowRelations,
-    });
+      const milestones = await tx.escrowMilestone.findMany({
+        where: { escrowId: escrow.id },
+        orderBy: { orderIndex: "asc" },
+      });
+      const state = getEscrowStateFromMilestones(milestones, transfer.balances.heldCents);
+      const updatedEscrow = await tx.escrow.update({
+        where: { id: escrow.id },
+        data: state,
+        include: includeEscrowRelations,
+      });
 
-    await createTimeline(
-      tx,
-      requireSellerId(updatedEscrow),
-      `Milestone released for ${updatedEscrow.reference}`,
-      `${targetMilestone.title} paid out`,
-      "released",
-    );
-    await createTimeline(
-      tx,
-      requireBuyerId(updatedEscrow),
-      `You released ${targetMilestone.title}`,
-      `${formatCurrencyFromCents(targetMilestone.amountCents)} sent to ${updatedEscrow.seller?.name ?? updatedEscrow.counterpart}`,
-      "released",
-    );
-    await createNotification(
-      tx,
-      requireSellerId(updatedEscrow),
-      "Milestone released",
-      `${targetMilestone.title} funds were released to your wallet.`,
-      "Just now",
-      updatedEscrow.id,
-    );
-    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
-      label: "Milestone resubmitted",
-      detailContains: targetMilestone.title,
-    });
+      await createTimeline(
+        tx,
+        requireSellerId(updatedEscrow),
+        `Milestone released for ${updatedEscrow.reference}`,
+        `${targetMilestone.title} paid out`,
+        "released",
+      );
+      await createTimeline(
+        tx,
+        requireBuyerId(updatedEscrow),
+        `You released ${targetMilestone.title}`,
+        `${formatCurrencyFromCents(targetMilestone.amountCents)} sent to ${updatedEscrow.seller?.name ?? updatedEscrow.counterpart}`,
+        "released",
+      );
+      await createNotification(
+        tx,
+        requireSellerId(updatedEscrow),
+        "Milestone released",
+        `${targetMilestone.title} funds were released to your wallet.`,
+        "Just now",
+        updatedEscrow.id,
+      );
+      await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
+        label: "Milestone resubmitted",
+        detailContains: targetMilestone.title,
+      });
 
-    return {
-      escrow: updatedEscrow,
-      milestone: updatedEscrow.milestones.find((item) => item.id === milestoneId)!,
-    };
-  });
+      return {
+        success: true,
+        escrowId: updatedEscrow.reference,
+        milestoneId,
+        releasedAt: releasedAt.toISOString(),
+      };
+    });
 }
 
 export async function rejectMilestone(
@@ -2040,16 +2145,6 @@ export async function listWalletTransactions(prisma: PrismaClient, userId: strin
     direction: tx.amountCents >= 0 ? "credit" : "debit",
     createdAt: tx.createdAt.toISOString(),
   }));
-}
-
-export async function recordWalletTransaction(prisma: PrismaClient, userId: string, amountCents: number, type: string) {
-  await prisma.walletTransaction.create({
-    data: {
-      userId,
-      amountCents,
-      type,
-    },
-  });
 }
 
 export async function addTimelineEvent(prisma: PrismaClient, userId: string, data: { title: string; meta: string; status: string; timeLabel?: string }) {
