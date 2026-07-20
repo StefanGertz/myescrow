@@ -61,10 +61,11 @@ async function createEscrow(token, payload) {
   });
 }
 
-async function escrowAction(token, reference, action) {
+async function escrowAction(token, reference, action, payload) {
   return request(`/api/dashboard/escrows/${reference}/${action}`, {
     method: 'POST',
-    headers: commandHeaders(token)
+    headers: commandHeaders(token),
+    ...(payload ? { body: JSON.stringify(payload) } : {})
   });
 }
 
@@ -147,7 +148,8 @@ function ensure(condition, message) {
     creatorRole: 'buyer',
     amount: AMOUNT,
     category: 'Automation',
-    description: 'Automated smoke test'
+    description: 'Automated smoke test',
+    signatureDataUrl: 'data:image/png;base64,c21va2UtY3JlYXRvcg=='
   };
   const createResult = await createEscrow(token, escrowPayload);
   ensure(createResult?.reference, 'Escrow creation missing reference');
@@ -159,7 +161,9 @@ function ensure(condition, message) {
   ensure(match, 'Created escrow not present in overview response');
 
   console.log('Approving escrow as invited counterparty');
-  const approvalResult = await escrowAction(counterpartyToken, createResult.reference, 'approve');
+  const approvalResult = await escrowAction(counterpartyToken, createResult.reference, 'approve', {
+    signatureDataUrl: 'data:image/png;base64,c21va2UtY291bnRlcnBhcnR5'
+  });
   ensure(approvalResult?.success, 'Approval endpoint did not return success');
 
   console.log('Funding buyer wallet and escrow');

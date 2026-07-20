@@ -113,6 +113,8 @@ released amount + refunded amount <= funded amount
 
 ## Phase 2 — Protect invitation delivery and agreement consent
 
+**Implementation status (2026-07-19):** The agreement-version and invitation-outbox migration, legacy backfill, version-bound signatures, funding consent gate, retryable invitation delivery, deadline extension, recipient correction/resend flow, and user-facing agreement/invitation status are implemented locally. API tests cover idempotent creation, provider failure recovery, signature invalidation after term changes, and funding only after both parties sign the locked current version. Production rollout still requires applying the migration in staging, running the invitation worker on a schedule, and verifying delivery with the configured email provider.
+
 ### Data model
 
 - Add immutable agreement versions containing the complete terms and milestone snapshot.

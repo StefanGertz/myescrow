@@ -55,7 +55,7 @@ RESEND_API_KEY=
 - `DATABASE_URL` points Prisma at Postgres. Append `?schema=<yourname>` if you want isolated schemas per developer/test run.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION` toggles the verification workflow (defaults to `true`).
 - `AUTH_DEBUG_CODES` surfaces verification codes in API responses/logs for local development and smoke tests. Left unset, it defaults to `true` whenever `NODE_ENV !== "production"`; set it explicitly to `false` in production environments.
-- `APP_URL`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, and `RESEND_API_KEY` configure email delivery. Use a verified sender domain in deployed environments, and set `EMAIL_REPLY_TO` only to a monitored inbox. When `RESEND_API_KEY` is omitted, the API logs verification codes instead of sending mail.
+- `APP_URL`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, and `RESEND_API_KEY` configure email delivery. Use a verified sender domain in deployed environments, and set `EMAIL_REPLY_TO` only to a monitored inbox. When `RESEND_API_KEY` is omitted, verification codes are logged for local development and escrow invitations remain in a visible failed/retryable state.
 
 ### Email verification
 
@@ -73,6 +73,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run db:generate` - regenerate the Prisma client.
 - `npm run smoke` - end-to-end smoke test (signup -> overview -> milestone releases -> wallet/disputes).
 - `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
+- `npm run outbox:invitations` - process due escrow invitation events once; run this command every minute in deployed environments.
 
 ## API surface
 
@@ -88,7 +89,11 @@ Escrow creation, funding, milestone approval, wallet top-up, and wallet withdraw
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
 | GET | `/api/dashboard/escrows` | Escrows requiring review, including derived funded, held, released, refunded, and disputed balances. |
 | GET | `/api/dashboard/escrows/:id/ledger` | Immutable escrow balance history for either party. |
-| POST | `/api/dashboard/escrows/create` | Create a new escrow draft. |
+| POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal and atomically queue its invitation. |
+| PATCH | `/api/dashboard/escrows/:id` | Revise a pre-funding proposal, create a new agreement version, and correct/resend its invitation. |
+| POST | `/api/dashboard/escrows/:id/agreement/sign` | Sign the current immutable agreement version. |
+| POST | `/api/dashboard/escrows/:id/invitation/resend` | Supersede the prior delivery and queue a fresh invitation. |
+| POST | `/api/dashboard/escrows/:id/invitation/extend` | Extend the current invitation deadline by 1-30 days. |
 | POST | `/api/dashboard/escrows/:id/release` | Disabled compatibility route; use milestone approval to release funds. |
 | POST | `/api/dashboard/escrows/:id/approve` | Mark escrow as approved. |
 | POST | `/api/dashboard/escrows/:id/reject` | Reject an escrow. |
@@ -131,10 +136,11 @@ ode dist/server.js, so remember to build (or rely on the Dockerfile-s build stag
 2. **Migrations** - Run 
 pm run db:migrate (or 
 px prisma migrate deploy) against the remote DB before booting the app.
-3. **Secrets** - Set PORT, JWT_SECRET, and DATABASE_URL in your hosting platform.
+3. **Secrets** - Set PORT, JWT_SECRET, DATABASE_URL, RESEND_API_KEY, EMAIL_FROM, and APP_URL in your hosting platform.
 4. **Runtime** - Either run the Docker image above or 
 pm ci && npm run build && npm start on the host.
-5. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
+5. **Invitation worker** - Schedule `npm run outbox:invitations` at least once per minute. The command is safe to run concurrently; due events are claimed before delivery.
+6. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
 
 Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
 

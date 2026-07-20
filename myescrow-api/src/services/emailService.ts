@@ -53,6 +53,7 @@ async function sendResendEmail({
     { to, category, emailId: result?.id, acceptedInMs: Date.now() - startedAt },
     "Email accepted by Resend",
   );
+  return result?.id ?? null;
 }
 
 type VerificationEmailPayload = {
@@ -137,10 +138,10 @@ export async function sendVerificationEmail({
       { to },
       "RESEND_API_KEY not set; verification email not sent externally. Code logged for development only.",
     );
-    return;
+    return null;
   }
 
-  await sendResendEmail({
+  return sendResendEmail({
     to,
     subject: `Your MyEscrow verification code: ${code}`,
     html: buildEmailHtml(code, expiresAt),
@@ -191,10 +192,10 @@ export async function sendPasswordResetEmail({
       { to },
       "RESEND_API_KEY not set; password reset email not sent externally. Code logged for development only.",
     );
-    return;
+    return null;
   }
 
-  await sendResendEmail({
+  return sendResendEmail({
     to,
     subject: `Your MyEscrow password reset code: ${code}`,
     html: buildResetEmailHtml(code, expiresAt),
@@ -292,10 +293,10 @@ export async function sendEscrowInvitationEmail(payload: EscrowInvitationEmailPa
       { to, escrowReference },
       "RESEND_API_KEY not set; escrow invitation email not sent externally.",
     );
-    return;
+    throw new Error("Escrow invitation provider is not configured.");
   }
 
-  await sendResendEmail({
+  return sendResendEmail({
     to,
     subject: `Review escrow ${escrowReference} on MyEscrow`,
     html: buildEscrowInvitationHtml({

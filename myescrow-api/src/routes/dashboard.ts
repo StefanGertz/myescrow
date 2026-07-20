@@ -8,6 +8,7 @@ import {
   cancelEscrow,
   createEscrow,
   dismissNotification,
+  extendEscrowInvitation,
   fundEscrow,
   getEscrowLedgerHistory,
   getOverview,
@@ -17,14 +18,17 @@ import {
   listWalletTransactions,
   rejectEscrow,
   rejectMilestone,
+  resendEscrowInvitation,
   requestAgreementChanges,
   requestMilestoneChanges,
   releaseEscrow,
   resubmitMilestone,
+  signCurrentAgreement,
   updateDispute,
   updateDraftEscrow,
 } from "../services/dashboardService";
-import { sendEscrowInvitationEmail, sendMilestoneChangeRequestEmail } from "../services/emailService";
+import { sendMilestoneChangeRequestEmail } from "../services/emailService";
+import { processInvitationOutbox } from "../services/invitationService";
 import { findUserById } from "../services/userService";
 import { recordStandaloneWalletTransfer } from "../services/moneyIntegrityService";
 import { AppError } from "../utils/errors";
@@ -58,7 +62,7 @@ const createEscrowSchema = z.object({
   creatorParty: partyIdentitySchema.default({ type: "individual" }),
   category: z.string().optional(),
   description: z.string().optional(),
-  signatureDataUrl: signatureDataUrlSchema.optional(),
+  signatureDataUrl: signatureDataUrlSchema,
   milestones: z.array(
     z.object({
       title: z.string().min(1),
@@ -191,23 +195,12 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         amount: body.amount,
         creatorRole: body.creatorRole,
         creatorParty: body.creatorParty,
+        signatureDataUrl: body.signatureDataUrl,
         ...(body.category ? { category: body.category } : {}),
         ...(body.description ? { description: body.description } : {}),
-        ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
         ...(body.milestones ? { milestones: body.milestones } : {}),
       }, requireIdempotencyKey(request));
-      if (!result.replayed) {
-        await sendEscrowInvitationEmail({
-          to: result.invitedEmail,
-          recipientName: result.recipientName,
-          creatorName: result.creatorName,
-          escrowTitle: result.escrowTitle,
-          escrowReference: result.reference,
-          creatorRole: result.creatorRole,
-          invitationStatus: result.invitationStatus,
-          logger: secured.log,
-        });
-      }
+      await processInvitationOutbox(secured.prisma, secured.log);
       reply.code(201);
       return {
         success: true,
@@ -230,16 +223,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         ...(body.description ? { description: body.description } : {}),
         ...(body.milestones ? { milestones: body.milestones } : {}),
       });
-      await sendEscrowInvitationEmail({
-        to: result.invitedEmail,
-        recipientName: result.counterpartyUser?.name ?? result.invitedEmail,
-        creatorName: result.owner.name,
-        escrowTitle: result.escrow.title,
-        escrowReference: result.escrow.reference,
-        creatorRole: result.escrow.creatorRole as "buyer" | "seller",
-        invitationStatus: result.invitationStatus,
-        logger: secured.log,
-      });
+      await processInvitationOutbox(secured.prisma, secured.log);
       return {
         success: true,
         escrowId: result.escrow.id,
@@ -261,14 +245,32 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
       const body = z.object({
-        signatureDataUrl: signatureDataUrlSchema.optional(),
+        signatureDataUrl: signatureDataUrlSchema,
         counterpartyParty: partyIdentitySchema.default({ type: "individual" }),
-      }).parse(request.body ?? {});
+      }).parse(request.body);
       const escrow = await approveEscrow(secured.prisma, user.id, id, {
-        ...(body.signatureDataUrl ? { signatureDataUrl: body.signatureDataUrl } : {}),
+        signatureDataUrl: body.signatureDataUrl,
         counterpartyParty: body.counterpartyParty,
       });
       return { success: true, escrowId: escrow.reference };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/agreement/sign", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = z.object({ signatureDataUrl: signatureDataUrlSchema }).parse(request.body);
+      const result = await signCurrentAgreement(
+        secured.prisma,
+        user.id,
+        id,
+        body.signatureDataUrl,
+      );
+      return {
+        success: true,
+        escrowId: result.escrow.reference,
+        agreementVersion: result.escrow.currentAgreementVersion?.versionNumber,
+        signedAt: result.signature.signedAt.toISOString(),
+      };
     });
 
     secured.post("/api/dashboard/escrows/:id/reject", async (request) => {
@@ -276,6 +278,26 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const { id } = idParamsSchema.parse(request.params);
       const escrow = await rejectEscrow(secured.prisma, user.id, id);
       return { success: true, escrowId: escrow.reference };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/invitation/resend", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const result = await resendEscrowInvitation(secured.prisma, user.id, id);
+      await processInvitationOutbox(secured.prisma, secured.log);
+      return {
+        success: true,
+        escrowId: result.escrow.reference,
+        invitationStatus: result.delivery.status,
+      };
+    });
+
+    secured.post("/api/dashboard/escrows/:id/invitation/extend", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const { days } = z.object({ days: z.number().int().min(1).max(30).default(7) }).parse(request.body ?? {});
+      const delivery = await extendEscrowInvitation(secured.prisma, user.id, id, days);
+      return { success: true, escrowId: id, expiresAt: delivery.expiresAt.toISOString() };
     });
 
     secured.post("/api/dashboard/escrows/:id/cancel", async (request) => {

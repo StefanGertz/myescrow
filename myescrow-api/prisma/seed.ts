@@ -12,6 +12,11 @@ async function main() {
   const data = JSON.parse(raw) as DatabaseSchema;
 
   await prisma.$transaction([
+    prisma.outboxEvent.deleteMany(),
+    prisma.invitationDelivery.deleteMany(),
+    prisma.agreementSignature.deleteMany(),
+    prisma.escrow.updateMany({ data: { currentAgreementVersionId: null } }),
+    prisma.agreementVersion.deleteMany(),
     prisma.idempotencyRecord.deleteMany(),
     prisma.escrowLedgerEntry.deleteMany(),
     prisma.walletTransaction.deleteMany(),
@@ -81,6 +86,76 @@ async function main() {
       updatedAt: new Date(milestone.updatedAt),
     })),
   });
+
+  const agreementEscrows = await prisma.escrow.findMany({ include: { milestones: true } });
+  for (const escrow of agreementEscrows) {
+    const locked = escrow.fundingStatus === "funded" || escrow.counterpartyApproved;
+    const version = await prisma.agreementVersion.create({
+      data: {
+        escrowId: escrow.id,
+        versionNumber: 1,
+        termsHash: `seed:${escrow.reference}`,
+        title: escrow.title,
+        description: escrow.description,
+        amountCents: escrow.amountCents,
+        creatorRole: escrow.creatorRole,
+        creatorParty: escrow.creatorPartySnapshot,
+        counterpartyParty: escrow.counterpartyPartySnapshot ?? undefined,
+        milestones: escrow.milestones.map((milestone) => ({
+          milestoneId: milestone.id,
+          title: milestone.title,
+          description: milestone.description,
+          amountCents: milestone.amountCents,
+          deadline: milestone.deadline?.toISOString() ?? null,
+          orderIndex: milestone.orderIndex,
+        })),
+        status: locked ? "locked" : "current",
+        lockedAt: locked ? escrow.approvedAt ?? escrow.updatedAt : null,
+        createdById: escrow.ownerId,
+      },
+    });
+    await prisma.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        currentAgreementVersionId: version.id,
+        invitationExpiresAt: new Date(escrow.createdAt.getTime() + 14 * 86_400_000),
+        agreementResponseDueAt: new Date(escrow.createdAt.getTime() + 7 * 86_400_000),
+      },
+    });
+    const signatureDataUrl = "data:image/png;base64,c2VlZA==";
+    await prisma.agreementSignature.create({
+      data: {
+        agreementVersionId: version.id,
+        signerId: escrow.ownerId,
+        signerRole: escrow.creatorRole,
+        signatureDataUrl,
+        evidenceHash: `seed:creator:${escrow.reference}`,
+      },
+    });
+    const counterpartyId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
+    if (locked && counterpartyId) {
+      await prisma.agreementSignature.create({
+        data: {
+          agreementVersionId: version.id,
+          signerId: counterpartyId,
+          signerRole: escrow.creatorRole === "buyer" ? "seller" : "buyer",
+          signatureDataUrl,
+          evidenceHash: `seed:counterparty:${escrow.reference}`,
+        },
+      });
+    }
+    await prisma.invitationDelivery.create({
+      data: {
+        escrowId: escrow.id,
+        recipient: escrow.counterpartyEmail,
+        status: locked ? "accepted" : "delivered",
+        attemptCount: 1,
+        expiresAt: new Date(escrow.createdAt.getTime() + 14 * 86_400_000),
+        responseDueAt: new Date(escrow.createdAt.getTime() + 7 * 86_400_000),
+        acceptedAt: locked ? escrow.approvedAt ?? escrow.updatedAt : null,
+      },
+    });
+  }
 
   for (const dispute of data.disputes) {
     await prisma.dispute.create({

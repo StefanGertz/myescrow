@@ -10,26 +10,28 @@ datasource db {
 }
 
 model User {
-  id                  String                   @id
-  name                String
-  email               String                   @unique
-  passwordHash        String
-  emailVerified       Boolean                  @default(false)
-  walletBalanceCents  Int                      @default(0)
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  escrows             Escrow[]                 @relation("EscrowOwner")
-  buyerEscrows        Escrow[]                 @relation("EscrowBuyer")
-  sellerEscrows       Escrow[]                 @relation("EscrowSeller")
-  disputes            Dispute[]
-  notifications       Notification[]
-  timelineEvents      TimelineEvent[]
-  walletTransactions  WalletTransaction[]
-  escrowLedgerEntries EscrowLedgerEntry[]      @relation("LedgerActor")
-  idempotencyRecords  IdempotencyRecord[]
-  verificationTokens  EmailVerificationToken[]
-  passwordResetTokens PasswordResetToken[]
-  businessProfile     BusinessProfile?
+  id                       String                   @id
+  name                     String
+  email                    String                   @unique
+  passwordHash             String
+  emailVerified            Boolean                  @default(false)
+  walletBalanceCents       Int                      @default(0)
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  escrows                  Escrow[]                 @relation("EscrowOwner")
+  buyerEscrows             Escrow[]                 @relation("EscrowBuyer")
+  sellerEscrows            Escrow[]                 @relation("EscrowSeller")
+  disputes                 Dispute[]
+  notifications            Notification[]
+  timelineEvents           TimelineEvent[]
+  walletTransactions       WalletTransaction[]
+  escrowLedgerEntries      EscrowLedgerEntry[]      @relation("LedgerActor")
+  idempotencyRecords       IdempotencyRecord[]
+  agreementVersionsCreated AgreementVersion[]       @relation("AgreementVersionCreator")
+  agreementSignatures      AgreementSignature[]
+  verificationTokens       EmailVerificationToken[]
+  passwordResetTokens      PasswordResetToken[]
+  businessProfile          BusinessProfile?
 }
 
 model BusinessProfile {
@@ -46,14 +48,14 @@ model BusinessProfile {
 }
 
 model Escrow {
-  id                           Int                 @id @default(autoincrement())
-  reference                    String              @unique
+  id                           Int                  @id @default(autoincrement())
+  reference                    String               @unique
   ownerId                      String
-  owner                        User                @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  owner                        User                 @relation("EscrowOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   buyerId                      String?
-  buyer                        User?               @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer                        User?                @relation("EscrowBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
   sellerId                     String?
-  seller                       User?               @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  seller                       User?                @relation("EscrowSeller", fields: [sellerId], references: [id], onDelete: Cascade)
   creatorRole                  String
   counterpartyEmail            String
   title                        String
@@ -62,23 +64,29 @@ model Escrow {
   stage                        String
   dueDescription               String
   status                       String
-  counterpartyApproved         Boolean             @default(false)
-  lifecycleStatus              String              @default("pending_approval")
-  fundingStatus                String              @default("not_funded")
+  counterpartyApproved         Boolean              @default(false)
+  lifecycleStatus              String               @default("pending_approval")
+  fundingStatus                String               @default("not_funded")
   category                     String?
   description                  String?
   approvedAt                   DateTime?
-  creatorSignatureDataUrl      String?             @db.Text
-  counterpartySignatureDataUrl String?             @db.Text
-  creatorPartySnapshot         Json                @default("{}")
+  creatorSignatureDataUrl      String?              @db.Text
+  counterpartySignatureDataUrl String?              @db.Text
+  creatorPartySnapshot         Json                 @default("{}")
   counterpartyPartySnapshot    Json?
   fundedAt                     DateTime?
   rejectedAt                   DateTime?
   cancelledAt                  DateTime?
-  createdAt                    DateTime            @default(now())
-  updatedAt                    DateTime            @updatedAt
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
   milestones                   EscrowMilestone[]
   ledgerEntries                EscrowLedgerEntry[]
+  agreementVersions            AgreementVersion[]   @relation("EscrowAgreementVersions")
+  currentAgreementVersionId    Int?                 @unique
+  currentAgreementVersion      AgreementVersion?    @relation("CurrentAgreementVersion", fields: [currentAgreementVersionId], references: [id], onDelete: Restrict)
+  invitationDeliveries         InvitationDelivery[]
+  invitationExpiresAt          DateTime?
+  agreementResponseDueAt       DateTime?
 
   @@index([ownerId])
   @@index([buyerId])
@@ -199,6 +207,90 @@ model IdempotencyRecord {
 
   @@unique([userId, key])
   @@index([createdAt])
+}
+
+model AgreementVersion {
+  id                Int                  @id @default(autoincrement())
+  escrowId          Int
+  escrow            Escrow               @relation("EscrowAgreementVersions", fields: [escrowId], references: [id], onDelete: Restrict)
+  currentForEscrow  Escrow?              @relation("CurrentAgreementVersion")
+  versionNumber     Int
+  termsHash         String
+  title             String
+  description       String?
+  amountCents       Int
+  currency          String               @default("USD")
+  creatorRole       String
+  creatorParty      Json
+  counterpartyParty Json?
+  milestones        Json
+  status            String               @default("current")
+  createdById       String
+  createdBy         User                 @relation("AgreementVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  lockedAt          DateTime?
+  createdAt         DateTime             @default(now())
+  signatures        AgreementSignature[]
+
+  @@unique([escrowId, versionNumber])
+  @@index([escrowId, status])
+  @@index([createdById])
+}
+
+model AgreementSignature {
+  id                 Int              @id @default(autoincrement())
+  agreementVersionId Int
+  agreementVersion   AgreementVersion @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
+  signerId           String
+  signer             User             @relation(fields: [signerId], references: [id], onDelete: Restrict)
+  signerRole         String
+  signatureDataUrl   String           @db.Text
+  evidenceHash       String
+  signedAt           DateTime         @default(now())
+
+  @@unique([agreementVersionId, signerId])
+  @@index([signerId])
+}
+
+model InvitationDelivery {
+  id            Int           @id @default(autoincrement())
+  escrowId      Int
+  escrow        Escrow        @relation(fields: [escrowId], references: [id], onDelete: Restrict)
+  recipient     String
+  status        String        @default("queued")
+  attemptCount  Int           @default(0)
+  providerId    String?
+  nextAttemptAt DateTime?
+  failureReason String?
+  expiresAt     DateTime
+  responseDueAt DateTime
+  acceptedAt    DateTime?
+  supersededAt  DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  outboxEvents  OutboxEvent[]
+
+  @@index([escrowId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([recipient])
+}
+
+model OutboxEvent {
+  id                   Int                @id @default(autoincrement())
+  invitationDeliveryId Int
+  invitationDelivery   InvitationDelivery @relation(fields: [invitationDeliveryId], references: [id], onDelete: Restrict)
+  eventType            String
+  payload              Json
+  status               String             @default("pending")
+  attemptCount         Int                @default(0)
+  nextAttemptAt        DateTime           @default(now())
+  lastError            String?
+  providerId           String?
+  processedAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([invitationDeliveryId])
 }
 
 model Sequence {

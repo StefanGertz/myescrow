@@ -272,6 +272,24 @@ describe("MyEscrow API", () => {
     expect(replay.statusCode).toBe(201);
     expect(replay.json()).toEqual(body);
     expect(await server.prisma.escrow.count({ where: { reference: createdEscrowReference } })).toBe(1);
+    const persistedEscrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: createdEscrowReference },
+      include: {
+        agreementVersions: { include: { signatures: true } },
+        invitationDeliveries: true,
+      },
+    });
+    expect(persistedEscrow.agreementVersions).toHaveLength(1);
+    expect(persistedEscrow.agreementVersions[0]).toEqual(expect.objectContaining({
+      versionNumber: 1,
+      status: "current",
+    }));
+    expect(persistedEscrow.agreementVersions[0]?.signatures).toHaveLength(1);
+    expect(persistedEscrow.invitationDeliveries).toHaveLength(1);
+    expect(persistedEscrow.invitationDeliveries[0]?.status).toBe("delivered");
+    expect(await server.prisma.outboxEvent.count({
+      where: { invitationDelivery: { escrowId: persistedEscrow.id } },
+    })).toBe(1);
     expect(sentEmails).toHaveLength(emailsBefore + 1);
     const escrowsResponse = await server.inject({
       method: "GET",
@@ -297,6 +315,104 @@ describe("MyEscrow API", () => {
     });
   });
 
+  it("keeps a failed invitation visible and lets the creator recover it", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("provider unavailable", { status: 503 }));
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-provider-outage" },
+      payload: {
+        title: "Invitation outage escrow",
+        counterpartyEmail: "outage.recipient@example.com",
+        creatorRole: "buyer",
+        amount: 425,
+        signatureDataUrl: creatorSignature,
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+
+    const escrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const failedEscrow = escrowsResponse.json().escrows.find((item: any) => item.id === reference);
+    expect(failedEscrow).toEqual(expect.objectContaining({
+      lifecycleStatus: "pending_counterparty_signup",
+      invitation: expect.objectContaining({ status: "failed", attemptCount: 1 }),
+    }));
+
+    const failedDelivery = await server.prisma.invitationDelivery.findFirstOrThrow({
+      where: { escrow: { reference } },
+      orderBy: { createdAt: "desc" },
+    });
+    const failedEvent = await server.prisma.outboxEvent.findFirstOrThrow({
+      where: { invitationDeliveryId: failedDelivery.id },
+    });
+    expect(failedEvent.status).toBe("pending");
+    expect(failedEvent.attemptCount).toBe(1);
+    expect(failedEvent.nextAttemptAt).not.toBeNull();
+
+    const extendResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/invitation/extend`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { days: 7 },
+    });
+    expect(extendResponse.statusCode).toBe(200);
+    expect(new Date(extendResponse.json().expiresAt).getTime()).toBeGreaterThan(failedDelivery.expiresAt.getTime());
+
+    const resendResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/invitation/resend`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(resendResponse.statusCode).toBe(200);
+    expect(await server.prisma.invitationDelivery.count({ where: { escrow: { reference } } })).toBe(2);
+    expect((await server.prisma.outboxEvent.findUniqueOrThrow({ where: { id: failedEvent.id } })).status).toBe("cancelled");
+    const recoveredDelivery = await server.prisma.invitationDelivery.findFirstOrThrow({
+      where: { escrow: { reference } },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(recoveredDelivery.status).toBe("delivered");
+
+    const correctionResponse = await server.inject({
+      method: "PATCH",
+      url: `/api/dashboard/escrows/${reference}`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        title: "Invitation outage escrow",
+        counterpartyEmail: "corrected.recipient@example.com",
+        amount: 425,
+      },
+    });
+    expect(correctionResponse.statusCode).toBe(200);
+    const correctedEscrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference },
+      include: {
+        agreementVersions: { orderBy: { versionNumber: "asc" }, include: { signatures: true } },
+        invitationDeliveries: { orderBy: { createdAt: "asc" } },
+      },
+    });
+    expect(correctedEscrow.agreementVersions).toHaveLength(2);
+    expect(correctedEscrow.agreementVersions[0]?.status).toBe("superseded");
+    expect(correctedEscrow.agreementVersions[1]?.signatures).toHaveLength(0);
+    expect(correctedEscrow.invitationDeliveries.at(-2)?.status).toBe("corrected");
+    expect(correctedEscrow.invitationDeliveries.at(-1)).toEqual(expect.objectContaining({
+      recipient: "corrected.recipient@example.com",
+      status: "delivered",
+    }));
+
+    const resignResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/agreement/sign`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { signatureDataUrl: creatorSignature },
+    });
+    expect(resignResponse.statusCode).toBe(200);
+  });
+
   it("supports agreement-level change requests with added milestones", async () => {
     const createResponse = await server.inject({
       method: "POST",
@@ -307,6 +423,7 @@ describe("MyEscrow API", () => {
         counterpartyEmail: "nora@example.com",
         creatorRole: "buyer",
         amount: 1500,
+        signatureDataUrl: creatorSignature,
         milestones: [
           { title: "Discovery", amount: 750, description: "Initial review" },
           { title: "Delivery", amount: 750, description: "Final package" },
@@ -396,6 +513,7 @@ describe("MyEscrow API", () => {
           counterpartyEmail: "nora@example.com",
           creatorRole: "buyer",
           amount: 1500,
+          signatureDataUrl: creatorSignature,
           milestones: [
             { title: "Design", amount: 500 },
             { title: "Build", amount: 1000 },
@@ -471,8 +589,24 @@ describe("MyEscrow API", () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       const pendingApprovalEscrow = pendingApprovalEscrows.json().escrows.find((item: any) => item.id === reference);
-      expect(pendingApprovalEscrow.lifecycleStatus).toBe("pending_approval");
+      expect(pendingApprovalEscrow.lifecycleStatus).toBe("creator_signature_required");
       expect(pendingApprovalEscrow.counterpartyApproved).toBe(false);
+      expect(pendingApprovalEscrow.agreement).toEqual(expect.objectContaining({
+        version: 2,
+        status: "current",
+        creatorSigned: false,
+        counterpartySigned: false,
+      }));
+      const agreementVersions = await server.prisma.agreementVersion.findMany({
+        where: { escrow: { reference } },
+        orderBy: { versionNumber: "asc" },
+        include: { signatures: true },
+      });
+      expect(agreementVersions).toHaveLength(2);
+      expect(agreementVersions[0]).toEqual(expect.objectContaining({ status: "superseded" }));
+      expect(agreementVersions[0]?.signatures).toHaveLength(1);
+      expect(agreementVersions[1]).toEqual(expect.objectContaining({ status: "current" }));
+      expect(agreementVersions[1]?.signatures).toHaveLength(0);
       expect(pendingApprovalEscrow.milestones).toContainEqual(
         expect.objectContaining({
           title: scenario.expectedMilestone.title,
@@ -487,6 +621,27 @@ describe("MyEscrow API", () => {
       });
       expect(fundBeforeApprovalResponse.statusCode).toBe(400);
       expect(fundBeforeApprovalResponse.json().error).toBe("This escrow is not ready for funding.");
+
+      const creatorSignResponse = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/agreement/sign`,
+        headers: { Authorization: `Bearer ${token}` },
+        payload: { signatureDataUrl: creatorSignature },
+      });
+      expect(creatorSignResponse.statusCode).toBe(200);
+
+      const resignedEscrows = await server.inject({
+        method: "GET",
+        url: "/api/dashboard/escrows",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const resignedEscrow = resignedEscrows.json().escrows.find((item: any) => item.id === reference);
+      expect(resignedEscrow.lifecycleStatus).toBe("pending_approval");
+      expect(resignedEscrow.agreement).toEqual(expect.objectContaining({
+        version: 2,
+        creatorSigned: true,
+        counterpartySigned: false,
+      }));
 
       const approveResponse = await server.inject({
         method: "POST",
@@ -675,6 +830,7 @@ describe("MyEscrow API", () => {
         counterpartyEmail: "jamie.contractor@example.com",
         creatorRole: "buyer",
         amount: 750,
+        signatureDataUrl: creatorSignature,
       },
     });
     expect(response.statusCode).toBe(201);
@@ -782,6 +938,7 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${invitedSignupEscrowReference}/approve`,
       headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().success).toBe(true);
@@ -1073,6 +1230,7 @@ describe("MyEscrow API", () => {
         counterpartyEmail: "nora@example.com",
         creatorRole: "buyer",
         amount: 900,
+        signatureDataUrl: creatorSignature,
         milestones: [
           { title: "Draft", amount: 300 },
           { title: "Final", amount: 600 },
@@ -1086,6 +1244,7 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/approve`,
       headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
     });
     expect(approveResponse.statusCode).toBe(200);
 

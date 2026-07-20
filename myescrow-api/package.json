@@ -13,6 +13,7 @@
     "test:watch": "vitest watch",
     "smoke": "node scripts/backend-smoke.mjs",
     "reconcile:ledger": "tsx scripts/reconcile-ledger.ts",
+    "outbox:invitations": "tsx scripts/process-invitation-outbox.ts",
     "lint:docs": "node scripts/check-readme-utf8.mjs",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

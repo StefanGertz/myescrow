@@ -5,6 +5,16 @@ import { AppError } from "../utils/errors";
 import { getNextSequenceValue } from "./sequenceService";
 import { normalizeEmail } from "./userService";
 import {
+  assertFundableAgreement,
+  createAgreementVersion,
+  lockAgreementIfFullySigned,
+  signAgreementVersion,
+} from "./agreementService";
+import {
+  markInvitationAccepted,
+  queueEscrowInvitation,
+} from "./invitationService";
+import {
   executeIdempotentCommand,
   executeIdempotentCommandWithMetadata,
 } from "./idempotencyService";
@@ -62,6 +72,21 @@ export type EscrowResponse = {
   seller: PartyResponse;
   milestones: EscrowMilestoneResponse[];
   balances: LedgerBalances;
+  agreement: {
+    version: number;
+    status: string;
+    creatorSigned: boolean;
+    counterpartySigned: boolean;
+    lockedAt?: string;
+  } | null;
+  invitation: {
+    status: string;
+    recipient: string;
+    attemptCount: number;
+    expiresAt: string;
+    responseDueAt: string;
+    failureReason?: string;
+  } | null;
 };
 
 type PartyIdentityInput =
@@ -126,6 +151,8 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
     seller: true;
     milestones: { orderBy: { orderIndex: "asc" } };
     ledgerEntries: { select: { movementType: true; amountCents: true } };
+    currentAgreementVersion: { include: { signatures: true } };
+    invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
   };
 }>;
 
@@ -137,7 +164,7 @@ type CreateEscrowInput = {
   creatorParty: PartyIdentityInput;
   category?: string | undefined;
   description?: string | undefined;
-  signatureDataUrl?: string | undefined;
+  signatureDataUrl: string;
   milestones?: Array<{
     title: string;
     amount: number;
@@ -160,7 +187,7 @@ type UpdateDraftEscrowInput = {
 };
 
 type ApproveEscrowInput = {
-  signatureDataUrl?: string | undefined;
+  signatureDataUrl: string;
   counterpartyParty: PartyIdentityInput;
 };
 
@@ -213,6 +240,8 @@ const includeEscrowRelations = {
   seller: true,
   milestones: { orderBy: { orderIndex: "asc" as const } },
   ledgerEntries: { select: { movementType: true, amountCents: true } },
+  currentAgreementVersion: { include: { signatures: true } },
+  invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
 };
 
 const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
@@ -222,6 +251,27 @@ const isProposedNewMilestone = (milestone: EscrowWithRelations["milestones"][num
 
 const hasPendingAgreementChanges = (escrow: Pick<EscrowWithRelations, "milestones">) =>
   escrow.milestones.some((milestone) => milestone.changeRequestedAt !== null);
+
+function agreementTermsFromEscrow(escrow: EscrowWithRelations) {
+  return {
+    title: escrow.title,
+    description: escrow.description,
+    amountCents: escrow.amountCents,
+    creatorRole: escrow.creatorRole,
+    creatorParty: escrow.creatorPartySnapshot as Prisma.InputJsonValue,
+    counterpartyParty: escrow.counterpartyPartySnapshot as Prisma.InputJsonValue | null,
+    milestones: escrow.milestones
+      .filter((milestone) => !isProposedNewMilestone(milestone))
+      .map((milestone) => ({
+        milestoneId: milestone.id,
+        title: milestone.title,
+        description: milestone.description,
+        amountCents: milestone.amountCents,
+        deadline: milestone.deadline?.toISOString() ?? null,
+        orderIndex: milestone.orderIndex,
+      })),
+  };
+}
 
 function statusWeight(status: string) {
   return status === "warning" ? 0 : 1;
@@ -321,6 +371,9 @@ function deriveStage(record: EscrowWithRelations) {
   if (record.lifecycleStatus === "pending_approval") {
     return "Approval pending";
   }
+  if (record.lifecycleStatus === "creator_signature_required") {
+    return "Creator signature required";
+  }
   if (record.lifecycleStatus === "changes_requested") {
     return "Changes requested";
   }
@@ -353,6 +406,9 @@ function deriveDueDescription(record: EscrowWithRelations) {
   }
   if (record.lifecycleStatus === "pending_approval") {
     return `Waiting for ${record.counterpart} to approve`;
+  }
+  if (record.lifecycleStatus === "creator_signature_required") {
+    return "The creator must sign the latest agreement version";
   }
   if (record.lifecycleStatus === "changes_requested") {
     return record.ownerId === record.buyerId || record.ownerId === record.sellerId
@@ -408,6 +464,16 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
   const sellerParty = record.creatorRole === "seller" ? creatorSnapshot : counterpartySnapshot;
   const buyerResponse = partyResponse(buyer.id, buyerParty);
   const sellerResponse = partyResponse(seller.id, sellerParty);
+  const agreementSigners = new Set(
+    record.currentAgreementVersion?.signatures.map((signature) => signature.signerId) ?? [],
+  );
+  const invitation = record.invitationDeliveries[0];
+  const invitationStatus = invitation
+    && invitation.status !== "accepted"
+    && invitation.status !== "corrected"
+    && invitation.expiresAt.getTime() <= Date.now()
+    ? "expired"
+    : invitation?.status;
 
   return {
     escrowId: record.id,
@@ -447,6 +513,29 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     buyer: buyerResponse,
     seller: sellerResponse,
     balances: deriveLedgerBalances(record.ledgerEntries),
+    agreement: record.currentAgreementVersion
+      ? {
+          version: record.currentAgreementVersion.versionNumber,
+          status: record.currentAgreementVersion.status,
+          creatorSigned: agreementSigners.has(record.ownerId),
+          counterpartySigned: agreementSigners.has(
+            record.ownerId === record.buyerId ? record.sellerId ?? "" : record.buyerId ?? "",
+          ),
+          ...(record.currentAgreementVersion.lockedAt
+            ? { lockedAt: record.currentAgreementVersion.lockedAt.toISOString() }
+            : {}),
+        }
+      : null,
+    invitation: invitation
+      ? {
+          status: invitationStatus ?? invitation.status,
+          recipient: invitation.recipient,
+          attemptCount: invitation.attemptCount,
+          expiresAt: invitation.expiresAt.toISOString(),
+          responseDueAt: invitation.responseDueAt.toISOString(),
+          ...(invitation.failureReason ? { failureReason: invitation.failureReason } : {}),
+        }
+      : null,
     milestones: record.milestones.map((milestone) => ({
       id: milestone.id,
       title: isProposedNewMilestone(milestone) ? milestone.requestedTitle ?? "New milestone" : milestone.title,
@@ -774,7 +863,7 @@ export async function createEscrow(
         fundingStatus: "not_funded",
         category: data.category ?? null,
         description: data.description ?? null,
-        creatorSignatureDataUrl: data.signatureDataUrl ?? null,
+        creatorSignatureDataUrl: data.signatureDataUrl,
         creatorPartySnapshot: creatorPartySnapshot as Prisma.InputJsonObject,
         milestones: {
           create: milestoneInputs.map((milestone, index) => ({
@@ -789,6 +878,34 @@ export async function createEscrow(
     const escrow = await tx.escrow.create({
       data: escrowData,
       include: includeEscrowRelations,
+    });
+
+    const agreementVersion = await createAgreementVersion(tx, {
+      escrowId: escrow.id,
+      createdById: userId,
+      terms: agreementTermsFromEscrow(escrow),
+    });
+    await signAgreementVersion(tx, {
+      agreementVersionId: agreementVersion.id,
+      signerId: userId,
+      signerRole: data.creatorRole,
+      signatureDataUrl: data.signatureDataUrl,
+    });
+    await tx.escrow.update({
+      where: { id: escrow.id },
+      data: { creatorSignatureDataUrl: data.signatureDataUrl },
+    });
+    await queueEscrowInvitation(tx, {
+      escrowId: escrow.id,
+      payload: {
+        to: normalizedCounterpartyEmail,
+        recipientName: counterpartyUser?.name ?? normalizedCounterpartyEmail,
+        creatorName: owner.name,
+        escrowTitle: escrow.title,
+        escrowReference: escrow.reference,
+        creatorRole: data.creatorRole,
+        invitationStatus,
+      },
     });
 
     await createTimeline(
@@ -850,8 +967,13 @@ export async function updateDraftEscrow(prisma: PrismaClient, userId: string, re
   if (escrow.ownerId !== userId) {
     throw new AppError("Only the escrow creator can edit this draft.", 403);
   }
-  if (escrow.lifecycleStatus !== "pending_counterparty_signup") {
-    throw new AppError("This escrow can only be edited before the counterparty gets involved.", 400);
+  if (![
+    "pending_counterparty_signup",
+    "pending_approval",
+    "creator_signature_required",
+    "rejected",
+  ].includes(escrow.lifecycleStatus)) {
+    throw new AppError("This proposal can only be revised before it is funded.", 400);
   }
 
   const amountInCents = dollarsToCents(data.amount);
@@ -898,13 +1020,14 @@ export async function updateDraftEscrow(prisma: PrismaClient, userId: string, re
         sellerId,
         amountCents: amountInCents,
         description: data.description?.trim() || null,
-        stage: counterpartyReady ? "Approval pending" : "Invitation pending",
+        stage: counterpartyReady ? "Creator signature required" : "Invitation pending",
         dueDescription: counterpartyReady
-          ? `Waiting for ${counterpartName} to approve`
+          ? "Sign the corrected agreement before the counterparty can approve it"
           : `Waiting for ${counterpartName} to create and verify an account`,
         status: "warning",
         counterpartyApproved: false,
-        lifecycleStatus: counterpartyReady ? "pending_approval" : "pending_counterparty_signup",
+        lifecycleStatus: counterpartyReady ? "creator_signature_required" : "pending_counterparty_signup",
+        rejectedAt: null,
         milestones: {
           create: milestoneInputs.map((milestone, index) => ({
             title: milestone.title.trim(),
@@ -916,6 +1039,24 @@ export async function updateDraftEscrow(prisma: PrismaClient, userId: string, re
         },
       },
       include: includeEscrowRelations,
+    });
+    await createAgreementVersion(tx, {
+      escrowId: updatedEscrow.id,
+      createdById: userId,
+      terms: agreementTermsFromEscrow(updatedEscrow),
+    });
+    await queueEscrowInvitation(tx, {
+      escrowId: updatedEscrow.id,
+      supersedeExisting: true,
+      payload: {
+        to: normalizedCounterpartyEmail,
+        recipientName: counterpartyUser?.name ?? normalizedCounterpartyEmail,
+        creatorName: owner.name,
+        escrowTitle: updatedEscrow.title,
+        escrowReference: updatedEscrow.reference,
+        creatorRole: updatedEscrow.creatorRole as "buyer" | "seller",
+        invitationStatus,
+      },
     });
 
     await createTimeline(
@@ -981,15 +1122,20 @@ export async function claimPendingEscrowsForUser(prisma: PrismaClient, userId: s
   await prisma.$transaction(async (tx) => {
     for (const escrow of pendingEscrows) {
       const isSellerInvite = escrow.creatorRole === "buyer";
+      const creatorSigned = escrow.currentAgreementVersion?.signatures.some(
+        (signature) => signature.signerId === escrow.ownerId,
+      ) ?? false;
       const updated = await tx.escrow.update({
         where: { id: escrow.id },
         data: {
           buyerId: isSellerInvite ? escrow.buyerId : user.id,
           sellerId: isSellerInvite ? user.id : escrow.sellerId,
           counterpart: user.name,
-          lifecycleStatus: "pending_approval",
-          stage: "Approval pending",
-          dueDescription: `Waiting for ${user.name} to approve`,
+          lifecycleStatus: creatorSigned ? "pending_approval" : "creator_signature_required",
+          stage: creatorSigned ? "Approval pending" : "Creator signature required",
+          dueDescription: creatorSigned
+            ? `Waiting for ${user.name} to approve`
+            : "Creator must sign the current agreement before approval",
           status: "warning",
         },
         include: includeEscrowRelations,
@@ -1052,9 +1198,27 @@ export async function approveEscrow(
     throw new AppError("Counterparty account is not attached to this escrow.", 400);
   }
   const counterpartyPartySnapshot = buildPartySnapshot(user, data.counterpartyParty);
+  if (!escrow.currentAgreementVersionId) {
+    throw new AppError("This escrow does not have a current agreement version.", 409);
+  }
 
   return prisma.$transaction(async (tx) => {
     await saveBusinessProfile(tx, userId, data.counterpartyParty);
+    await tx.agreementVersion.update({
+      where: { id: escrow.currentAgreementVersionId! },
+      data: { counterpartyParty: counterpartyPartySnapshot as Prisma.InputJsonObject },
+    });
+    await signAgreementVersion(tx, {
+      agreementVersionId: escrow.currentAgreementVersionId!,
+      signerId: userId,
+      signerRole: escrow.buyerId === userId ? "buyer" : "seller",
+      signatureDataUrl: data.signatureDataUrl,
+    });
+    await lockAgreementIfFullySigned(tx, {
+      agreementVersionId: escrow.currentAgreementVersionId!,
+      buyerId: requireBuyerId(escrow),
+      sellerId: requireSellerId(escrow),
+    });
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
@@ -1064,11 +1228,12 @@ export async function approveEscrow(
         dueDescription: "Buyer funding required",
         status: "warning",
         approvedAt: new Date(),
-        counterpartySignatureDataUrl: data.signatureDataUrl ?? null,
+        counterpartySignatureDataUrl: data.signatureDataUrl,
         counterpartyPartySnapshot: counterpartyPartySnapshot as Prisma.InputJsonObject,
       },
       include: includeEscrowRelations,
     });
+    await markInvitationAccepted(tx, escrow.id);
 
     await createTimeline(
       tx,
@@ -1095,6 +1260,48 @@ export async function approveEscrow(
     await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
+  });
+}
+
+export async function signCurrentAgreement(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  signatureDataUrl: string,
+) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (!escrow.currentAgreementVersionId) {
+    throw new AppError("This escrow does not have a current agreement version.", 409);
+  }
+  if (!["pending_counterparty_signup", "pending_approval", "creator_signature_required", "changes_requested"].includes(escrow.lifecycleStatus)) {
+    throw new AppError("This agreement can no longer be signed.", 409);
+  }
+  const signerRole = escrow.buyerId === userId ? "buyer" : "seller";
+  return prisma.$transaction(async (tx) => {
+    const signature = await signAgreementVersion(tx, {
+      agreementVersionId: escrow.currentAgreementVersionId!,
+      signerId: userId,
+      signerRole,
+      signatureDataUrl,
+    });
+    const isCreator = escrow.ownerId === userId;
+    const updated = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        ...(isCreator
+          ? { creatorSignatureDataUrl: signatureDataUrl }
+          : { counterpartySignatureDataUrl: signatureDataUrl }),
+        ...(isCreator && escrow.lifecycleStatus === "creator_signature_required"
+          ? {
+              lifecycleStatus: "pending_approval",
+              stage: "Approval pending",
+              dueDescription: `Waiting for ${escrow.counterpart} to approve`,
+            }
+          : {}),
+      },
+      include: includeEscrowRelations,
+    });
+    return { escrow: updated, signature };
   });
 }
 
@@ -1139,6 +1346,92 @@ export async function rejectEscrow(prisma: PrismaClient, userId: string, referen
     await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
 
     return updated;
+  });
+}
+
+export async function resendEscrowInvitation(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.ownerId !== userId) {
+    throw new AppError("Only the creator can resend this invitation.", 403);
+  }
+  if (!["pending_counterparty_signup", "pending_approval", "creator_signature_required", "rejected"].includes(escrow.lifecycleStatus)) {
+    throw new AppError("This invitation cannot be resent in its current state.", 409);
+  }
+  const counterpartyUser = await prisma.user.findUnique({
+    where: { email: escrow.counterpartyEmail },
+  });
+  const invitationStatus: EscrowInvitationStatus = !counterpartyUser
+    ? "signup_required"
+    : counterpartyUser.emailVerified
+      ? "existing_user"
+      : "verification_required";
+  return prisma.$transaction(async (tx) => {
+    const delivery = await queueEscrowInvitation(tx, {
+      escrowId: escrow.id,
+      supersedeExisting: true,
+      payload: {
+        to: escrow.counterpartyEmail,
+        recipientName: counterpartyUser?.name ?? escrow.counterpart,
+        creatorName: escrow.owner.name,
+        escrowTitle: escrow.title,
+        escrowReference: escrow.reference,
+        creatorRole: escrow.creatorRole as "buyer" | "seller",
+        invitationStatus,
+      },
+    });
+    const creatorSigned = escrow.currentAgreementVersion?.signatures.some(
+      (signature) => signature.signerId === escrow.ownerId,
+    ) ?? false;
+    const readyLifecycle = creatorSigned ? "pending_approval" : "creator_signature_required";
+    const updated = await tx.escrow.update({
+      where: { id: escrow.id },
+      data: {
+        lifecycleStatus: invitationStatus === "existing_user" ? readyLifecycle : "pending_counterparty_signup",
+        stage: invitationStatus === "existing_user"
+          ? creatorSigned ? "Approval pending" : "Creator signature required"
+          : "Invitation pending",
+        dueDescription: invitationStatus === "existing_user"
+          ? creatorSigned
+            ? `Waiting for ${counterpartyUser?.name ?? escrow.counterpart} to approve`
+            : "Sign the current agreement before the counterparty can approve it"
+          : `Waiting for ${escrow.counterpartyEmail} to create and verify an account`,
+        rejectedAt: null,
+      },
+      include: includeEscrowRelations,
+    });
+    return { escrow: updated, delivery };
+  });
+}
+
+export async function extendEscrowInvitation(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  days: number,
+) {
+  const escrow = await findEscrowForUser(prisma, userId, reference);
+  if (escrow.ownerId !== userId) throw new AppError("Only the creator can extend this invitation.", 403);
+  if (escrow.fundingStatus === "funded") throw new AppError("A funded escrow has no open invitation.", 409);
+  const delivery = escrow.invitationDeliveries[0];
+  if (!delivery || delivery.status === "accepted" || delivery.status === "corrected") {
+    throw new AppError("No open invitation is available to extend.", 409);
+  }
+  const base = delivery.expiresAt.getTime() > Date.now() ? delivery.expiresAt : new Date();
+  const expiresAt = new Date(base.getTime() + days * 86_400_000);
+  const responseDueAt = new Date(expiresAt.getTime());
+  return prisma.$transaction(async (tx) => {
+    await tx.escrow.update({
+      where: { id: escrow.id },
+      data: { invitationExpiresAt: expiresAt, agreementResponseDueAt: responseDueAt },
+    });
+    return tx.invitationDelivery.update({
+      where: { id: delivery.id },
+      data: { expiresAt, responseDueAt, status: delivery.status === "failed" ? "failed" : "delivered" },
+    });
   });
 }
 
@@ -1398,12 +1691,21 @@ export async function applyAgreementChanges(
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
-        lifecycleStatus: "pending_approval",
-        stage: "Approval pending",
-        dueDescription: `Waiting for ${escrow.counterpart} to approve`,
+        lifecycleStatus: acceptsChanges ? "creator_signature_required" : "pending_approval",
+        stage: acceptsChanges ? "Creator signature required" : "Approval pending",
+        dueDescription: acceptsChanges
+          ? "Sign the updated agreement before resending"
+          : `Waiting for ${escrow.counterpart} to approve`,
       },
       include: includeEscrowRelations,
     });
+    if (acceptsChanges) {
+      await createAgreementVersion(tx, {
+        escrowId: updated.id,
+        createdById: userId,
+        terms: agreementTermsFromEscrow(updated),
+      });
+    }
     const counterpartyId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
     if (counterpartyId) {
       await createTimeline(
@@ -1487,14 +1789,31 @@ export async function applyMilestoneChanges(
       where: { id: escrow.id },
       data: {
         amountCents,
-        lifecycleStatus: remainingRequests ? "changes_requested" : "pending_approval",
-        stage: remainingRequests ? "Changes requested" : "Approval pending",
+        lifecycleStatus: remainingRequests
+          ? "changes_requested"
+          : acceptsChanges
+            ? "creator_signature_required"
+            : "pending_approval",
+        stage: remainingRequests
+          ? "Changes requested"
+          : acceptsChanges
+            ? "Creator signature required"
+            : "Approval pending",
         dueDescription: remainingRequests
           ? `${remainingRequests} milestone revision(s) pending`
-          : `Waiting for ${escrow.counterpart} to approve`,
+          : acceptsChanges
+            ? "Sign the updated agreement before resending"
+            : `Waiting for ${escrow.counterpart} to approve`,
       },
       include: includeEscrowRelations,
     });
+    if (!remainingRequests && acceptsChanges) {
+      await createAgreementVersion(tx, {
+        escrowId: updated.id,
+        createdById: userId,
+        terms: agreementTermsFromEscrow(updated),
+      });
+    }
     const counterpartyId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
     if (counterpartyId) {
       await createTimeline(
@@ -1530,7 +1849,13 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
   if (escrow.ownerId !== userId) {
     throw new AppError("Only the creator can cancel this escrow.", 403);
   }
-  const cancellableStates = ["pending_counterparty_signup", "pending_approval", "changes_requested"];
+  const cancellableStates = [
+    "pending_counterparty_signup",
+    "pending_approval",
+    "changes_requested",
+    "creator_signature_required",
+    "rejected",
+  ];
   if (escrow.fundingStatus === "funded" || ["funded", "completed"].includes(escrow.lifecycleStatus)) {
     throw new AppError(
       "Funded escrows cannot be cancelled until the refund workflow is available.",
@@ -1622,6 +1947,11 @@ export async function fundEscrow(
       if (hasPendingAgreementChanges(escrow)) {
         throw new AppError("Requested agreement changes must be resolved before funding.", 400);
       }
+      await assertFundableAgreement(tx, {
+        currentAgreementVersionId: escrow.currentAgreementVersionId,
+        buyerId,
+        sellerId: requireSellerId(escrow),
+      });
 
       const fundedAt = new Date();
     const transition = await tx.escrow.updateMany({
