@@ -6,6 +6,7 @@ import { authPlugin } from "./plugins/auth";
 import { prismaPlugin } from "./plugins/prisma";
 import { authRoutes } from "./routes/auth";
 import { dashboardRoutes } from "./routes/dashboard";
+import { operationsRoutes } from "./routes/operations";
 import { AppError } from "./utils/errors";
 
 export async function buildServer() {
@@ -37,6 +38,7 @@ export async function buildServer() {
 
   await fastify.register(authRoutes);
   await fastify.register(dashboardRoutes);
+  await fastify.register(operationsRoutes);
 
   fastify.get("/", async () => {
     return { status: "ok" };

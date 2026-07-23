@@ -62,6 +62,10 @@ export async function executeIdempotentCommandWithMetadata<T extends Prisma.Json
   const unique = { userId_key: { userId: input.userId, key: input.key } };
   const existing = await prisma.idempotencyRecord.findUnique({ where: unique });
   if (existing) {
+    await prisma.idempotencyRecord.update({
+      where: { id: existing.id },
+      data: { replayCount: { increment: 1 }, lastReplayedAt: new Date() },
+    });
     return { value: validateReplay(existing, input.command, hash) as T, replayed: true };
   }
 
@@ -87,6 +91,10 @@ export async function executeIdempotentCommandWithMetadata<T extends Prisma.Json
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const replay = await prisma.idempotencyRecord.findUnique({ where: unique });
       if (replay) {
+        await prisma.idempotencyRecord.update({
+          where: { id: replay.id },
+          data: { replayCount: { increment: 1 }, lastReplayedAt: new Date() },
+        });
         return { value: validateReplay(replay, input.command, hash) as T, replayed: true };
       }
     }

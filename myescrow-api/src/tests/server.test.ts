@@ -1778,6 +1778,113 @@ describe("MyEscrow API", () => {
     expect(ledger.json().balances.heldCents).toBe(10_000);
   });
 
+  it("runs durable recovery jobs and exposes permissioned support tools and audit history", async () => {
+    const denied = await server.inject({
+      method: "GET",
+      url: "/api/operations/health",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const operator = await server.prisma.user.update({
+      where: { email: "scott@example.com" },
+      data: { role: "support" },
+    });
+    const delivery = await server.prisma.invitationDelivery.findFirstOrThrow({
+      where: { acceptedAt: null, supersededAt: null, status: { notIn: ["accepted", "corrected"] } },
+      orderBy: { id: "desc" },
+    });
+    const extendKey = `support-extend-${delivery.id}`;
+    const extended = await server.inject({
+      method: "POST",
+      url: `/api/operations/invitations/${delivery.id}/extend`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": extendKey },
+      payload: { days: 5 },
+    });
+    expect(extended.statusCode).toBe(200);
+    const extendedReplay = await server.inject({
+      method: "POST",
+      url: `/api/operations/invitations/${delivery.id}/extend`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": extendKey },
+      payload: { days: 5 },
+    });
+    expect(extendedReplay.json()).toEqual(extended.json());
+
+    const recoveryNow = new Date("2026-09-30T12:00:00.000Z");
+    await server.prisma.invitationDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        responseDueAt: new Date(recoveryNow.getTime() - 2 * 86_400_000),
+        expiresAt: new Date(recoveryNow.getTime() - 86_400_000),
+      },
+    });
+    const { runOperationalRecovery } = await import("../services/operationsService");
+    const result = await runOperationalRecovery(server.prisma, server.log, recoveryNow, 100);
+    expect(result.failed).toBe(0);
+    expect(result.completed).toBeGreaterThan(0);
+    expect((await server.prisma.invitationDelivery.findUniqueOrThrow({ where: { id: delivery.id } })).status).toBe("expired");
+    const reopened = await server.inject({
+      method: "POST",
+      url: `/api/operations/invitations/${delivery.id}/extend`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `support-reopen-${delivery.id}` },
+      payload: { days: 7 },
+    });
+    expect(reopened.statusCode).toBe(200);
+    const reopenedDelivery = await server.prisma.invitationDelivery.findUniqueOrThrow({
+      where: { id: delivery.id },
+      include: { escrow: true },
+    });
+    expect(reopenedDelivery.status).toBe("delivered");
+    expect(reopenedDelivery.escrow.lifecycleStatus).not.toBe("invitation_expired");
+    expect(await server.prisma.auditEvent.count({ where: { actorId: operator.id } })).toBeGreaterThan(0);
+    expect((await server.prisma.reconciliationRun.findFirstOrThrow({ orderBy: { startedAt: "desc" } })).status).toBe("clean");
+
+    const failedJob = await server.prisma.operationalJob.create({
+      data: {
+        jobType: "funding_timeout",
+        dedupeKey: "test-failed-operational-job",
+        payload: { escrowId: -1 },
+        status: "failed",
+        runAt: recoveryNow,
+        attemptCount: 5,
+        lastError: "simulated failure",
+      },
+    });
+    const retryKey = `retry-job-${failedJob.id}`;
+    const retried = await server.inject({
+      method: "POST",
+      url: `/api/operations/jobs/${failedJob.id}/retry`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": retryKey },
+    });
+    expect(retried.statusCode).toBe(200);
+    expect((await server.prisma.operationalJob.findUniqueOrThrow({ where: { id: failedJob.id } })).status).toBe("pending");
+
+    const evidence = await server.inject({
+      method: "GET",
+      url: `/api/operations/disputes/${phaseFourDisputeReference}/evidence`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(evidence.statusCode).toBe(200);
+    expect(evidence.json().evidence.length).toBeGreaterThan(0);
+
+    const audit = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/audit`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(audit.json().events.some((event: { type: string }) => event.type === "ledger")).toBe(true);
+    expect(audit.json().events.some((event: { type: string }) => event.type === "dispute_evidence")).toBe(true);
+
+    const health = await server.inject({
+      method: "GET",
+      url: "/api/operations/health",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().counts.duplicateCommandAttempts).toBeGreaterThan(0);
+  });
+
   it("reconciles every funded escrow against its immutable ledger", async () => {
     const report = await reconcileEscrowLedger(server.prisma);
     expect(report.checkedEscrows).toBeGreaterThan(0);

@@ -12,6 +12,9 @@ async function main() {
   const data = JSON.parse(raw) as DatabaseSchema;
 
   await prisma.$transaction([
+    prisma.auditEvent.deleteMany(),
+    prisma.operationalJob.deleteMany(),
+    prisma.reconciliationRun.deleteMany(),
     prisma.disputeResolutionAllocation.deleteMany(),
     prisma.disputeEvidenceSubmission.deleteMany(),
     prisma.cancellationRequest.deleteMany(),

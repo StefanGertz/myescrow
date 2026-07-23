@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { sendEscrowInvitationEmail } from "./emailService";
+import { AppError } from "../utils/errors";
 
 const INVITATION_DAYS = 14;
 const RESPONSE_DAYS = 7;
@@ -17,6 +18,49 @@ export type InvitationPayload = {
   creatorRole: "buyer" | "seller";
   invitationStatus: "existing_user" | "signup_required" | "verification_required";
 };
+
+export async function extendInvitationDelivery(
+  tx: Prisma.TransactionClient,
+  deliveryId: number,
+  days: number,
+) {
+  const delivery = await tx.invitationDelivery.findUnique({
+    where: { id: deliveryId },
+    include: { escrow: { select: { lifecycleStatus: true, buyerId: true, sellerId: true, counterpartyEmail: true } } },
+  });
+  if (!delivery || ["accepted", "corrected"].includes(delivery.status)) {
+    throw new AppError("No open invitation is available to extend.", 409);
+  }
+  const now = new Date();
+  const base = delivery.expiresAt.getTime() > now.getTime() ? delivery.expiresAt : now;
+  const expiresAt = addDays(base, days);
+  await tx.escrow.update({
+    where: { id: delivery.escrowId },
+    data: {
+      invitationExpiresAt: expiresAt,
+      agreementResponseDueAt: expiresAt,
+      ...(delivery.escrow.lifecycleStatus === "invitation_expired"
+        ? delivery.escrow.buyerId && delivery.escrow.sellerId
+          ? {
+              lifecycleStatus: "pending_approval",
+              stage: "Approval pending",
+              dueDescription: `Waiting for ${delivery.recipient} to approve`,
+              status: "warning",
+            }
+          : {
+              lifecycleStatus: "pending_counterparty_signup",
+              stage: "Invitation pending",
+              dueDescription: `Waiting for ${delivery.escrow.counterpartyEmail} to create and verify an account`,
+              status: "warning",
+            }
+        : {}),
+    },
+  });
+  return tx.invitationDelivery.update({
+    where: { id: delivery.id },
+    data: { expiresAt, responseDueAt: expiresAt, status: delivery.status === "failed" ? "failed" : "delivered" },
+  });
+}
 
 export async function queueEscrowInvitation(
   tx: Prisma.TransactionClient,

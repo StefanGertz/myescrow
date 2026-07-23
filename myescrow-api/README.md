@@ -75,6 +75,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
 - `npm run outbox:invitations` - process due escrow invitation events once; run this command every minute in deployed environments.
 - `npm run milestones:deadlines` - send due-soon milestone reminders and escalate overdue reviews once; run on a recurring schedule.
+- `npm run operations:run` - process the durable recovery queue, invitation retries, deadlines, and recorded daily reconciliation; run at least once per minute.
 
 ## API surface
 
@@ -90,6 +91,7 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
 | GET | `/api/dashboard/escrows` | Escrows requiring review, including derived funded, held, released, refunded, and disputed balances. |
 | GET | `/api/dashboard/escrows/:id/ledger` | Immutable escrow balance history for either party. |
+| GET | `/api/dashboard/escrows/:id/audit` | Chronological agreement, milestone, dispute, cancellation, recovery, and money history for either party. |
 | POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal and atomically queue its invitation. |
 | PATCH | `/api/dashboard/escrows/:id` | Revise a pre-funding proposal, create a new agreement version, and correct/resend its invitation. |
 | POST | `/api/dashboard/escrows/:id/agreement/sign` | Sign the current immutable agreement version. |
@@ -114,6 +116,13 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | POST | `/api/dashboard/wallet/topup` | Increase wallet balance (`{ amount: number }`). |
 | POST | `/api/dashboard/wallet/withdraw` | Withdraw from wallet (`{ amount: number }`). |
 | GET | `/api/dashboard/wallet/transactions` | Recent wallet transactions (credits/debits). |
+| GET | `/api/operations/health` | Support/admin health summary and active operational alerts. |
+| GET | `/api/operations/jobs` | Support/admin operational job list, optionally filtered by status. |
+| GET | `/api/operations/escrows/:id/audit` | Support/admin escrow audit history. |
+| GET | `/api/operations/disputes/:id/evidence` | Support/admin dispute evidence inspection. |
+| POST | `/api/operations/jobs/:id/retry` | Idempotently queue a failed operational job for retry. |
+| POST | `/api/operations/outbox/:id/retry` | Idempotently queue a failed invitation event for retry. |
+| POST | `/api/operations/invitations/:id/extend` | Idempotently extend an active invitation deadline. |
 
 ## Testing
 

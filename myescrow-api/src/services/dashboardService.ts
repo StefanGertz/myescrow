@@ -11,6 +11,7 @@ import {
   signAgreementVersion,
 } from "./agreementService";
 import {
+  extendInvitationDelivery,
   markInvitationAccepted,
   queueEscrowInvitation,
 } from "./invitationService";
@@ -1499,7 +1500,7 @@ export async function resendEscrowInvitation(
   if (escrow.ownerId !== userId) {
     throw new AppError("Only the creator can resend this invitation.", 403);
   }
-  if (!["pending_counterparty_signup", "pending_approval", "creator_signature_required", "rejected"].includes(escrow.lifecycleStatus)) {
+  if (!["pending_counterparty_signup", "pending_approval", "creator_signature_required", "rejected", "invitation_expired"].includes(escrow.lifecycleStatus)) {
     throw new AppError("This invitation cannot be resent in its current state.", 409);
   }
   const counterpartyUser = await prisma.user.findUnique({
@@ -1561,19 +1562,7 @@ export async function extendEscrowInvitation(
   if (!delivery || delivery.status === "accepted" || delivery.status === "corrected") {
     throw new AppError("No open invitation is available to extend.", 409);
   }
-  const base = delivery.expiresAt.getTime() > Date.now() ? delivery.expiresAt : new Date();
-  const expiresAt = new Date(base.getTime() + days * 86_400_000);
-  const responseDueAt = new Date(expiresAt.getTime());
-  return prisma.$transaction(async (tx) => {
-    await tx.escrow.update({
-      where: { id: escrow.id },
-      data: { invitationExpiresAt: expiresAt, agreementResponseDueAt: responseDueAt },
-    });
-    return tx.invitationDelivery.update({
-      where: { id: delivery.id },
-      data: { expiresAt, responseDueAt, status: delivery.status === "failed" ? "failed" : "delivered" },
-    });
-  });
+  return prisma.$transaction((tx) => extendInvitationDelivery(tx, delivery.id, days));
 }
 
 export async function requestMilestoneChanges(
@@ -1996,6 +1985,7 @@ export async function cancelEscrow(prisma: PrismaClient, userId: string, referen
     "changes_requested",
     "creator_signature_required",
     "rejected",
+    "invitation_expired",
   ];
   if (escrow.fundingStatus === "funded" || ["funded", "completed"].includes(escrow.lifecycleStatus)) {
     throw new AppError(

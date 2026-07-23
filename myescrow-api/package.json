@@ -15,6 +15,7 @@
     "reconcile:ledger": "tsx scripts/reconcile-ledger.ts",
     "outbox:invitations": "tsx scripts/process-invitation-outbox.ts",
     "milestones:deadlines": "tsx scripts/process-milestone-deadlines.ts",
+    "operations:run": "tsx scripts/process-operational-recovery.ts",
     "lint:docs": "node scripts/check-readme-utf8.mjs",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

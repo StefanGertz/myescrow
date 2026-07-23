@@ -223,6 +223,10 @@ Funded mutual cancellation is now a request-and-accept workflow: new milestone a
 - Daily reconciliation produces a recorded result and pages an owner on variance.
 - Support actions are permissioned, audited, and idempotent.
 
+**Implementation status (2026-07-22):** Phase 5 is implemented locally. A persistent operational queue schedules invitation response and expiry handling, funding escalation, milestone deadline sweeps, dispute evidence reminders and escalation, cancellation response escalation, and daily ledger reconciliation. Workers conditionally claim jobs, recover stale locks, retry with backoff, and retain terminal failures for support retry. Reconciliation runs are recorded and operators are notified when exceptions exist.
+
+Support and admin roles can inspect health, failed jobs, dispute evidence, and complete escrow audit history; retry failed jobs or invitation deliveries; and extend invitation deadlines through idempotent, audited commands. Escrow parties can read the same transaction audit chronology. The operator dashboard surfaces failed delivery, failed recovery, aged escrow, duplicate-command, approaching-dispute, and reconciliation alerts. Incident procedures and ownership targets are documented in `docs/operations-incident-runbook.md`. Production deployment must schedule `npm run operations:run` at least once per minute and assign real support/admin roles through the deployment's identity administration process.
+
 ## Cross-cutting API and web work
 
 ### API
