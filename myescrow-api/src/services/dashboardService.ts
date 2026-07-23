@@ -898,6 +898,18 @@ export async function listEscrows(prisma: PrismaClient, userId: string): Promise
   return records.map((record) => mapEscrow(record, userId));
 }
 
+export async function getEscrowForOperations(prisma: PrismaClient, reference: string): Promise<EscrowResponse> {
+  const record = await prisma.escrow.findUnique({
+    where: { reference },
+    include: includeEscrowRelations,
+  });
+  if (!record) throw new AppError("Escrow not found.", 404);
+
+  // Operator inspection is read-only. Mapping from the owner's perspective keeps
+  // the established escrow response shape while the operations UI renders both parties.
+  return mapEscrow(record, record.ownerId);
+}
+
 export async function getEscrowLedgerHistory(
   prisma: PrismaClient,
   userId: string,

@@ -9,6 +9,7 @@ import {
 } from "../services/operationsService";
 import { AppError } from "../utils/errors";
 import { changeOperatorRole, listOperators } from "../services/operatorService";
+import { getEscrowForOperations } from "../services/dashboardService";
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 const escrowSchema = z.object({ id: z.string().min(1) });
@@ -87,6 +88,12 @@ export async function operationsRoutes(fastify: FastifyInstance) {
       const operator = await requireOperator(request);
       const { id } = escrowSchema.parse(request.params);
       return getEscrowAuditTrail(secured.prisma, operator.id, id, true);
+    });
+
+    secured.get("/api/operations/escrows/:id", async (request) => {
+      await requireOperator(request);
+      const { id } = escrowSchema.parse(request.params);
+      return { escrow: await getEscrowForOperations(secured.prisma, id) };
     });
 
     secured.get("/api/operations/disputes/:id/evidence", async (request) => {
