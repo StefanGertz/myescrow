@@ -8,6 +8,10 @@ export function buildDisputeReference(sequence: number) {
   return `DSP-${pad(sequence)}`;
 }
 
+export function buildCancellationReference(sequence: number) {
+  return `CXL-${pad(sequence)}`;
+}
+
 export function buildNotificationId(sequence: number) {
   return `notif-${pad(sequence, 2)}`;
 }

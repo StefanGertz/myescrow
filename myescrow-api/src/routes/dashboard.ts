@@ -24,9 +24,16 @@ import {
   releaseEscrow,
   resubmitMilestone,
   signCurrentAgreement,
-  updateDispute,
   updateDraftEscrow,
 } from "../services/dashboardService";
+import {
+  acceptDisputeResolution,
+  acceptFundedCancellation,
+  openMilestoneDispute,
+  proposeDisputeResolution,
+  requestFundedCancellation,
+  submitDisputeEvidence,
+} from "../services/disputeService";
 import { sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { processInvitationOutbox } from "../services/invitationService";
 import { findUserById } from "../services/userService";
@@ -97,6 +104,30 @@ const milestoneSubmissionSchema = z.object({
     sizeBytes: z.number().int().positive().max(25_000_000),
     sha256: z.string().regex(/^[a-f0-9]{64}$/i),
   })).max(10).optional(),
+});
+
+const disputeEvidenceReferenceSchema = z.object({
+  objectKey: z.string().trim().min(1).max(1_000),
+  fileName: z.string().trim().min(1).max(255),
+  contentType: z.string().trim().min(1).max(120),
+  sizeBytes: z.number().int().positive().max(25_000_000),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+});
+
+const disputeEvidenceSchema = z.object({
+  note: z.string().trim().max(5_000).optional(),
+  evidence: z.array(disputeEvidenceReferenceSchema).max(20).optional(),
+});
+
+const disputeResolutionSchema = z.object({
+  sellerAmount: z.number().nonnegative(),
+  buyerAmount: z.number().nonnegative(),
+  note: z.string().trim().max(5_000).optional(),
+});
+
+const fundedCancellationSchema = z.object({
+  mode: z.enum(["mutual", "unilateral"]),
+  reason: z.string().trim().min(10).max(5_000),
 });
 
 const walletSchema = z.object({
@@ -318,6 +349,30 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       return { success: true, escrowId: escrow.reference };
     });
 
+    secured.post("/api/dashboard/escrows/:id/cancellation/request", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = fundedCancellationSchema.parse(request.body);
+      return requestFundedCancellation(
+        secured.prisma,
+        user.id,
+        id,
+        body,
+        requireIdempotencyKey(request),
+      );
+    });
+
+    secured.post("/api/dashboard/cancellations/:id/accept", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      return acceptFundedCancellation(
+        secured.prisma,
+        user.id,
+        id,
+        requireIdempotencyKey(request),
+      );
+    });
+
     secured.post("/api/dashboard/escrows/:id/fund", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
@@ -367,6 +422,20 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/submit", handleMilestoneSubmission);
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/resubmit", handleMilestoneSubmission);
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/dispute", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const { reason } = z.object({ reason: z.string().trim().min(10).max(5_000) }).parse(request.body);
+      return openMilestoneDispute(
+        secured.prisma,
+        user.id,
+        id,
+        milestoneId,
+        reason,
+        requireIdempotencyKey(request),
+      );
+    });
 
     const handleAgreementChangeRequest = async (request: FastifyRequest) => {
       const user = await requireUser(request);
@@ -449,21 +518,60 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/disputes/:id/launch", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      await updateDispute(secured.prisma, user.id, id, {
-        workspaceLaunched: true,
-        updatedLabel: "Workspace launched just now",
+      const dispute = await secured.prisma.dispute.findFirst({
+        where: {
+          reference: id,
+          OR: [
+            { ownerId: user.id },
+            { escrow: { OR: [{ buyerId: user.id }, { sellerId: user.id }] } },
+          ],
+        },
+      });
+      if (!dispute) throw new AppError("Dispute not found.", 404);
+      await secured.prisma.dispute.update({
+        where: { id: dispute.id },
+        data: { workspaceLaunched: true, updatedLabel: "Workspace launched just now" },
       });
       return { disputeId: id, launchedAt: nowIso() };
+    });
+
+    secured.post("/api/dashboard/disputes/:id/evidence", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = disputeEvidenceSchema.parse(request.body ?? {});
+      return submitDisputeEvidence(
+        secured.prisma,
+        user.id,
+        id,
+        body,
+        requireIdempotencyKey(request),
+      );
+    });
+
+    secured.post("/api/dashboard/disputes/:id/resolution", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const body = disputeResolutionSchema.parse(request.body);
+      return proposeDisputeResolution(
+        secured.prisma,
+        user.id,
+        id,
+        dollarsToCents(body.sellerAmount),
+        dollarsToCents(body.buyerAmount),
+        body.note,
+        requireIdempotencyKey(request),
+      );
     });
 
     secured.post("/api/dashboard/disputes/:id/resolve", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      await updateDispute(secured.prisma, user.id, id, {
-        status: "resolved",
-        updatedLabel: "Resolved",
-      });
-      return { disputeId: id, resolvedAt: nowIso() };
+      return acceptDisputeResolution(
+        secured.prisma,
+        user.id,
+        id,
+        requireIdempotencyKey(request),
+      );
     });
 
     secured.get("/api/dashboard/notifications", async (request) => {

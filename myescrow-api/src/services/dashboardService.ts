@@ -21,6 +21,7 @@ import {
 import {
   applyEscrowTransfer,
   deriveLedgerBalances,
+  getEscrowLedgerBalances,
   type LedgerBalances,
 } from "./moneyIntegrityService";
 import {
@@ -116,6 +117,15 @@ export type EscrowResponse = {
     responseDueAt: string;
     failureReason?: string;
   } | null;
+  cancellation: {
+    id: string;
+    mode: string;
+    reason: string;
+    status: string;
+    requestedById: string;
+    requestedAt: string;
+    refundAmountCents: number;
+  } | null;
 };
 
 type PartyIdentityInput =
@@ -163,6 +173,32 @@ export type DisputeResponse = {
   amount: string;
   updated: string;
   priority: string;
+  status: string;
+  reason?: string;
+  escrowId?: string;
+  milestoneId?: number;
+  amountFrozenCents: number;
+  evidenceWindowEndsAt?: string;
+  openedBy?: { id: string; name: string };
+  resolution?: {
+    proposedById: string;
+    sellerCents: number;
+    buyerCents: number;
+    note?: string;
+  };
+  evidence: Array<{
+    id: number;
+    note?: string;
+    submittedAt: string;
+    submitter: { id: string; name: string };
+    references: Array<{
+      objectKey: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      sha256: string;
+    }>;
+  }>;
 };
 
 export type TimelineResponse = {
@@ -188,8 +224,10 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
       };
     };
     ledgerEntries: { select: { movementType: true; amountCents: true } };
+    disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving"] } } };
     currentAgreementVersion: { include: { signatures: true } };
     invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
+    cancellationRequests: { orderBy: { requestedAt: "desc" }; take: 1 };
   };
 }>;
 
@@ -285,8 +323,10 @@ const includeEscrowRelations = {
     },
   },
   ledgerEntries: { select: { movementType: true, amountCents: true } },
+  disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving"] as string[] } } },
   currentAgreementVersion: { include: { signatures: true } },
   invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
+  cancellationRequests: { orderBy: { requestedAt: "desc" as const }, take: 1 },
 };
 
 const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
@@ -437,7 +477,7 @@ function deriveStage(record: EscrowWithRelations) {
       : "Funded";
   }
   if (record.lifecycleStatus === "completed") {
-    return "Released";
+    return "Completed";
   }
   if (record.lifecycleStatus === "cancelled") {
     return "Cancelled";
@@ -475,7 +515,7 @@ function deriveDueDescription(record: EscrowWithRelations) {
     return pendingMilestones > 0 ? `${pendingMilestones} milestone(s) pending` : "Funded";
   }
   if (record.lifecycleStatus === "completed") {
-    return "All funds released";
+    return "All funds allocated";
   }
   if (record.lifecycleStatus === "cancelled") {
     return "Escrow cancelled";
@@ -513,6 +553,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     record.currentAgreementVersion?.signatures.map((signature) => signature.signerId) ?? [],
   );
   const invitation = record.invitationDeliveries[0];
+  const cancellation = record.cancellationRequests[0];
   const invitationStatus = invitation
     && invitation.status !== "accepted"
     && invitation.status !== "corrected"
@@ -557,7 +598,10 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     isOwner: record.ownerId === userId,
     buyer: buyerResponse,
     seller: sellerResponse,
-    balances: deriveLedgerBalances(record.ledgerEntries),
+    balances: deriveLedgerBalances(
+      record.ledgerEntries,
+      record.disputes.reduce((total, dispute) => total + dispute.amountFrozenCents, 0),
+    ),
     agreement: record.currentAgreementVersion
       ? {
           version: record.currentAgreementVersion.versionNumber,
@@ -579,6 +623,17 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
           expiresAt: invitation.expiresAt.toISOString(),
           responseDueAt: invitation.responseDueAt.toISOString(),
           ...(invitation.failureReason ? { failureReason: invitation.failureReason } : {}),
+        }
+      : null,
+    cancellation: cancellation
+      ? {
+          id: cancellation.reference,
+          mode: cancellation.mode,
+          reason: cancellation.reason,
+          status: cancellation.status,
+          requestedById: cancellation.requestedById,
+          requestedAt: cancellation.requestedAt.toISOString(),
+          refundAmountCents: cancellation.refundAmountCents,
         }
       : null,
     milestones: record.milestones.map((milestone) => ({
@@ -729,13 +784,14 @@ function getEscrowStateFromMilestones(
 ) {
   const remainingPending = milestones.filter((milestone) => ["not_started", "submitted"].includes(milestone.status)).length;
   const rejectedCount = milestones.filter((milestone) => milestone.status === "revision_requested").length;
-  const allReleased = milestones.length > 0 && milestones.every((milestone) => milestone.status === "released");
+  const allReleased = milestones.length > 0 && milestones.every((milestone) =>
+    ["released", "refunded", "settled", "cancelled"].includes(milestone.status));
 
   if (allReleased && heldCents === 0) {
     return {
       lifecycleStatus: "completed",
-      stage: "Released",
-      dueDescription: "All funds released",
+      stage: "Completed",
+      dueDescription: "All funds allocated",
       status: "success",
     } as const;
   }
@@ -764,7 +820,15 @@ export async function getOverview(prisma: PrismaClient, userId: string) {
       where: visibleEscrowWhere(userId),
       include: includeEscrowRelations,
     }),
-    prisma.dispute.findMany({ where: { ownerId: userId, status: "open" } }),
+    prisma.dispute.findMany({
+      where: {
+        status: { in: ["open", "resolution_proposed", "resolving"] },
+        OR: [
+          { ownerId: userId },
+          { escrow: { OR: [{ buyerId: userId }, { sellerId: userId }] } },
+        ],
+      },
+    }),
     prisma.timelineEvent.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
@@ -850,7 +914,7 @@ export async function getEscrowLedgerHistory(
   });
   return {
     escrowId: escrow.reference,
-    balances: deriveLedgerBalances(entries),
+    balances: await getEscrowLedgerBalances(prisma, escrow.id),
     entries: entries.map((entry) => ({
       id: entry.id,
       movementType: entry.movementType,
@@ -2364,14 +2428,63 @@ export async function resubmitMilestone(
 }
 
 export async function listDisputes(prisma: PrismaClient, userId: string): Promise<DisputeResponse[]> {
-  const disputes = await prisma.dispute.findMany({ where: { ownerId: userId, status: "open" } });
+  const disputes = await prisma.dispute.findMany({
+    where: {
+      status: { in: ["open", "resolution_proposed", "resolving"] },
+      OR: [
+        { ownerId: userId },
+        { escrow: { OR: [{ buyerId: userId }, { sellerId: userId }] } },
+      ],
+    },
+    include: {
+      escrow: { select: { reference: true } },
+      openedBy: { select: { id: true, name: true } },
+      evidenceSubmissions: {
+        include: { submitter: { select: { id: true, name: true } } },
+        orderBy: { submittedAt: "asc" },
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
   return disputes.map((dispute) => ({
     id: dispute.reference,
     title: dispute.title,
     owner: dispute.ownerTeam,
-    amount: formatAmountWithSuffix(dispute.amountCents),
+    amount: formatAmountWithSuffix(dispute.amountFrozenCents || dispute.amountCents),
     updated: dispute.updatedLabel,
     priority: dispute.priority,
+    status: dispute.status,
+    ...(dispute.reason ? { reason: dispute.reason } : {}),
+    ...(dispute.escrow ? { escrowId: dispute.escrow.reference } : {}),
+    ...(dispute.milestoneId ? { milestoneId: dispute.milestoneId } : {}),
+    amountFrozenCents: dispute.amountFrozenCents,
+    ...(dispute.evidenceWindowEndsAt
+      ? { evidenceWindowEndsAt: dispute.evidenceWindowEndsAt.toISOString() }
+      : {}),
+    ...(dispute.openedBy
+      ? { openedBy: { id: dispute.openedBy.id, name: dispute.openedBy.name } }
+      : {}),
+    ...(dispute.resolutionProposedById
+      && dispute.proposedSellerCents !== null
+      && dispute.proposedBuyerCents !== null
+      ? {
+          resolution: {
+            proposedById: dispute.resolutionProposedById,
+            sellerCents: dispute.proposedSellerCents,
+            buyerCents: dispute.proposedBuyerCents,
+            ...(dispute.resolutionNote ? { note: dispute.resolutionNote } : {}),
+          },
+        }
+      : {}),
+    evidence: dispute.evidenceSubmissions.map((submission) => ({
+      id: submission.id,
+      ...(submission.note ? { note: submission.note } : {}),
+      submittedAt: submission.submittedAt.toISOString(),
+      submitter: submission.submitter,
+      references: Array.isArray(submission.evidence)
+        ? submission.evidence as DisputeResponse["evidence"][number]["references"]
+        : [],
+    })),
   }));
 }
 

@@ -17,6 +17,8 @@ let createdEscrowReference: string;
 let createdMilestoneId: number;
 let secondMilestoneEscrowReference: string;
 let rejectedMilestoneId: number;
+let phaseFourDisputeReference: string;
+let phaseFourCancellationReference: string;
 let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
 const sentEmails: Array<{ from?: string; to?: string; subject?: string; html?: string; text?: string }> = [];
@@ -1521,22 +1523,259 @@ describe("MyEscrow API", () => {
     expect(body.transactions[0]).toHaveProperty("amount");
   });
 
-  it("resolves a dispute", async () => {
-    const responseDisputes = await server.inject({
+  it("opens one milestone dispute and reserves only that milestone balance", async () => {
+    const requests = await Promise.all([
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/dispute`,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `open-dispute-${rejectedMilestoneId}-a`,
+        },
+        payload: { reason: "The revised delivery still does not meet the agreed acceptance criteria." },
+      }),
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/dispute`,
+        headers: {
+          Authorization: `Bearer ${counterpartyToken}`,
+          "Idempotency-Key": `open-dispute-${rejectedMilestoneId}-b`,
+        },
+        payload: { reason: "The parties disagree about whether the revised acceptance criteria were met." },
+      }),
+    ]);
+    expect(requests.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    phaseFourDisputeReference = requests.find((response) => response.statusCode === 200)!.json().disputeId;
+
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: secondMilestoneEscrowReference },
+      include: { milestones: true },
+    });
+    const milestone = escrow.milestones.find((item) => item.id === rejectedMilestoneId);
+    expect(milestone?.status).toBe("disputed");
+    expect(await server.prisma.dispute.count({
+      where: { milestoneId: rejectedMilestoneId, status: { in: ["open", "resolution_proposed", "resolving"] } },
+    })).toBe(1);
+
+    const ledger = await server.inject({
       method: "GET",
-      url: "/api/dashboard/disputes",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/ledger`,
       headers: { Authorization: `Bearer ${token}` },
     });
-    const disputes = responseDisputes.json();
-    const target = disputes.disputes[0];
-    expect(target).toBeDefined();
-    const response = await server.inject({
+    expect(ledger.json().balances).toEqual(expect.objectContaining({
+      heldCents: 90_000,
+      disputedCents: 30_000,
+    }));
+  });
+
+  it("stores evidence and requires a complete mutual resolution allocation", async () => {
+    const evidenceResponse = await server.inject({
       method: "POST",
-      url: `/api/dashboard/disputes/${target.id}/resolve`,
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/evidence`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `evidence-${phaseFourDisputeReference}`,
+      },
+      payload: { note: "Attached delivery notes explain the seller's interpretation of the criteria." },
+    });
+    expect(evidenceResponse.statusCode).toBe(200);
+
+    const invalidProposal = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/resolution`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `bad-resolution-${phaseFourDisputeReference}`,
+      },
+      payload: { sellerAmount: 120, buyerAmount: 100, note: "Incomplete allocation" },
+    });
+    expect(invalidProposal.statusCode).toBe(400);
+
+    const proposal = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/resolution`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `resolution-${phaseFourDisputeReference}`,
+      },
+      payload: { sellerAmount: 120, buyerAmount: 180, note: "Split settlement proposed by the buyer." },
+    });
+    expect(proposal.statusCode).toBe(200);
+
+    const selfAcceptance = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/resolve`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `self-accept-${phaseFourDisputeReference}`,
+      },
+    });
+    expect(selfAcceptance.statusCode).toBe(403);
+  });
+
+  it("refunds only undisputed, unreleased funds after mutual cancellation", async () => {
+    const request = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/cancellation/request`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `cancel-request-${secondMilestoneEscrowReference}`,
+      },
+      payload: {
+        mode: "mutual",
+        reason: "Both parties agree to stop before work begins on the final milestone.",
+      },
+    });
+    expect(request.statusCode).toBe(200);
+    phaseFourCancellationReference = request.json().cancellationId;
+
+    const selfAcceptance = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${phaseFourCancellationReference}/accept`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `self-cancel-${phaseFourCancellationReference}`,
+      },
+    });
+    expect(selfAcceptance.statusCode).toBe(403);
+
+    const buyerBefore = await server.prisma.user.findUniqueOrThrow({ where: { email: "scott@example.com" } });
+    const acceptKey = `accept-cancel-${phaseFourCancellationReference}`;
+    const acceptance = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${phaseFourCancellationReference}/accept`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": acceptKey,
+      },
+    });
+    expect(acceptance.statusCode).toBe(200);
+    expect(acceptance.json()).toEqual(expect.objectContaining({ refundedCents: 60_000, disputedCents: 30_000 }));
+    const replay = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${phaseFourCancellationReference}/accept`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": acceptKey,
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(acceptance.json());
+
+    const buyerAfter = await server.prisma.user.findUniqueOrThrow({ where: { id: buyerBefore.id } });
+    expect(buyerAfter.walletBalanceCents).toBe(buyerBefore.walletBalanceCents + 60_000);
+    const cancellation = await server.prisma.cancellationRequest.findUniqueOrThrow({
+      where: { reference: phaseFourCancellationReference },
+      include: { escrow: { include: { milestones: { orderBy: { orderIndex: "asc" } } } } },
+    });
+    expect(cancellation.status).toBe("accepted");
+    expect(cancellation.escrow.lifecycleStatus).toBe("dispute_resolution_pending");
+    expect(cancellation.escrow.milestones[0]?.status).toBe("disputed");
+    expect(cancellation.escrow.milestones[1]?.status).toBe("cancelled");
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { businessReference: `cancellation:${phaseFourCancellationReference}:refund` },
+    })).toBe(1);
+  });
+
+  it("allocates every frozen dollar after cancellation and then closes the escrow", async () => {
+    const acceptanceKey = `accept-resolution-${phaseFourDisputeReference}`;
+    const acceptance = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/resolve`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": acceptanceKey,
+      },
+    });
+    expect(acceptance.statusCode).toBe(200);
+    expect(acceptance.json()).toEqual(expect.objectContaining({
+      disputeId: phaseFourDisputeReference,
+      sellerCents: 12_000,
+      buyerCents: 18_000,
+      status: "resolved",
+    }));
+    const replay = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/resolve`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": acceptanceKey,
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(acceptance.json());
+
+    const allocations = await server.prisma.disputeResolutionAllocation.findMany({
+      where: { dispute: { reference: phaseFourDisputeReference } },
+      include: { ledgerEntry: true },
+    });
+    expect(allocations.reduce((total, allocation) => total + allocation.amountCents, 0)).toBe(30_000);
+    expect(allocations.map((allocation) => allocation.recipient).sort()).toEqual(["buyer", "seller"]);
+    expect(allocations.every((allocation) => allocation.ledgerEntry.milestoneId === rejectedMilestoneId)).toBe(true);
+
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: secondMilestoneEscrowReference },
+      include: { milestones: { orderBy: { orderIndex: "asc" } } },
+    });
+    expect(escrow.lifecycleStatus).toBe("cancelled");
+    expect(escrow.milestones[0]?.status).toBe("settled");
+    expect(escrow.milestones[1]?.status).toBe("cancelled");
+  });
+
+  it("escalates unilateral cancellation without moving funds", async () => {
+    const create = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-unilateral-cancellation",
+      },
+      payload: {
+        title: "Governed cancellation escrow",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 100,
+        signatureDataUrl: creatorSignature,
+        milestones: [{ title: "Governed work", amount: 100 }],
+      },
+    });
+    const reference = create.json().reference;
+    await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    });
+    await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/fund`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `fund-${reference}` },
+    });
+    const refundCountBefore = await server.prisma.escrowLedgerEntry.count({ where: { movementType: "refund" } });
+    const request = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/cancellation/request`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `unilateral-${reference}`,
+      },
+      payload: {
+        mode: "unilateral",
+        reason: "The buyer is requesting a governed review because mutual agreement was not reached.",
+      },
+    });
+    expect(request.statusCode).toBe(200);
+    expect(request.json().status).toBe("escalated");
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({ where: { reference } });
+    expect(escrow.lifecycleStatus).toBe("cancellation_review");
+    expect(await server.prisma.escrowLedgerEntry.count({ where: { movementType: "refund" } })).toBe(refundCountBefore);
+
+    const ledger = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/escrows/${reference}/ledger`,
       headers: { Authorization: `Bearer ${token}` },
     });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().disputeId).toBe(target.id);
+    expect(ledger.json().balances.heldCents).toBe(10_000);
   });
 
   it("reconciles every funded escrow against its immutable ledger", async () => {

@@ -201,6 +201,10 @@ Evidence files should use private object storage, short-lived access links, malw
 - Mutual cancellation refunds only money that has not already been released or otherwise allocated.
 - The escrow audit trail links the issue, evidence, decision, and resulting money movement.
 
+**Implementation status (2026-07-22):** Phase 4 is implemented locally. Either escrow party can open one active dispute against an eligible milestone, and the dispute freezes only that milestone's remaining held balance. Evidence notes and private file metadata are retained during a seven-day evidence window. A party may propose release, refund, or a split, but the seller and buyer allocations must add up to every frozen cent and the other party must accept before ledger-backed settlement entries move money. Concurrent dispute opening and proposal changes use conditional transitions, and all money-moving commands are idempotent.
+
+Funded mutual cancellation is now a request-and-accept workflow: new milestone activity stops, the unreleased and undisputed balance returns to the buyer, and disputed funds remain held until their linked dispute is resolved. A unilateral request moves the escrow into governed review without moving money. The dashboard shows the frozen amount, evidence deadline and history, complete resolution proposal, cancellation status, and the counterparty action required. Automated deadline escalation, staff resolution authority, and operational support tooling remain Phase 5 work.
+
 ## Phase 5 — Operationalize recovery and eliminate silent stalls
 
 ### Capabilities

@@ -79,7 +79,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 ## API surface
 
 Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
-Escrow creation, funding, milestone submission, milestone approval, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
+Escrow creation, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -98,13 +98,18 @@ Escrow creation, funding, milestone submission, milestone approval, wallet top-u
 | POST | `/api/dashboard/escrows/:id/release` | Disabled compatibility route; use milestone approval to release funds. |
 | POST | `/api/dashboard/escrows/:id/approve` | Mark escrow as approved. |
 | POST | `/api/dashboard/escrows/:id/reject` | Reject an escrow. |
-| POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow. |
+| POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow before funding. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/submit` | Submit or resubmit completed work with a note and optional private evidence metadata. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/approve` | Approve the latest seller submission and release that milestone's remaining held balance. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/reject` | Request a revision with a required reason saved to the review history. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/dispute` | Open one active dispute and freeze that milestone's remaining held balance. |
+| POST | `/api/dashboard/escrows/:id/cancellation/request` | Request mutual funded cancellation or escalate a unilateral request without moving funds. |
+| POST | `/api/dashboard/cancellations/:id/accept` | Counterparty acceptance of mutual cancellation; refund only unreleased, undisputed funds. |
 | GET | `/api/dashboard/disputes` | Active disputes. |
 | POST | `/api/dashboard/disputes/:id/launch` | Mark a dispute workspace as launched. |
-| POST | `/api/dashboard/disputes/:id/resolve` | Resolve a dispute. |
+| POST | `/api/dashboard/disputes/:id/evidence` | Add a note and private evidence metadata during the evidence window. |
+| POST | `/api/dashboard/disputes/:id/resolution` | Propose a complete seller/buyer allocation of the frozen amount. |
+| POST | `/api/dashboard/disputes/:id/resolve` | Accept the other party's complete proposal and create linked settlement ledger entries. |
 | GET | `/api/dashboard/notifications` | Dashboard notifications. |
 | POST | `/api/dashboard/wallet/topup` | Increase wallet balance (`{ amount: number }`). |
 | POST | `/api/dashboard/wallet/withdraw` | Withdraw from wallet (`{ amount: number }`). |

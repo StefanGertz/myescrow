@@ -13,7 +13,7 @@ export type LedgerBalances = {
 
 type LedgerLike = { movementType: string; amountCents: number };
 
-export function deriveLedgerBalances(entries: LedgerLike[]): LedgerBalances {
+export function deriveLedgerBalances(entries: LedgerLike[], disputedCents = 0): LedgerBalances {
   const fundedCents = entries
     .filter((entry) => entry.movementType === "fund")
     .reduce((total, entry) => total + entry.amountCents, 0);
@@ -29,19 +29,32 @@ export function deriveLedgerBalances(entries: LedgerLike[]): LedgerBalances {
     heldCents: fundedCents - releasedCents - refundedCents,
     releasedCents,
     refundedCents,
-    disputedCents: 0,
+    disputedCents,
   };
 }
 
 export async function getEscrowLedgerBalances(
-  prisma: Pick<PrismaClient, "escrowLedgerEntry"> | Prisma.TransactionClient,
+  prisma: Pick<PrismaClient, "escrowLedgerEntry" | "dispute"> | Prisma.TransactionClient,
   escrowId: number,
 ) {
-  const entries = await prisma.escrowLedgerEntry.findMany({
-    where: { escrowId },
-    select: { movementType: true, amountCents: true },
-  });
-  return deriveLedgerBalances(entries);
+  const [entries, activeDisputes] = await Promise.all([
+    prisma.escrowLedgerEntry.findMany({
+      where: { escrowId },
+      select: { movementType: true, amountCents: true },
+    }),
+    prisma.dispute.findMany({
+      where: {
+        escrowId,
+        status: { in: ["open", "resolution_proposed", "resolving"] },
+      },
+      select: { amountFrozenCents: true },
+    }),
+  ]);
+  const disputedCents = activeDisputes.reduce(
+    (total, dispute) => total + dispute.amountFrozenCents,
+    0,
+  );
+  return deriveLedgerBalances(entries, disputedCents);
 }
 
 export async function applyWalletTransfer(
@@ -124,7 +137,12 @@ export async function applyEscrowTransfer(
   if (input.movementType === "fund" && before.fundedCents !== 0) {
     throw new AppError("This escrow already has a funding ledger entry.", 409);
   }
-  if (input.movementType !== "fund" && before.heldCents < input.amountCents) {
+  const isSettlement = ["settlement_release", "settlement_refund"].includes(input.movementType);
+  const availableCents = before.heldCents - before.disputedCents;
+  if (
+    input.movementType !== "fund"
+    && (isSettlement ? before.heldCents : availableCents) < input.amountCents
+  ) {
     throw new AppError("The escrow does not have enough held funds for this transfer.", 409);
   }
 
@@ -180,10 +198,16 @@ export async function reconcileEscrowLedger(prisma: PrismaClient) {
   for (const escrow of escrows) {
     const balances = deriveLedgerBalances(escrow.ledgerEntries);
     const issues: string[] = [];
-    const expectedFunded = escrow.fundingStatus === "funded" ? escrow.amountCents : 0;
-    const expectedReleased = escrow.milestones
-      .filter((milestone) => milestone.status === "released")
-      .reduce((total, milestone) => total + milestone.amountCents, 0);
+    const expectedFunded = balances.fundedCents > 0 ? escrow.amountCents : 0;
+    const expectedReleased = escrow.milestones.reduce((total, milestone) => {
+      if (milestone.status === "released") return total + milestone.amountCents;
+      if (milestone.status !== "settled") return total;
+      return total + escrow.ledgerEntries
+        .filter((entry) =>
+          entry.milestoneId === milestone.id
+          && entry.movementType === "settlement_release")
+        .reduce((sum, entry) => sum + Math.abs(entry.amountCents), 0);
+    }, 0);
     if (balances.fundedCents !== expectedFunded) {
       issues.push(`funded ledger ${balances.fundedCents} != escrow ${expectedFunded}`);
     }

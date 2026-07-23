@@ -106,7 +106,8 @@ export async function submitMilestoneWork(
         throw new AppError("This milestone is not awaiting a seller submission.", 409);
       }
       const blockedBy = escrow.milestones.find(
-        (item) => item.orderIndex < milestone.orderIndex && item.status !== "released",
+        (item) => item.orderIndex < milestone.orderIndex
+          && !["released", "refunded", "settled", "cancelled"].includes(item.status),
       );
       if (blockedBy) {
         throw new AppError(`Complete the earlier milestone \"${blockedBy.title}\" first.`, 409);
