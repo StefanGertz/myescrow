@@ -45,7 +45,7 @@ export async function getEscrowLedgerBalances(
     prisma.dispute.findMany({
       where: {
         escrowId,
-        status: { in: ["open", "resolution_proposed", "resolving"] },
+        status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] },
       },
       select: { amountFrozenCents: true },
     }),

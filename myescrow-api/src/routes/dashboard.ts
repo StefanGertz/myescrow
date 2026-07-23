@@ -31,6 +31,7 @@ import {
   acceptFundedCancellation,
   openMilestoneDispute,
   proposeDisputeResolution,
+  requestDisputeArbitration,
   requestFundedCancellation,
   submitDisputeEvidence,
 } from "../services/disputeService";
@@ -559,6 +560,17 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         dollarsToCents(body.sellerAmount),
         dollarsToCents(body.buyerAmount),
         body.note,
+        requireIdempotencyKey(request),
+      );
+    });
+
+    secured.post("/api/dashboard/disputes/:id/arbitration", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      return requestDisputeArbitration(
+        secured.prisma,
+        user.id,
+        id,
         requireIdempotencyKey(request),
       );
     });

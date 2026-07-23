@@ -25,6 +25,7 @@ model User {
   disputes                     Dispute[]                   @relation("DisputeLegacyOwner")
   disputesOpened               Dispute[]                   @relation("DisputeOpenedBy")
   disputeResolutionsProposed   Dispute[]                   @relation("DisputeResolutionProposer")
+  disputeArbitrationsRequested Dispute[]                   @relation("DisputeArbitrationRequester")
   disputeEvidenceSubmissions   DisputeEvidenceSubmission[]
   cancellationRequestsMade     CancellationRequest[]       @relation("CancellationRequestedBy")
   cancellationRequestsAnswered CancellationRequest[]       @relation("CancellationRespondedBy")
@@ -204,6 +205,9 @@ model Dispute {
   evidenceReminderSentAt DateTime?
   evidenceEscalatedAt    DateTime?
   resolutionAuthority    String                        @default("mutual_party_agreement")
+  arbitrationRequestedAt DateTime?
+  arbitrationRequestedById String?
+  arbitrationRequestedBy User?                         @relation("DisputeArbitrationRequester", fields: [arbitrationRequestedById], references: [id], onDelete: Restrict)
   resolutionProposedById String?
   resolutionProposedBy   User?                         @relation("DisputeResolutionProposer", fields: [resolutionProposedById], references: [id], onDelete: Restrict)
   proposedSellerCents    Int?

@@ -180,6 +180,8 @@ export type DisputeResponse = {
   milestoneId?: number;
   amountFrozenCents: number;
   evidenceWindowEndsAt?: string;
+  arbitrationRequestedAt?: string;
+  arbitrationRequestedById?: string;
   openedBy?: { id: string; name: string };
   resolution?: {
     proposedById: string;
@@ -225,7 +227,7 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
       };
     };
     ledgerEntries: { select: { movementType: true; amountCents: true } };
-    disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving"] } } };
+    disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] } } };
     currentAgreementVersion: { include: { signatures: true } };
     invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
     cancellationRequests: { orderBy: { requestedAt: "desc" }; take: 1 };
@@ -324,7 +326,7 @@ const includeEscrowRelations = {
     },
   },
   ledgerEntries: { select: { movementType: true, amountCents: true } },
-  disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving"] as string[] } } },
+  disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] as string[] } } },
   currentAgreementVersion: { include: { signatures: true } },
   invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
   cancellationRequests: { orderBy: { requestedAt: "desc" as const }, take: 1 },
@@ -823,7 +825,7 @@ export async function getOverview(prisma: PrismaClient, userId: string) {
     }),
     prisma.dispute.findMany({
       where: {
-        status: { in: ["open", "resolution_proposed", "resolving"] },
+        status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] },
         OR: [
           { ownerId: userId },
           { escrow: { OR: [{ buyerId: userId }, { sellerId: userId }] } },
@@ -2432,7 +2434,7 @@ export async function resubmitMilestone(
 export async function listDisputes(prisma: PrismaClient, userId: string): Promise<DisputeResponse[]> {
   const disputes = await prisma.dispute.findMany({
     where: {
-      status: { in: ["open", "resolution_proposed", "resolving"] },
+      status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] },
       OR: [
         { ownerId: userId },
         { escrow: { OR: [{ buyerId: userId }, { sellerId: userId }] } },
@@ -2462,6 +2464,12 @@ export async function listDisputes(prisma: PrismaClient, userId: string): Promis
     amountFrozenCents: dispute.amountFrozenCents,
     ...(dispute.evidenceWindowEndsAt
       ? { evidenceWindowEndsAt: dispute.evidenceWindowEndsAt.toISOString() }
+      : {}),
+    ...(dispute.arbitrationRequestedAt
+      ? { arbitrationRequestedAt: dispute.arbitrationRequestedAt.toISOString() }
+      : {}),
+    ...(dispute.arbitrationRequestedById
+      ? { arbitrationRequestedById: dispute.arbitrationRequestedById }
       : {}),
     ...(dispute.openedBy
       ? { openedBy: { id: dispute.openedBy.id, name: dispute.openedBy.name } }

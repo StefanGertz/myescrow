@@ -1554,7 +1554,7 @@ describe("MyEscrow API", () => {
     const milestone = escrow.milestones.find((item) => item.id === rejectedMilestoneId);
     expect(milestone?.status).toBe("disputed");
     expect(await server.prisma.dispute.count({
-      where: { milestoneId: rejectedMilestoneId, status: { in: ["open", "resolution_proposed", "resolving"] } },
+      where: { milestoneId: rejectedMilestoneId, status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] } },
     })).toBe(1);
 
     const ledger = await server.inject({

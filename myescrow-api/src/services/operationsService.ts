@@ -20,7 +20,7 @@ const ACTIVE_ESCROW_STATES = [
   "cancellation_review",
   "dispute_resolution_pending",
 ];
-const ACTIVE_DISPUTE_STATES = ["open", "resolution_proposed", "resolving"];
+const ACTIVE_DISPUTE_STATES = ["open", "resolution_proposed", "resolving", "arbitration_requested"];
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 

@@ -9,7 +9,7 @@ import { executeIdempotentCommand } from "./idempotencyService";
 import { applyEscrowTransfer, getEscrowLedgerBalances } from "./moneyIntegrityService";
 import { getNextSequenceValue } from "./sequenceService";
 
-const ACTIVE_DISPUTE_STATUSES = ["open", "resolution_proposed", "resolving"];
+const ACTIVE_DISPUTE_STATUSES = ["open", "resolution_proposed", "resolving", "arbitration_requested"];
 const TERMINAL_MILESTONE_STATUSES = ["released", "refunded", "settled", "cancelled"];
 const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
 
@@ -195,7 +195,7 @@ export async function submitDisputeEvidence(
       });
       if (!dispute?.escrow) throw new AppError("Dispute not found.", 404);
       requireEscrowParty(dispute.escrow, userId);
-      if (!ACTIVE_DISPUTE_STATUSES.includes(dispute.status)) {
+      if (!["open", "resolution_proposed"].includes(dispute.status)) {
         throw new AppError("This dispute is no longer accepting evidence.", 409);
       }
       if (dispute.evidenceWindowEndsAt && dispute.evidenceWindowEndsAt < new Date()) {
@@ -217,6 +217,82 @@ export async function submitDisputeEvidence(
         dispute.escrow.id,
       );
       return { success: true, disputeId: dispute.reference, evidenceSubmissionId: submission.id };
+    },
+  );
+}
+
+export async function requestDisputeArbitration(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  idempotencyKey: string,
+) {
+  return executeIdempotentCommand(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "request_dispute_arbitration",
+      payload: { reference },
+    },
+    async (tx) => {
+      const dispute = await tx.dispute.findUnique({
+        where: { reference },
+        include: { escrow: true, _count: { select: { evidenceSubmissions: true } } },
+      });
+      if (!dispute?.escrow) throw new AppError("Dispute not found.", 404);
+      requireEscrowParty(dispute.escrow, userId);
+      if (dispute._count.evidenceSubmissions === 0) {
+        throw new AppError("Submit evidence before requesting arbitration.", 409);
+      }
+      if (!["open", "resolution_proposed"].includes(dispute.status)) {
+        throw new AppError(
+          dispute.status === "arbitration_requested"
+            ? "Arbitration has already been requested."
+            : "This dispute can no longer be moved to arbitration.",
+          409,
+        );
+      }
+
+      const requestedAt = new Date();
+      const transition = await tx.dispute.updateMany({
+        where: { id: dispute.id, status: { in: ["open", "resolution_proposed"] } },
+        data: {
+          status: "arbitration_requested",
+          resolutionAuthority: "arbitration",
+          arbitrationRequestedAt: requestedAt,
+          arbitrationRequestedById: userId,
+          resolutionProposedById: null,
+          proposedSellerCents: null,
+          proposedBuyerCents: null,
+          resolutionNote: null,
+          updatedLabel: "Arbitration requested",
+        },
+      });
+      if (transition.count !== 1) {
+        throw new AppError("The dispute changed before arbitration was requested. Refresh and try again.", 409);
+      }
+      await tx.escrow.update({
+        where: { id: dispute.escrow.id },
+        data: {
+          stage: "Dispute in arbitration",
+          dueDescription: "Arbitration review pending",
+          status: "warning",
+        },
+      });
+      await notify(
+        tx,
+        otherPartyId(dispute.escrow, userId),
+        "Arbitration requested",
+        `${dispute.reference} has moved to arbitration. The disputed funds remain reserved.`,
+        dispute.escrow.id,
+      );
+      return {
+        success: true,
+        disputeId: dispute.reference,
+        status: "arbitration_requested",
+        arbitrationRequestedAt: requestedAt.toISOString(),
+      };
     },
   );
 }
