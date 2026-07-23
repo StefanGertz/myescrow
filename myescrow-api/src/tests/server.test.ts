@@ -1943,8 +1943,28 @@ describe("MyEscrow API", () => {
       agedEscrows: expect.any(Array),
       duplicateCommands: expect.any(Array),
       disputesApproaching: expect.any(Array),
+      arbitrationRequested: expect.any(Array),
     }));
     expect(health.json().details.duplicateCommands.length).toBeGreaterThan(0);
+
+    await server.prisma.dispute.update({
+      where: { reference: phaseFourDisputeReference },
+      data: {
+        status: "arbitration_requested",
+        arbitrationRequestedAt: recoveryNow,
+        arbitrationRequestedById: operator.id,
+      },
+    });
+    const arbitrationHealth = await server.inject({
+      method: "GET",
+      url: "/api/operations/health",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(arbitrationHealth.json().counts.arbitrationRequested).toBe(1);
+    expect(arbitrationHealth.json().alerts).toContain("Arbitration: 1 dispute(s) awaiting review");
+    expect(arbitrationHealth.json().details.arbitrationRequested).toEqual([
+      expect.objectContaining({ reference: phaseFourDisputeReference, status: "arbitration_requested" }),
+    ]);
 
     await server.prisma.operationalWorkerState.update({
       where: { id: "primary" },

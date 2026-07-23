@@ -470,6 +470,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     agedEscrows,
     duplicateCommands,
     disputesApproaching,
+    arbitrationRequested,
     latestReconciliation,
     worker,
     failedOutboxDetails,
@@ -477,6 +478,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     agedEscrowDetails,
     duplicateCommandDetails,
     disputeDetails,
+    arbitrationDetails,
   ] = await Promise.all([
     prisma.outboxEvent.count({ where: { status: "failed" } }),
     prisma.operationalJob.count({ where: { status: "failed" } }),
@@ -488,6 +490,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
         evidenceWindowEndsAt: { gt: now, lte: approaching },
       },
     }),
+    prisma.dispute.count({ where: { status: "arbitration_requested" } }),
     prisma.reconciliationRun.findFirst({ orderBy: { startedAt: "desc" } }),
     prisma.operationalWorkerState.findUnique({ where: { id: "primary" } }),
     prisma.outboxEvent.findMany({
@@ -570,6 +573,20 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       orderBy: { evidenceWindowEndsAt: "asc" },
       take: 100,
     }),
+    prisma.dispute.findMany({
+      where: { status: "arbitration_requested" },
+      select: {
+        reference: true,
+        title: true,
+        status: true,
+        priority: true,
+        amountFrozenCents: true,
+        arbitrationRequestedAt: true,
+        escrow: { select: { reference: true, title: true } },
+      },
+      orderBy: { arbitrationRequestedAt: "asc" },
+      take: 100,
+    }),
   ]);
   const workerStale = !worker?.lastSuccessAt || now.getTime() - worker.lastSuccessAt.getTime() > 120_000;
   const alerts = [
@@ -578,6 +595,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     ...(failedJobs ? [`${failedJobs} failed operational job(s)`] : []),
     ...(agedEscrows ? [`${agedEscrows} active escrow(s) older than seven days`] : []),
     ...(disputesApproaching ? [`${disputesApproaching} dispute evidence deadline(s) within two days`] : []),
+    ...(arbitrationRequested ? [`Arbitration: ${arbitrationRequested} dispute(s) awaiting review`] : []),
     ...(latestReconciliation?.status === "exception" ? [`${latestReconciliation.exceptionCount} reconciliation exception(s)`] : []),
   ];
   return {
@@ -588,6 +606,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       agedEscrows,
       duplicateCommandAttempts: duplicateCommands._sum.replayCount ?? 0,
       disputesApproaching,
+      arbitrationRequested,
     },
     latestReconciliation,
     worker: {
@@ -603,6 +622,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       agedEscrows: agedEscrowDetails,
       duplicateCommands: duplicateCommandDetails,
       disputesApproaching: disputeDetails,
+      arbitrationRequested: arbitrationDetails,
     },
     alerts,
   };
