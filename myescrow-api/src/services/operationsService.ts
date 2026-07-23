@@ -464,7 +464,20 @@ export async function runOperationalRecovery(
 export async function getOperationsHealth(prisma: PrismaClient, now = new Date()) {
   const approaching = new Date(now.getTime() + 2 * DAY_MS);
   const agedBefore = new Date(now.getTime() - 7 * DAY_MS);
-  const [failedOutbox, failedJobs, agedEscrows, duplicateCommands, disputesApproaching, latestReconciliation, worker] = await Promise.all([
+  const [
+    failedOutbox,
+    failedJobs,
+    agedEscrows,
+    duplicateCommands,
+    disputesApproaching,
+    latestReconciliation,
+    worker,
+    failedOutboxDetails,
+    failedJobDetails,
+    agedEscrowDetails,
+    duplicateCommandDetails,
+    disputeDetails,
+  ] = await Promise.all([
     prisma.outboxEvent.count({ where: { status: "failed" } }),
     prisma.operationalJob.count({ where: { status: "failed" } }),
     prisma.escrow.count({ where: { lifecycleStatus: { in: ACTIVE_ESCROW_STATES }, updatedAt: { lt: agedBefore } } }),
@@ -477,6 +490,86 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     }),
     prisma.reconciliationRun.findFirst({ orderBy: { startedAt: "desc" } }),
     prisma.operationalWorkerState.findUnique({ where: { id: "primary" } }),
+    prisma.outboxEvent.findMany({
+      where: { status: "failed" },
+      select: {
+        id: true,
+        eventType: true,
+        status: true,
+        attemptCount: true,
+        nextAttemptAt: true,
+        lastError: true,
+        updatedAt: true,
+        invitationDelivery: {
+          select: {
+            recipient: true,
+            escrow: { select: { reference: true, title: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    }),
+    prisma.operationalJob.findMany({
+      where: { status: "failed" },
+      select: {
+        id: true,
+        jobType: true,
+        status: true,
+        attemptCount: true,
+        maxAttempts: true,
+        runAt: true,
+        lastError: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    }),
+    prisma.escrow.findMany({
+      where: { lifecycleStatus: { in: ACTIVE_ESCROW_STATES }, updatedAt: { lt: agedBefore } },
+      select: {
+        reference: true,
+        title: true,
+        lifecycleStatus: true,
+        fundingStatus: true,
+        amountCents: true,
+        counterpartyEmail: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "asc" },
+      take: 100,
+    }),
+    prisma.idempotencyRecord.findMany({
+      where: { replayCount: { gt: 0 } },
+      select: {
+        id: true,
+        command: true,
+        replayCount: true,
+        lastReplayedAt: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } },
+      },
+      orderBy: [{ replayCount: "desc" }, { updatedAt: "desc" }],
+      take: 100,
+    }),
+    prisma.dispute.findMany({
+      where: {
+        status: { in: ACTIVE_DISPUTE_STATES },
+        evidenceWindowEndsAt: { gt: now, lte: approaching },
+      },
+      select: {
+        reference: true,
+        title: true,
+        status: true,
+        priority: true,
+        amountFrozenCents: true,
+        evidenceWindowEndsAt: true,
+        escrow: { select: { reference: true, title: true } },
+      },
+      orderBy: { evidenceWindowEndsAt: "asc" },
+      take: 100,
+    }),
   ]);
   const workerStale = !worker?.lastSuccessAt || now.getTime() - worker.lastSuccessAt.getTime() > 120_000;
   const alerts = [
@@ -503,6 +596,13 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       lastCompletedAt: worker?.lastCompletedAt ?? null,
       lastSuccessAt: worker?.lastSuccessAt ?? null,
       lastError: worker?.lastError ?? null,
+    },
+    details: {
+      failedOutbox: failedOutboxDetails,
+      failedJobs: failedJobDetails,
+      agedEscrows: agedEscrowDetails,
+      duplicateCommands: duplicateCommandDetails,
+      disputesApproaching: disputeDetails,
     },
     alerts,
   };

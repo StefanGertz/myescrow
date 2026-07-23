@@ -1937,6 +1937,14 @@ describe("MyEscrow API", () => {
     expect(health.json().currentRole).toBe("admin");
     expect(health.json().worker.status).toBe("healthy");
     expect(health.json().counts.duplicateCommandAttempts).toBeGreaterThan(0);
+    expect(health.json().details).toEqual(expect.objectContaining({
+      failedOutbox: expect.any(Array),
+      failedJobs: expect.any(Array),
+      agedEscrows: expect.any(Array),
+      duplicateCommands: expect.any(Array),
+      disputesApproaching: expect.any(Array),
+    }));
+    expect(health.json().details.duplicateCommands.length).toBeGreaterThan(0);
 
     await server.prisma.operationalWorkerState.update({
       where: { id: "primary" },
