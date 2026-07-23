@@ -70,21 +70,21 @@ A seller submission is now required before review begins. Each submission has a 
 | --- | --- |
 | 🔴 Milestone appears ready → no submission or evidence is required → buyer rejects without a reason → seller resubmits without new information → review can loop or stall forever | 🟢 Seller creates a distinct submission with a note and evidence history → buyer reviews within a defined window → approval releases the remaining milestone balance once, or a reasoned revision request returns it to the seller → reminders run → no response holds funds safely and escalates |
 
-## 5. Disputes and funded cancellation
+## 5. Disputes, arbitration, and funded cancellation
 
 ### The unhappy path, in everyday language
 
-Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being argued about or guarantee that a settlement, refund, or cancellation reconciled to the funds actually held.
+Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being argued about, reconcile a settlement, or provide a governed escalation path when the parties could not agree.
 
-**Example:** A buyer disputes a $2,000 milestone in a $10,000 escrow. The dispute exists as a record, but it does not reserve that $2,000. Staff cannot safely resolve it without manual intervention, and unrelated milestones may also become stuck.
+**Example:** A buyer disputes a $2,000 milestone in a $10,000 escrow. The parties provide evidence but cannot agree on a proposed split. The dispute does not authoritatively reserve the $2,000 or offer a controlled route to arbitration, so safe resolution requires manual intervention and unrelated work may also become stuck.
 
 ### What was done to remediate it
 
-Either party can open one active dispute against an eligible milestone. The remaining balance for that milestone is frozen atomically while unrelated funds stay available according to policy. Both parties can submit evidence and propose a seller release, buyer refund, or split. Allocations must equal every frozen cent, the other party must accept, and the ledger records the result. Mutual cancellation refunds only unreleased, undisputed funds; unilateral requests move into governed review without moving money.
+Either party can open one active dispute against an eligible milestone. The remaining balance for that milestone is frozen atomically while unrelated funds stay available according to policy. The parties may resolve it directly through an exact release, refund, or split. If at least one evidence submission exists and the dispute is still open or has an unaccepted resolution proposal, either party may instead request arbitration. That request assigns resolution authority to arbitration, clears the private proposal, keeps the disputed funds reserved, notifies the counterparty, and places the case in the operations review queue. Mutual cancellation still refunds only unreleased, undisputed funds; unilateral cancellation requests move into governed review without moving money.
 
 | Original unhappy path | Remediated path — all green |
 | --- | --- |
-| 🔴 Parties disagree → standalone dispute record is created → affected funds are not authoritatively reserved → resolution or cancellation requires manual balance decisions → money can remain stranded or be allocated incorrectly | 🟢 Open one escrow-linked dispute → freeze exactly the affected milestone balance → collect evidence during a defined window → agree to release, refund, or an exact split → record ledger-backed settlement entries → continue unrelated work or complete with a reconciled audit trail |
+| 🔴 Parties disagree → standalone dispute record is created → affected funds are not authoritatively reserved → the parties cannot agree → no governed arbitration request exists → money can remain stranded or be allocated manually | 🟢 Open one escrow-linked dispute and freeze the affected balance → submit evidence → agree to an exact release, refund, or split; **or**, while the dispute is open or its proposal is unaccepted, either party requests arbitration → keep funds reserved for arbitration review → record the eventual outcome through the ledger |
 
 ## 6. Deadlines, monitoring, and operational recovery
 
@@ -96,7 +96,7 @@ Invitations, funding requests, milestone reviews, disputes, and cancellations co
 
 ### What was done to remediate it
 
-A persistent recovery queue now schedules invitation handling, funding escalation, milestone deadline sweeps, dispute reminders, cancellation escalation, and daily reconciliation. Workers safely claim and retry jobs, recover stale locks, and retain terminal failures. Operator dashboards expose failed jobs, aged escrows, delivery failures, dispute deadlines, worker health, duplicate attempts, and reconciliation variance. Support actions reuse the same permissioned, idempotent, audited domain commands as the main product.
+A persistent recovery queue now schedules invitation handling, funding escalation, milestone deadline sweeps, dispute reminders, cancellation escalation, and daily reconciliation. Workers safely claim and retry jobs, recover stale locks, and retain terminal failures. Operator dashboards expose failed jobs, aged escrows, delivery failures, dispute deadlines, arbitration requests awaiting review, worker health, duplicate attempts, and reconciliation variance. Support actions reuse the same permissioned, idempotent, audited domain commands as the main product.
 
 | Original unhappy path | Remediated path — all green |
 | --- | --- |
@@ -110,7 +110,7 @@ The remediated process is recoverable end to end:
 2. Both parties sign one immutable final agreement.
 3. Every money movement is atomic, idempotent, ledger-backed, and reconcilable.
 4. Milestone review is based on distinct submissions, reasons, evidence history, and deadlines.
-5. Disputed funds are precisely frozen and fully allocated through release, refund, or settlement.
+5. Disputed funds are precisely frozen and fully allocated through direct agreement or, after evidence is submitted, a governed arbitration request.
 6. Waiting states, job failures, and reconciliation issues are visible, owned, and recoverable.
 
 The governing financial invariant is:

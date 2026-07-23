@@ -513,20 +513,20 @@
 
   <section class="page">
     <div class="section-kicker">Comparison 5 of 6</div>
-    <h2>Disputes and funded cancellation</h2>
+    <h2>Disputes, arbitration, and funded cancellation</h2>
     <div class="context">
       <div class="panel">
         <h3>The unhappy path, in everyday language</h3>
-        <p>Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being disputed or reconcile a settlement, refund, or cancellation.</p>
+        <p>Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the disputed money, reconcile a settlement, or provide governed escalation when the parties could not agree.</p>
       </div>
       <div class="panel example">
         <h3>Example</h3>
-        <p>A buyer disputes a $2,000 milestone in a $10,000 escrow. The dispute exists, but it does not reserve that $2,000. Safe resolution requires manual intervention, and unrelated work may become stuck.</p>
+        <p>A buyer disputes a $2,000 milestone. The parties submit evidence but cannot agree on a split. The $2,000 is not authoritatively reserved and there is no controlled route to arbitration, so resolution requires manual intervention.</p>
       </div>
     </div>
     <div class="remedy">
       <h3>What was done to remediate it</h3>
-      <p>One active dispute can atomically freeze the affected milestone balance. Evidence and resolution proposals are retained, allocations must equal every frozen cent, and accepted release, refund, or split outcomes move money through the ledger.</p>
+      <p>One active dispute freezes the affected balance. After evidence is submitted, either party may request arbitration while the case is open or a proposal remains unaccepted. Funds stay reserved, the counterparty is notified, and operations receives the case for review.</p>
     </div>
     <div class="comparison-title">Side-by-side path</div>
     <div class="comparison">
@@ -536,21 +536,21 @@
           <li>The parties disagree.</li>
           <li>A standalone dispute record is created.</li>
           <li>Affected funds are not reserved authoritatively.</li>
-          <li>Resolution needs manual balance decisions.</li>
-          <li>Funds can remain stranded or be misallocated.</li>
+          <li>The parties cannot agree on an allocation.</li>
+          <li>No governed arbitration request exists.</li>
         </ol>
         <div class="outcome">Risk: the dispute record and actual money drift apart.</div>
       </div>
       <div class="path fixed">
         <div class="path-header">Remediated path — all green</div>
         <ol class="step-list">
-          <li>Open one dispute linked to the milestone.</li>
-          <li>Freeze exactly its remaining balance.</li>
-          <li>Collect evidence within a defined window.</li>
-          <li>Agree to release, refund, or an exact split.</li>
-          <li>Record the result as ledger-backed movements.</li>
+          <li>Open a linked dispute and freeze its balance.</li>
+          <li>Submit evidence within the defined window.</li>
+          <li>Agree to an exact release, refund, or split; or</li>
+          <li>Request arbitration while open or unresolved.</li>
+          <li>Keep funds reserved pending arbitration review.</li>
         </ol>
-        <div class="outcome">Safe result: disputed money is fully reserved and reconciled.</div>
+        <div class="outcome">Safe result: direct settlement or governed arbitration, with funds protected.</div>
       </div>
     </div>
     <div class="footer"><span>MyEscrow</span><span>6</span></div>
@@ -571,7 +571,7 @@
     </div>
     <div class="remedy">
       <h3>What was done to remediate it</h3>
-      <p>A persistent recovery queue now handles deadlines, reminders, retries, escalations, and daily reconciliation. Dashboards expose failures and aged work; support uses the same permissioned, idempotent, audited commands as the product.</p>
+      <p>A persistent recovery queue handles deadlines, reminders, retries, escalations, and daily reconciliation. Dashboards expose failures, aged work, and arbitration requests awaiting review; support uses permissioned, idempotent, audited commands.</p>
     </div>
     <div class="comparison-title">Side-by-side path</div>
     <div class="comparison">
@@ -592,7 +592,7 @@
           <li>Every waiting state has an owner and deadline.</li>
           <li>Durable jobs remind, retry, expire, or escalate.</li>
           <li>Failures and aged escrows are visible.</li>
-          <li>Reconciliation and health alerts notify operators.</li>
+          <li>Arbitration and health alerts notify operators.</li>
           <li>Support actions are permissioned and audited.</li>
         </ol>
         <div class="outcome">Safe result: stalled work is visible, owned, and recoverable.</div>
@@ -609,7 +609,7 @@
       <div class="result-card"><strong>Versioned consent</strong>Both parties sign the same immutable final agreement before funding.</div>
       <div class="result-card"><strong>Money integrity</strong>Every movement is atomic, idempotent, ledger-backed, and reconcilable.</div>
       <div class="result-card"><strong>Evidence-based review</strong>Submissions, reasons, history, reminders, and deadlines govern milestone decisions.</div>
-      <div class="result-card"><strong>Controlled disputes</strong>Only affected funds freeze, and every settlement allocates the exact frozen amount.</div>
+      <div class="result-card"><strong>Controlled disputes</strong>Affected funds stay frozen through direct settlement or evidence-backed arbitration.</div>
       <div class="result-card"><strong>Operational recovery</strong>Waiting states and failed work are visible, owned, retryable, and audited.</div>
     </div>
     <div class="invariant">
