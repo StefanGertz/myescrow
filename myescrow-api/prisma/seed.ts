@@ -14,6 +14,7 @@ async function main() {
   await prisma.$transaction([
     prisma.auditEvent.deleteMany(),
     prisma.operationalJob.deleteMany(),
+    prisma.operationalWorkerState.deleteMany(),
     prisma.reconciliationRun.deleteMany(),
     prisma.disputeResolutionAllocation.deleteMany(),
     prisma.disputeEvidenceSubmission.deleteMany(),

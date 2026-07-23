@@ -1,6 +1,6 @@
 # MyEscrow operational recovery runbook
 
-The operational worker is the only automated recovery entry point:
+The compiled operational worker is the only automated recovery entry point:
 
 ```bash
 cd myescrow-api
@@ -8,6 +8,17 @@ npm run operations:run
 ```
 
 Run it at least once per minute. Jobs are stored before execution, claimed conditionally, retried with backoff, and recover stale worker locks after ten minutes. Operators use `/operations` for health and failed-job retries. Support APIs require a `support` or `admin` role, an authenticated session, and an idempotency key for every mutation.
+
+In the Docker deployment, `operations-worker` runs continuously from the same image as the API. Its database heartbeat must show a successful cycle within the last two minutes. External cron platforms may run `npm run operations:once` every minute instead.
+
+## Operator access
+
+1. Create and verify the intended administrator account through the normal signup flow.
+2. Run `docker compose -f docker-compose.staging.yml --env-file .env.staging run --rm api npm run operators:bootstrap -- admin@example.com` once on the deployment host. A checked-out built release may run `npm run operators:bootstrap -- admin@example.com` with production `DATABASE_URL` instead.
+3. The bootstrap refuses to run after any administrator exists.
+4. Administrators grant, change, and revoke operator access from `/operations`.
+5. Use `support` for recovery work and `admin` only for role management. The final administrator cannot be demoted.
+6. Role changes are immediately effective because every operations request checks the database, and every change is written to the audit log.
 
 ## Payment or ledger mismatch
 

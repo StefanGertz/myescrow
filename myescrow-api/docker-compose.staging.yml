@@ -1,3 +1,17 @@
+x-api-environment: &api-environment
+  JWT_SECRET: ${JWT_SECRET}
+  DATABASE_URL: ${DATABASE_URL:-postgres://${DB_USER:-escrow}:${DB_PASSWORD:-escrowpass}@db:5432/${DB_NAME:-myescrow}}
+  AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-true}
+  AUTH_DEBUG_CODES: ${AUTH_DEBUG_CODES:-false}
+  EMAIL_VERIFICATION_CODE_DIGITS: ${EMAIL_VERIFICATION_CODE_DIGITS:-6}
+  EMAIL_VERIFICATION_TTL_MINUTES: ${EMAIL_VERIFICATION_TTL_MINUTES:-15}
+  PASSWORD_RESET_CODE_DIGITS: ${PASSWORD_RESET_CODE_DIGITS:-6}
+  PASSWORD_RESET_TTL_MINUTES: ${PASSWORD_RESET_TTL_MINUTES:-15}
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  EMAIL_FROM: ${EMAIL_FROM:-"MyEscrow <hello@myescrowdemo.xyz>"}
+  EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+
 services:
   db:
     image: postgres:15
@@ -22,23 +36,22 @@ services:
     ports:
       - "4000:4000"
     environment:
+      <<: *api-environment
       PORT: ${PORT:-4000}
-      JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: ${DATABASE_URL:-postgres://${DB_USER:-escrow}:${DB_PASSWORD:-escrowpass}@db:5432/${DB_NAME:-myescrow}}
-      AUTH_REQUIRE_EMAIL_VERIFICATION: ${AUTH_REQUIRE_EMAIL_VERIFICATION:-true}
-      AUTH_DEBUG_CODES: ${AUTH_DEBUG_CODES:-false}
-      EMAIL_VERIFICATION_CODE_DIGITS: ${EMAIL_VERIFICATION_CODE_DIGITS:-6}
-      EMAIL_VERIFICATION_TTL_MINUTES: ${EMAIL_VERIFICATION_TTL_MINUTES:-15}
-      PASSWORD_RESET_CODE_DIGITS: ${PASSWORD_RESET_CODE_DIGITS:-6}
-      PASSWORD_RESET_TTL_MINUTES: ${PASSWORD_RESET_TTL_MINUTES:-15}
-      APP_URL: ${APP_URL:-http://localhost:3000}
-      EMAIL_FROM: ${EMAIL_FROM:-"MyEscrow <hello@myescrowdemo.xyz>"}
-      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
     healthcheck:
       test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:4000/',x=>{x.resume();process.exit(x.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
+  operations-worker:
+    image: ghcr.io/stefangertz/myescrow-api:latest
+    command: ["node", "dist/operationsWorker.js"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *api-environment
+      OPERATIONS_INTERVAL_MS: ${OPERATIONS_INTERVAL_MS:-60000}
 volumes:
   pgdata:

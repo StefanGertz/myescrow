@@ -371,6 +371,15 @@ model OperationalJob {
   @@index([status, runAt])
 }
 
+model OperationalWorkerState {
+  id              String    @id
+  lastStartedAt   DateTime?
+  lastCompletedAt DateTime?
+  lastSuccessAt   DateTime?
+  lastError       String?
+  updatedAt       DateTime  @updatedAt
+}
+
 model ReconciliationRun {
   id             Int       @id @default(autoincrement())
   status         String

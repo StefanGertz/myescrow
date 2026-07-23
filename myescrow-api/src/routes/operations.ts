@@ -8,6 +8,7 @@ import {
   supportExtendInvitation,
 } from "../services/operationsService";
 import { AppError } from "../utils/errors";
+import { changeOperatorRole, listOperators } from "../services/operatorService";
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 const escrowSchema = z.object({ id: z.string().min(1) });
@@ -40,6 +41,12 @@ export async function operationsRoutes(fastify: FastifyInstance) {
       return user;
     };
 
+    const requireAdmin = async (request: FastifyRequest) => {
+      const user = await requireUser(request);
+      if (user.role !== "admin") throw new AppError("Administrator access is required.", 403);
+      return user;
+    };
+
     secured.get("/api/dashboard/escrows/:id/audit", async (request) => {
       const user = await requireUser(request);
       const { id } = escrowSchema.parse(request.params);
@@ -47,8 +54,22 @@ export async function operationsRoutes(fastify: FastifyInstance) {
     });
 
     secured.get("/api/operations/health", async (request) => {
-      await requireOperator(request);
-      return getOperationsHealth(secured.prisma);
+      const operator = await requireOperator(request);
+      return { ...(await getOperationsHealth(secured.prisma)), currentRole: operator.role };
+    });
+
+    secured.get("/api/operations/operators", async (request) => {
+      await requireAdmin(request);
+      return { operators: await listOperators(secured.prisma) };
+    });
+
+    secured.post("/api/operations/operators/role", async (request) => {
+      const admin = await requireAdmin(request);
+      const { email, role } = z.object({
+        email: z.string().email(),
+        role: z.enum(["customer", "support", "admin"]),
+      }).parse(request.body);
+      return changeOperatorRole(secured.prisma, admin.id, email, role, requireIdempotencyKey(request));
     });
 
     secured.get("/api/operations/jobs", async (request) => {

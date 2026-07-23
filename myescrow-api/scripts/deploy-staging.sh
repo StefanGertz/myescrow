@@ -25,6 +25,7 @@ else
 fi
 EMAIL_REPLY_TO_VALUE="${EMAIL_REPLY_TO:-}"
 RESEND_API_KEY_VALUE="${RESEND_API_KEY:-}"
+OPERATIONS_INTERVAL_MS_VALUE="${OPERATIONS_INTERVAL_MS:-60000}"
 
 if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-stefangertz}" --password-stdin
@@ -46,6 +47,7 @@ APP_URL="$APP_URL_VALUE"
 EMAIL_FROM="$EMAIL_FROM_VALUE"
 EMAIL_REPLY_TO="$EMAIL_REPLY_TO_VALUE"
 RESEND_API_KEY="$RESEND_API_KEY_VALUE"
+OPERATIONS_INTERVAL_MS=$OPERATIONS_INTERVAL_MS_VALUE
 ENV
 
 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d

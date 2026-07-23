@@ -1790,6 +1790,57 @@ describe("MyEscrow API", () => {
       where: { email: "scott@example.com" },
       data: { role: "support" },
     });
+    const supportCannotGrant = await server.inject({
+      method: "POST",
+      url: "/api/operations/operators/role",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "support-cannot-grant-role" },
+      payload: { email: "scott@example.com", role: "admin" },
+    });
+    expect(supportCannotGrant.statusCode).toBe(403);
+
+    const { bootstrapFirstAdmin } = await import("../services/operatorService");
+    const firstAdmin = await bootstrapFirstAdmin(server.prisma, "nora@example.com");
+    expect(firstAdmin).toEqual(expect.objectContaining({ role: "admin", changed: true }));
+    await expect(bootstrapFirstAdmin(server.prisma, "scott@example.com")).rejects.toMatchObject({ statusCode: 409 });
+
+    const operators = await server.inject({
+      method: "GET",
+      url: "/api/operations/operators",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(operators.statusCode).toBe(200);
+    expect(operators.json().operators).toHaveLength(2);
+
+    const grantKey = "admin-grant-scott";
+    const grant = await server.inject({
+      method: "POST",
+      url: "/api/operations/operators/role",
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": grantKey },
+      payload: { email: "scott@example.com", role: "admin" },
+    });
+    expect(grant.statusCode).toBe(200);
+    const grantReplay = await server.inject({
+      method: "POST",
+      url: "/api/operations/operators/role",
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": grantKey },
+      payload: { email: "scott@example.com", role: "admin" },
+    });
+    expect(grantReplay.json()).toEqual(grant.json());
+    const demoteFirstAdmin = await server.inject({
+      method: "POST",
+      url: "/api/operations/operators/role",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "demote-first-admin" },
+      payload: { email: "nora@example.com", role: "customer" },
+    });
+    expect(demoteFirstAdmin.statusCode).toBe(200);
+    const demoteFinalAdmin = await server.inject({
+      method: "POST",
+      url: "/api/operations/operators/role",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "protect-final-admin" },
+      payload: { email: "scott@example.com", role: "customer" },
+    });
+    expect(demoteFinalAdmin.statusCode).toBe(409);
+
     const delivery = await server.prisma.invitationDelivery.findFirstOrThrow({
       where: { acceptedAt: null, supersededAt: null, status: { notIn: ["accepted", "corrected"] } },
       orderBy: { id: "desc" },
@@ -1822,6 +1873,7 @@ describe("MyEscrow API", () => {
     const result = await runOperationalRecovery(server.prisma, server.log, recoveryNow, 100);
     expect(result.failed).toBe(0);
     expect(result.completed).toBeGreaterThan(0);
+    expect((await server.prisma.operationalWorkerState.findUniqueOrThrow({ where: { id: "primary" } })).lastSuccessAt).toBeTruthy();
     expect((await server.prisma.invitationDelivery.findUniqueOrThrow({ where: { id: delivery.id } })).status).toBe("expired");
     const reopened = await server.inject({
       method: "POST",
@@ -1882,7 +1934,21 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(health.statusCode).toBe(200);
+    expect(health.json().currentRole).toBe("admin");
+    expect(health.json().worker.status).toBe("healthy");
     expect(health.json().counts.duplicateCommandAttempts).toBeGreaterThan(0);
+
+    await server.prisma.operationalWorkerState.update({
+      where: { id: "primary" },
+      data: { lastSuccessAt: new Date(Date.now() - 3 * 60_000) },
+    });
+    const staleHealth = await server.inject({
+      method: "GET",
+      url: "/api/operations/health",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(staleHealth.json().worker.status).toBe("stale");
+    expect(staleHealth.json().alerts).toContain("Operational recovery worker has not completed successfully within two minutes");
   });
 
   it("reconciles every funded escrow against its immutable ledger", async () => {

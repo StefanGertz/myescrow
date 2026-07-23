@@ -73,9 +73,10 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run db:generate` - regenerate the Prisma client.
 - `npm run smoke` - end-to-end smoke test (signup -> overview -> milestone releases -> wallet/disputes).
 - `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
-- `npm run outbox:invitations` - process due escrow invitation events once; run this command every minute in deployed environments.
-- `npm run milestones:deadlines` - send due-soon milestone reminders and escalate overdue reviews once; run on a recurring schedule.
-- `npm run operations:run` - process the durable recovery queue, invitation retries, deadlines, and recorded daily reconciliation; run at least once per minute.
+- `npm run operations:run` - start the compiled recovery worker; it runs immediately and every minute until stopped.
+- `npm run operations:once` - process one compiled recovery cycle and exit, for external cron platforms.
+- `npm run operations:dev` - process one recovery cycle directly from TypeScript during development.
+- `npm run operators:bootstrap -- admin@example.com` - grant the first administrator role to an existing verified account; refuses once any admin exists.
 
 ## API surface
 
@@ -123,6 +124,8 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | POST | `/api/operations/jobs/:id/retry` | Idempotently queue a failed operational job for retry. |
 | POST | `/api/operations/outbox/:id/retry` | Idempotently queue a failed invitation event for retry. |
 | POST | `/api/operations/invitations/:id/extend` | Idempotently extend an active invitation deadline. |
+| GET | `/api/operations/operators` | Admin-only list of support and administrator accounts. |
+| POST | `/api/operations/operators/role` | Admin-only, idempotent grant, change, or revocation of operator access. |
 
 ## Testing
 
@@ -138,30 +141,27 @@ The tests will provision a fresh schema (`vitest_<timestamp>`), run `prisma migr
 
 ### Docker image
 
-The repo now includes a production Dockerfile and .dockerignore. Build and run locally:
+The repo includes a production Dockerfile and `.dockerignore`. Build and run locally:
 
-`
+```bash
 docker build -t myescrow-api .
 docker run --env-file .env -p 4000:4000 myescrow-api
-`
+```
 
-The image runs 
-ode dist/server.js, so remember to build (or rely on the Dockerfile-s build stage) before pushing to a registry.
+The image contains the compiled API, operations worker, and first-admin bootstrap command.
 
 ### Staging/production checklist
 
 1. **Database** - Provision Postgres (e.g., Supabase, RDS). Copy the connection string into DATABASE_URL.
-2. **Migrations** - Run 
-pm run db:migrate (or 
-px prisma migrate deploy) against the remote DB before booting the app.
+2. **Migrations** - Run `npx prisma migrate deploy` against the remote database before booting the API or worker.
 3. **Secrets** - Set PORT, JWT_SECRET, DATABASE_URL, RESEND_API_KEY, EMAIL_FROM, and APP_URL in your hosting platform.
-4. **Runtime** - Either run the Docker image above or 
-pm ci && npm run build && npm start on the host.
-5. **Invitation worker** - Schedule `npm run outbox:invitations` at least once per minute. The command is safe to run concurrently; due events are claimed before delivery.
-6. **Milestone deadline worker** - Schedule `npm run milestones:deadlines` regularly. It sends reminders and marks overdue reviews for escalation while leaving funds held.
-7. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
+4. **Runtime** - Run the API and compiled operations worker from the same image. `docker-compose.staging.yml` defines both services.
+5. **Worker** - Keep `operations-worker` running with `OPERATIONS_INTERVAL_MS=60000`, or schedule `npm run operations:once` every minute on a cron platform.
+6. **First admin** - After the verified account exists, run `npm run operators:bootstrap -- admin@example.com` once with production `DATABASE_URL`.
+7. **Operators** - Use `/operations` to grant and revoke support/admin access. Never accept a role from signup input or edit roles directly in Postgres.
+8. **Observability** - Alert when `/api/operations/health` reports a stale worker, and retain container logs and reconciliation alerts.
 
-Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
+Point the frontend's `NEXT_PUBLIC_API_BASE_URL` at the deployed URL once the server is reachable.
 
 ## Continuous integration
 
@@ -180,7 +180,7 @@ GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) ins
    DATABASE_URL="postgresql://..." npm run db:migrate
    DATABASE_URL="postgresql://..." npx prisma db seed
    ```
-3. On the staging host, export `DATABASE_URL`, `JWT_SECRET`, (and optionally `PORT`, `GHCR_USER`, `GHCR_TOKEN`).
+3. On the staging host, export `DATABASE_URL`, `JWT_SECRET`, and optionally `PORT`, `GHCR_USER`, `GHCR_TOKEN`, and `OPERATIONS_INTERVAL_MS`.
 4. Pull + boot the published image using the helper script:
    ```bash
    cd myescrow-api
@@ -188,7 +188,16 @@ GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) ins
    ./scripts/deploy-staging.sh
    ```
    The script writes `.env.staging` and runs `docker compose -f docker-compose.staging.yml up -d`.
-5. Smoke-test the staging URL from your workstation:
+5. Create and verify the intended administrator account, then bootstrap it from the deployed API image:
+   ```bash
+   docker compose -f docker-compose.staging.yml --env-file .env.staging run --rm api npm run operators:bootstrap -- admin@example.com
+   ```
+6. Confirm the API and worker are running and the heartbeat is current:
+   ```bash
+   docker compose -f docker-compose.staging.yml ps
+   docker compose -f docker-compose.staging.yml logs operations-worker
+   ```
+7. Smoke-test the staging URL from your workstation:
    ```bash
    SMOKE_API_BASE=https://staging.example.com npm run smoke
    ```

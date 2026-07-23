@@ -379,7 +379,7 @@ async function executeOperationalJob(prisma: PrismaClient, job: { id: number; jo
   });
 }
 
-export async function runOperationalRecovery(
+async function performOperationalRecovery(
   prisma: PrismaClient,
   logger: FastifyBaseLogger,
   now = new Date(),
@@ -431,10 +431,40 @@ export async function runOperationalRecovery(
   return { invitations: invitationResult, scheduled: scheduled.scheduled, processed: completed + failed, completed, failed };
 }
 
+export async function runOperationalRecovery(
+  prisma: PrismaClient,
+  logger: FastifyBaseLogger,
+  now = new Date(),
+  limit = 50,
+) {
+  await prisma.operationalWorkerState.upsert({
+    where: { id: "primary" },
+    create: { id: "primary", lastStartedAt: now },
+    update: { lastStartedAt: now },
+  });
+  try {
+    const result = await performOperationalRecovery(prisma, logger, now, limit);
+    await prisma.operationalWorkerState.update({
+      where: { id: "primary" },
+      data: { lastCompletedAt: new Date(), lastSuccessAt: new Date(), lastError: null },
+    });
+    return result;
+  } catch (error) {
+    await prisma.operationalWorkerState.update({
+      where: { id: "primary" },
+      data: {
+        lastCompletedAt: new Date(),
+        lastError: error instanceof Error ? error.message : "Unknown operational worker error",
+      },
+    });
+    throw error;
+  }
+}
+
 export async function getOperationsHealth(prisma: PrismaClient, now = new Date()) {
   const approaching = new Date(now.getTime() + 2 * DAY_MS);
   const agedBefore = new Date(now.getTime() - 7 * DAY_MS);
-  const [failedOutbox, failedJobs, agedEscrows, duplicateCommands, disputesApproaching, latestReconciliation] = await Promise.all([
+  const [failedOutbox, failedJobs, agedEscrows, duplicateCommands, disputesApproaching, latestReconciliation, worker] = await Promise.all([
     prisma.outboxEvent.count({ where: { status: "failed" } }),
     prisma.operationalJob.count({ where: { status: "failed" } }),
     prisma.escrow.count({ where: { lifecycleStatus: { in: ACTIVE_ESCROW_STATES }, updatedAt: { lt: agedBefore } } }),
@@ -446,8 +476,11 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       },
     }),
     prisma.reconciliationRun.findFirst({ orderBy: { startedAt: "desc" } }),
+    prisma.operationalWorkerState.findUnique({ where: { id: "primary" } }),
   ]);
+  const workerStale = !worker?.lastSuccessAt || now.getTime() - worker.lastSuccessAt.getTime() > 120_000;
   const alerts = [
+    ...(workerStale ? ["Operational recovery worker has not completed successfully within two minutes"] : []),
     ...(failedOutbox ? [`${failedOutbox} failed invitation outbox event(s)`] : []),
     ...(failedJobs ? [`${failedJobs} failed operational job(s)`] : []),
     ...(agedEscrows ? [`${agedEscrows} active escrow(s) older than seven days`] : []),
@@ -464,6 +497,13 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       disputesApproaching,
     },
     latestReconciliation,
+    worker: {
+      status: workerStale ? "stale" : "healthy",
+      lastStartedAt: worker?.lastStartedAt ?? null,
+      lastCompletedAt: worker?.lastCompletedAt ?? null,
+      lastSuccessAt: worker?.lastSuccessAt ?? null,
+      lastError: worker?.lastError ?? null,
+    },
     alerts,
   };
 }
