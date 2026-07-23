@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MyEscrow — Original Unhappy Paths vs. Remediated Paths</title>
+  <style>
+    @page {
+      size: Letter;
+      margin: 0.55in 0.58in 0.52in;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: #17212b;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      font-size: 10.2pt;
+      line-height: 1.42;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body { background: #ffffff; }
+
+    .page {
+      position: relative;
+      min-height: 9.88in;
+      page-break-after: always;
+      break-after: page;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 9.4in;
+      padding: 0.35in 0.28in;
+    }
+
+    .eyebrow {
+      color: #087f5b;
+      font-size: 10pt;
+      font-weight: 750;
+      letter-spacing: 1.35px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 14px 0 14px;
+      color: #102a43;
+      font-size: 29pt;
+      line-height: 1.08;
+      letter-spacing: -0.7px;
+    }
+
+    .subtitle {
+      max-width: 6.8in;
+      margin: 0;
+      color: #52606d;
+      font-size: 14pt;
+      line-height: 1.45;
+    }
+
+    .cover-rule {
+      width: 1.2in;
+      height: 6px;
+      margin: 30px 0;
+      border-radius: 4px;
+      background: #12b886;
+    }
+
+    .cover-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 25px;
+    }
+
+    .cover-stat {
+      min-height: 92px;
+      padding: 14px 15px;
+      border: 1px solid #c3fae8;
+      border-radius: 10px;
+      background: #f1fff9;
+    }
+
+    .cover-stat strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #087f5b;
+      font-size: 18pt;
+      line-height: 1;
+    }
+
+    .cover-stat span {
+      color: #435466;
+      font-size: 9pt;
+      line-height: 1.35;
+    }
+
+    .cover-note {
+      margin-top: 24px;
+      padding: 15px 17px;
+      border-left: 5px solid #12b886;
+      border-radius: 5px;
+      background: #f6f8fa;
+      color: #435466;
+    }
+
+    .section-kicker {
+      margin-bottom: 4px;
+      color: #087f5b;
+      font-size: 8.6pt;
+      font-weight: 750;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      padding-bottom: 9px;
+      border-bottom: 2px solid #d9e2ec;
+      color: #102a43;
+      font-size: 19pt;
+      line-height: 1.15;
+      letter-spacing: -0.3px;
+    }
+
+    h3 {
+      margin: 0 0 5px;
+      color: #243b53;
+      font-size: 10.8pt;
+    }
+
+    p { margin: 0 0 9px; }
+
+    .context {
+      display: grid;
+      grid-template-columns: 1.13fr 0.87fr;
+      gap: 12px;
+      margin: 0 0 12px;
+    }
+
+    .panel {
+      padding: 12px 14px;
+      border: 1px solid #d9e2ec;
+      border-radius: 9px;
+      background: #ffffff;
+    }
+
+    .example {
+      border-color: #ffd8a8;
+      background: #fff9f0;
+    }
+
+    .example h3 { color: #a04b00; }
+
+    .remedy {
+      margin-bottom: 13px;
+      padding: 12px 14px;
+      border: 1px solid #b2f2bb;
+      border-left: 5px solid #2f9e44;
+      border-radius: 8px;
+      background: #f4fff6;
+    }
+
+    .remedy h3 { color: #237c35; }
+
+    .comparison-title {
+      margin: 0 0 7px;
+      color: #52606d;
+      font-size: 8.5pt;
+      font-weight: 750;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .path {
+      overflow: hidden;
+      border: 1px solid;
+      border-radius: 10px;
+    }
+
+    .path-header {
+      padding: 8px 11px;
+      color: #ffffff;
+      font-size: 9pt;
+      font-weight: 800;
+      letter-spacing: 0.65px;
+      text-transform: uppercase;
+    }
+
+    .original {
+      border-color: #ffc9c9;
+      background: #fff5f5;
+    }
+
+    .original .path-header { background: #c92a2a; }
+
+    .fixed {
+      border-color: #8ce99a;
+      background: #f0fff4;
+    }
+
+    .fixed .path-header { background: #2b8a3e; }
+
+    .step-list {
+      margin: 0;
+      padding: 10px 11px 10px 32px;
+    }
+
+    .step-list li {
+      position: relative;
+      margin: 0;
+      padding: 0 0 12px 2px;
+    }
+
+    .step-list li:last-child { padding-bottom: 0; }
+
+    .step-list li:not(:last-child)::after {
+      content: "↓";
+      position: absolute;
+      left: -20px;
+      bottom: -3px;
+      color: #7b8794;
+      font-weight: 800;
+    }
+
+    .original li::marker { color: #c92a2a; }
+    .fixed li::marker { color: #2b8a3e; }
+
+    .outcome {
+      margin: 9px 11px 11px;
+      padding: 9px 10px;
+      border-radius: 6px;
+      font-weight: 700;
+    }
+
+    .original .outcome {
+      color: #a61e1e;
+      background: #ffe3e3;
+    }
+
+    .fixed .outcome {
+      color: #176b2c;
+      background: #d3f9d8;
+    }
+
+    .footer {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      display: flex;
+      justify-content: space-between;
+      padding-top: 8px;
+      border-top: 1px solid #e6ebf0;
+      color: #7b8794;
+      font-size: 7.8pt;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 11px;
+      margin-top: 14px;
+    }
+
+    .result-card {
+      padding: 13px 14px;
+      border: 1px solid #b2f2bb;
+      border-radius: 9px;
+      background: #f0fff4;
+    }
+
+    .result-card strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #237c35;
+    }
+
+    .invariant {
+      margin-top: 18px;
+      padding: 16px;
+      border-radius: 9px;
+      background: #102a43;
+      color: #eff7ff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10.5pt;
+      line-height: 1.7;
+    }
+
+    .closing {
+      margin-top: 15px;
+      color: #243b53;
+      font-size: 12pt;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div class="eyebrow">MyEscrow workflow remediation</div>
+    <h1>Original unhappy paths<br>vs. remediated paths</h1>
+    <p class="subtitle">A plain-language, side-by-side view of the original failure scenarios and the recoverable workflows now implemented.</p>
+    <div class="cover-rule"></div>
+    <div class="cover-grid">
+      <div class="cover-stat"><strong>6</strong><span>critical workflow areas compared</span></div>
+      <div class="cover-stat"><strong>1×</strong><span>maximum movement for every funded dollar</span></div>
+      <div class="cover-stat"><strong>100%</strong><span>of remediated paths end safely or recoverably</span></div>
+    </div>
+    <div class="cover-note">
+      Each comparison begins with a layman’s explanation and a practical example. The original path appears in red; every step in the remediated path appears in green because errors, delays, and disagreements now lead to a controlled recovery action.
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>Workflow remediation comparison</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 1 of 6</div>
+    <h2>Escrow creation and invitation delivery</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>An escrow could be successfully created even though its invitation email failed. The creator would see an error and might try again, potentially creating a duplicate without realizing the first escrow already existed.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>Alex creates a $5,000 escrow for Jordan. The escrow is saved, but the email provider times out. Alex sees “creation failed” and submits again. Two escrows may now exist for the same deal.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>Creation now uses an idempotency key, so the same request returns the original escrow. A durable invitation job is saved with the escrow; delivery can be retried, corrected, extended, or escalated without recreating the deal.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>Creator submits the escrow.</li>
+          <li>The escrow is saved.</li>
+          <li>The invitation email fails.</li>
+          <li>The interface reports failure.</li>
+          <li>The creator submits again.</li>
+        </ol>
+        <div class="outcome">Risk: duplicate escrows for one deal.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>Creator submits with a unique request key.</li>
+          <li>Escrow and invitation job are saved atomically.</li>
+          <li>A retry returns the same escrow.</li>
+          <li>Delivery status remains visible.</li>
+          <li>Failure triggers retry or address correction.</li>
+        </ol>
+        <div class="outcome">Safe result: one escrow and one accountable invitation.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>2</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 2 of 6</div>
+    <h2>Agreement changes and valid consent</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>The terms of a deal could change after someone signed, while the old signature remained attached. A signature could therefore appear to approve terms the signer never actually saw.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>Priya signs an agreement for three milestones. A milestone amount is later changed, but Priya’s original signature still appears valid—even though both parties did not sign the same final terms.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>Every material change creates a new immutable agreement version. Earlier signatures are invalidated, both parties must sign the current version, and funding is blocked until that fully signed version is locked.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>Parties review and sign.</li>
+          <li>Terms are changed in place.</li>
+          <li>An earlier signature remains attached.</li>
+          <li>The changed agreement appears approved.</li>
+          <li>Funding can rely on stale consent.</li>
+        </ol>
+        <div class="outcome">Risk: a signer is bound to unseen terms.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>A change creates a new agreement version.</li>
+          <li>Prior signatures are invalidated.</li>
+          <li>Both parties review the same version.</li>
+          <li>Both sign that exact version.</li>
+          <li>The signed version is locked before funding.</li>
+        </ol>
+        <div class="outcome">Safe result: funding uses one shared, final agreement.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>3</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 3 of 6</div>
+    <h2>Funding, release, and refund integrity</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>Competing release routes could act on the same money, simultaneous requests could both pass an outdated check, and cancellation could change a status without recording a refund.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>A buyer releases the first $1,000 milestone. Later, “release all” pays the full $5,000 deal amount. The seller could receive $6,000 even though only $5,000 was funded.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>All money movement now uses one immutable ledger and atomic transfer service. Commands are idempotent, concurrent transitions cannot succeed twice, and balances are derived from ledger entries—not lifecycle labels.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>The buyer funds the escrow.</li>
+          <li>One milestone is released.</li>
+          <li>A full-release or concurrent request also succeeds.</li>
+          <li>The seller may be credited twice.</li>
+          <li>Cancellation can omit a refund record.</li>
+        </ol>
+        <div class="outcome">Risk: overpayment, stranded funds, or weak reconciliation.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>Funding creates an authoritative held balance.</li>
+          <li>One atomic service moves every dollar.</li>
+          <li>Each release reduces the balance once.</li>
+          <li>Duplicate requests return the original result or fail safely.</li>
+          <li>Cancellation refunds only the eligible remainder.</li>
+        </ol>
+        <div class="outcome">Safe result: every dollar is held, released, refunded, or settled once.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>4</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 4 of 6</div>
+    <h2>Milestone submission, revision, and response</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>A milestone could enter review without a real seller submission. The buyer could reject it without explaining why, the seller could resubmit unchanged work, and silence could leave it waiting forever.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>A designer marks a logo ready without a deliverable. The buyer rejects without a reason. The designer clicks resubmit without changing anything. If the buyer then disappears, nobody knows what happens next.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>A distinct seller submission is required before review. Revision requests require a reason, history is preserved, order is enforced, and a seven-day review window includes a reminder and deterministic hold-and-escalate handling.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>Milestone appears ready for review.</li>
+          <li>No submission or evidence is required.</li>
+          <li>Buyer rejects without a reason.</li>
+          <li>Seller resubmits without new information.</li>
+          <li>The cycle repeats or stalls indefinitely.</li>
+        </ol>
+        <div class="outcome">Risk: unproductive loops and unexplained delays.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>Seller creates a distinct, traceable submission.</li>
+          <li>Buyer reviews within a defined window.</li>
+          <li>Approval releases the remaining balance once.</li>
+          <li>A revision request must explain what must change.</li>
+          <li>Silence triggers reminders, safe holding, and escalation.</li>
+        </ol>
+        <div class="outcome">Safe result: every review has evidence, reasons, history, and a deadline.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>5</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 5 of 6</div>
+    <h2>Disputes and funded cancellation</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being disputed or reconcile a settlement, refund, or cancellation.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>A buyer disputes a $2,000 milestone in a $10,000 escrow. The dispute exists, but it does not reserve that $2,000. Safe resolution requires manual intervention, and unrelated work may become stuck.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>One active dispute can atomically freeze the affected milestone balance. Evidence and resolution proposals are retained, allocations must equal every frozen cent, and accepted release, refund, or split outcomes move money through the ledger.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>The parties disagree.</li>
+          <li>A standalone dispute record is created.</li>
+          <li>Affected funds are not reserved authoritatively.</li>
+          <li>Resolution needs manual balance decisions.</li>
+          <li>Funds can remain stranded or be misallocated.</li>
+        </ol>
+        <div class="outcome">Risk: the dispute record and actual money drift apart.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>Open one dispute linked to the milestone.</li>
+          <li>Freeze exactly its remaining balance.</li>
+          <li>Collect evidence within a defined window.</li>
+          <li>Agree to release, refund, or an exact split.</li>
+          <li>Record the result as ledger-backed movements.</li>
+        </ol>
+        <div class="outcome">Safe result: disputed money is fully reserved and reconciled.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>6</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">Comparison 6 of 6</div>
+    <h2>Deadlines, monitoring, and operational recovery</h2>
+    <div class="context">
+      <div class="panel">
+        <h3>The unhappy path, in everyday language</h3>
+        <p>Invitations, funding, reviews, disputes, and cancellations could quietly age without reminders or escalation. Failed background work was hard to see and could require direct database intervention.</p>
+      </div>
+      <div class="panel example">
+        <h3>Example</h3>
+        <p>An invitation retry job fails over a weekend. No alert is raised, the creator has no clear recovery action, and support cannot safely retry it from an operator tool. The escrow simply looks stuck.</p>
+      </div>
+    </div>
+    <div class="remedy">
+      <h3>What was done to remediate it</h3>
+      <p>A persistent recovery queue now handles deadlines, reminders, retries, escalations, and daily reconciliation. Dashboards expose failures and aged work; support uses the same permissioned, idempotent, audited commands as the product.</p>
+    </div>
+    <div class="comparison-title">Side-by-side path</div>
+    <div class="comparison">
+      <div class="path original">
+        <div class="path-header">Original unhappy path</div>
+        <ol class="step-list">
+          <li>A party or background job stops responding.</li>
+          <li>No standard reminder or expiry runs.</li>
+          <li>The failure stays hidden.</li>
+          <li>The escrow appears stuck.</li>
+          <li>Support needs manual database intervention.</li>
+        </ol>
+        <div class="outcome">Risk: silent stalls and fragile operational recovery.</div>
+      </div>
+      <div class="path fixed">
+        <div class="path-header">Remediated path — all green</div>
+        <ol class="step-list">
+          <li>Every waiting state has an owner and deadline.</li>
+          <li>Durable jobs remind, retry, expire, or escalate.</li>
+          <li>Failures and aged escrows are visible.</li>
+          <li>Reconciliation and health alerts notify operators.</li>
+          <li>Support actions are permissioned and audited.</li>
+        </ol>
+        <div class="outcome">Safe result: stalled work is visible, owned, and recoverable.</div>
+      </div>
+    </div>
+    <div class="footer"><span>MyEscrow</span><span>7</span></div>
+  </section>
+
+  <section class="page">
+    <div class="section-kicker">End-state summary</div>
+    <h2>A recoverable process from creation to completion</h2>
+    <div class="result-grid">
+      <div class="result-card"><strong>Retry-safe creation</strong>One escrow is created, while invitation delivery remains visible and recoverable.</div>
+      <div class="result-card"><strong>Versioned consent</strong>Both parties sign the same immutable final agreement before funding.</div>
+      <div class="result-card"><strong>Money integrity</strong>Every movement is atomic, idempotent, ledger-backed, and reconcilable.</div>
+      <div class="result-card"><strong>Evidence-based review</strong>Submissions, reasons, history, reminders, and deadlines govern milestone decisions.</div>
+      <div class="result-card"><strong>Controlled disputes</strong>Only affected funds freeze, and every settlement allocates the exact frozen amount.</div>
+      <div class="result-card"><strong>Operational recovery</strong>Waiting states and failed work are visible, owned, retryable, and audited.</div>
+    </div>
+    <div class="invariant">
+      funded amount = held amount + released amount + refunded amount<br>
+      held amount &gt;= 0<br>
+      released amount + refunded amount &lt;= funded amount
+    </div>
+    <p class="closing">Every funded dollar now has one—and only one—final accounting outcome.</p>
+    <div class="footer"><span>MyEscrow</span><span>8</span></div>
+  </section>
+</body>
+</html>
