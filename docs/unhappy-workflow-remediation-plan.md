@@ -172,6 +172,8 @@ Evidence files should use private object storage, short-lived access links, malw
 - No-response handling is deterministic and tested.
 - Released amounts always use the remaining ledger balance for that milestone.
 
+**Implementation status (2026-07-22):** Phase 3 is implemented locally. Milestones now move through `not_started`, `submitted`, `revision_requested`, and `released`; a seller submission is required before buyer review; revision reasons and distinct resubmissions are enforced; submission, evidence-metadata, and review history is returned to both parties; and earlier milestones must be released before later work can be submitted. Buyer review opens for seven days, receives a reminder after five days, and follows a deterministic `hold_and_escalate` policy when overdue, so missed reviews never release funds automatically. The dashboard exposes submission notes, revision reasons, review deadlines, overdue state, and chronological submission history. Private evidence upload, malware scanning, and short-lived download links still require the planned object-storage integration before file attachments are enabled in production.
+
 ## Phase 4 — Connect disputes and cancellation to escrow funds
 
 ### Data model

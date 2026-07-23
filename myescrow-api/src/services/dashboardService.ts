@@ -23,6 +23,10 @@ import {
   deriveLedgerBalances,
   type LedgerBalances,
 } from "./moneyIntegrityService";
+import {
+  submitMilestoneWork,
+  type MilestoneSubmissionInput,
+} from "./milestoneReviewService";
 
 export type SummaryMetric = {
   id: string;
@@ -46,6 +50,31 @@ export type EscrowMilestoneResponse = {
   changeRequestedAt?: string;
   releasedAt?: string;
   rejectedAt?: string;
+  reviewDeadline?: string;
+  reminderSentAt?: string;
+  reviewOverdueAt?: string;
+  submissions: Array<{
+    id: number;
+    submissionNumber: number;
+    note?: string;
+    submittedAt: string;
+    reviewDeadline: string;
+    submitter: { id: string; name: string };
+    evidence: Array<{
+      id: number;
+      objectKey: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      sha256: string;
+    }>;
+    review?: {
+      decision: string;
+      reason?: string;
+      reviewedAt: string;
+      reviewer: { id: string; name: string };
+    };
+  }>;
 };
 
 export type EscrowResponse = {
@@ -149,7 +178,15 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
     owner: true;
     buyer: true;
     seller: true;
-    milestones: { orderBy: { orderIndex: "asc" } };
+    milestones: {
+      orderBy: { orderIndex: "asc" };
+      include: {
+        submissions: {
+          orderBy: { submissionNumber: "asc" };
+          include: { submitter: true; evidence: true; review: { include: { reviewer: true } } };
+        };
+      };
+    };
     ledgerEntries: { select: { movementType: true; amountCents: true } };
     currentAgreementVersion: { include: { signatures: true } };
     invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
@@ -238,7 +275,15 @@ const includeEscrowRelations = {
   owner: true,
   buyer: true,
   seller: true,
-  milestones: { orderBy: { orderIndex: "asc" as const } },
+  milestones: {
+    orderBy: { orderIndex: "asc" as const },
+    include: {
+      submissions: {
+        orderBy: { submissionNumber: "asc" as const },
+        include: { submitter: true, evidence: true, review: { include: { reviewer: true } } },
+      },
+    },
+  },
   ledgerEntries: { select: { movementType: true, amountCents: true } },
   currentAgreementVersion: { include: { signatures: true } },
   invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
@@ -384,10 +429,10 @@ function deriveStage(record: EscrowWithRelations) {
     return "Funding pending";
   }
   if (record.lifecycleStatus === "funded") {
-    if (record.milestones.some((milestone) => milestone.status === "rejected")) {
+    if (record.milestones.some((milestone) => milestone.status === "revision_requested")) {
       return "Milestone attention";
     }
-    return record.milestones.some((milestone) => milestone.status === "pending")
+    return record.milestones.some((milestone) => ["not_started", "submitted"].includes(milestone.status))
       ? "Milestones active"
       : "Funded";
   }
@@ -422,11 +467,11 @@ function deriveDueDescription(record: EscrowWithRelations) {
     return "Buyer funding required";
   }
   if (record.lifecycleStatus === "funded") {
-    const rejectedMilestones = record.milestones.filter((milestone) => milestone.status === "rejected").length;
+    const rejectedMilestones = record.milestones.filter((milestone) => milestone.status === "revision_requested").length;
     if (rejectedMilestones > 0) {
       return `${rejectedMilestones} milestone(s) need revision`;
     }
-    const pendingMilestones = record.milestones.filter((milestone) => milestone.status === "pending").length;
+    const pendingMilestones = record.milestones.filter((milestone) => ["not_started", "submitted"].includes(milestone.status)).length;
     return pendingMilestones > 0 ? `${pendingMilestones} milestone(s) pending` : "Funded";
   }
   if (record.lifecycleStatus === "completed") {
@@ -555,6 +600,38 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
       ...(milestone.changeRequestedAt ? { changeRequestedAt: milestone.changeRequestedAt.toISOString() } : {}),
       ...(milestone.releasedAt ? { releasedAt: milestone.releasedAt.toISOString() } : {}),
       ...(milestone.rejectedAt ? { rejectedAt: milestone.rejectedAt.toISOString() } : {}),
+      ...(milestone.reviewDeadline ? { reviewDeadline: milestone.reviewDeadline.toISOString() } : {}),
+      ...(milestone.reminderSentAt ? { reminderSentAt: milestone.reminderSentAt.toISOString() } : {}),
+      ...(milestone.reviewOverdueAt ? { reviewOverdueAt: milestone.reviewOverdueAt.toISOString() } : {}),
+      submissions: milestone.submissions.map((submission) => ({
+        id: submission.id,
+        submissionNumber: submission.submissionNumber,
+        ...(submission.note ? { note: submission.note } : {}),
+        submittedAt: submission.submittedAt.toISOString(),
+        reviewDeadline: submission.reviewDeadline.toISOString(),
+        submitter: { id: submission.submitter.id, name: submission.submitter.name },
+        evidence: submission.evidence.map((evidence) => ({
+          id: evidence.id,
+          objectKey: evidence.objectKey,
+          fileName: evidence.fileName,
+          contentType: evidence.contentType,
+          sizeBytes: evidence.sizeBytes,
+          sha256: evidence.sha256,
+        })),
+        ...(submission.review
+          ? {
+              review: {
+                decision: submission.review.decision,
+                ...(submission.review.reason ? { reason: submission.review.reason } : {}),
+                reviewedAt: submission.review.reviewedAt.toISOString(),
+                reviewer: {
+                  id: submission.review.reviewer.id,
+                  name: submission.review.reviewer.name,
+                },
+              },
+            }
+          : {}),
+      })),
     })),
   };
 }
@@ -647,11 +724,11 @@ function getMilestoneById(
 }
 
 function getEscrowStateFromMilestones(
-  milestones: EscrowWithRelations["milestones"],
+  milestones: ReadonlyArray<{ status: string }>,
   heldCents?: number,
 ) {
-  const remainingPending = milestones.filter((milestone) => milestone.status === "pending").length;
-  const rejectedCount = milestones.filter((milestone) => milestone.status === "rejected").length;
+  const remainingPending = milestones.filter((milestone) => ["not_started", "submitted"].includes(milestone.status)).length;
+  const rejectedCount = milestones.filter((milestone) => milestone.status === "revision_requested").length;
   const allReleased = milestones.length > 0 && milestones.every((milestone) => milestone.status === "released");
 
   if (allReleased && heldCents === 0) {
@@ -1450,7 +1527,7 @@ export async function requestMilestoneChanges(
     throw new AppError("Changes can only be requested before escrow approval.", 400);
   }
   const milestone = getMilestoneById(escrow, milestoneId);
-  if (milestone.status !== "pending") {
+  if (milestone.status !== "not_started") {
     throw new AppError("Only pending milestones can be revised.", 400);
   }
 
@@ -1522,7 +1599,7 @@ export async function requestAgreementChanges(
 
   const existingPendingIds = new Set(
     escrow.milestones
-      .filter((milestone) => milestone.status === "pending" && !isProposedNewMilestone(milestone))
+      .filter((milestone) => milestone.status === "not_started" && !isProposedNewMilestone(milestone))
       .map((milestone) => milestone.id),
   );
   const proposedExistingIds = new Set(
@@ -1574,7 +1651,7 @@ export async function requestAgreementChanges(
             amountCents: 0,
             deadline: null,
             orderIndex: nextOrderIndex,
-            status: "pending",
+            status: "not_started",
             ...requestedData,
           },
         });
@@ -2031,6 +2108,7 @@ export async function approveMilestone(
   reference: string,
   milestoneId: number,
   idempotencyKey: string,
+  reason?: string,
 ) {
   return executeIdempotentCommand(
     prisma,
@@ -2038,7 +2116,7 @@ export async function approveMilestone(
       userId,
       key: idempotencyKey,
       command: "approve_milestone",
-      payload: { reference, milestoneId },
+      payload: { reference, milestoneId, reason: reason?.trim() || null },
     },
     async (tx) => {
       const escrow = await tx.escrow.findFirst({
@@ -2058,34 +2136,49 @@ export async function approveMilestone(
       }
 
       const targetMilestone = getMilestoneById(escrow, milestoneId);
-      if (targetMilestone.status !== "pending") {
+      if (targetMilestone.status !== "submitted") {
+        throw new AppError("The seller must submit this milestone before it can be approved.", 409);
+      }
+      const submission = targetMilestone.submissions.at(-1);
+      if (!submission || submission.review) {
+        throw new AppError("This milestone does not have an open submission to review.", 409);
+      }
+
+      const escrowLock = await tx.escrow.updateMany({
+        where: { id: escrow.id, lifecycleStatus: "funded" },
+        data: { updatedAt: new Date() },
+      });
+      if (escrowLock.count !== 1) {
+        throw new AppError("The escrow changed before this milestone could be released. Refresh and try again.", 409);
+      }
+
+      const releasedAt = new Date();
+      const milestoneTransition = await tx.escrowMilestone.updateMany({
+        where: {
+          id: milestoneId,
+          escrowId: escrow.id,
+          status: "submitted",
+        },
+        data: {
+          status: "released",
+          releasedAt,
+          rejectedAt: null,
+          reviewDeadline: null,
+          reminderAt: null,
+        },
+      });
+      if (milestoneTransition.count !== 1) {
         throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
       }
 
-    const escrowLock = await tx.escrow.updateMany({
-      where: { id: escrow.id, lifecycleStatus: "funded" },
-      data: { updatedAt: new Date() },
-    });
-    if (escrowLock.count !== 1) {
-      throw new AppError("The escrow changed before this milestone could be released. Refresh and try again.", 409);
-    }
-
-    const releasedAt = new Date();
-    const milestoneTransition = await tx.escrowMilestone.updateMany({
-      where: {
-        id: milestoneId,
-        escrowId: escrow.id,
-        status: "pending",
-      },
-      data: {
-        status: "released",
-        releasedAt,
-        rejectedAt: null,
-      },
-    });
-    if (milestoneTransition.count !== 1) {
-      throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
-    }
+      await tx.milestoneReview.create({
+        data: {
+          submissionId: submission.id,
+          reviewerId: userId,
+          decision: "approved",
+          reason: reason?.trim() || null,
+        },
+      });
 
       const transfer = await applyEscrowTransfer(tx, {
         escrowId: escrow.id,
@@ -2151,7 +2244,12 @@ export async function rejectMilestone(
   userId: string,
   reference: string,
   milestoneId: number,
+  reason: string,
 ): Promise<MilestoneActionResult> {
+  const revisionReason = reason.trim();
+  if (revisionReason.length < 3) {
+    throw new AppError("Explain what the seller needs to revise.", 400);
+  }
   const escrow = await findEscrowForUser(prisma, userId, reference);
   const buyerId = requireBuyerId(escrow);
   if (buyerId !== userId) {
@@ -2165,8 +2263,12 @@ export async function rejectMilestone(
   }
 
   const targetMilestone = getMilestoneById(escrow, milestoneId);
-  if (targetMilestone.status !== "pending") {
-    throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
+  if (targetMilestone.status !== "submitted") {
+    throw new AppError("The seller must submit this milestone before a revision can be requested.", 409);
+  }
+  const submission = targetMilestone.submissions.at(-1);
+  if (!submission || submission.review) {
+    throw new AppError("This milestone does not have an open submission to review.", 409);
   }
 
   return prisma.$transaction(async (tx) => {
@@ -2183,16 +2285,27 @@ export async function rejectMilestone(
       where: {
         id: milestoneId,
         escrowId: escrow.id,
-        status: "pending",
+        status: "submitted",
       },
       data: {
-        status: "rejected",
+        status: "revision_requested",
         rejectedAt,
+        reviewDeadline: null,
+        reminderAt: null,
       },
     });
     if (milestoneTransition.count !== 1) {
       throw new AppError("This milestone was already processed. Refresh to see its current state.", 409);
     }
+
+    await tx.milestoneReview.create({
+      data: {
+        submissionId: submission.id,
+        reviewerId: userId,
+        decision: "revision_requested",
+        reason: revisionReason,
+      },
+    });
 
     const milestones = await tx.escrowMilestone.findMany({
       where: { escrowId: escrow.id },
@@ -2209,21 +2322,21 @@ export async function rejectMilestone(
       tx,
       requireSellerId(updatedEscrow),
       `Milestone rejected for ${updatedEscrow.reference}`,
-      `${targetMilestone.title} needs revision`,
+      `${targetMilestone.title} needs revision: ${revisionReason}`,
       "attention",
     );
     await createTimeline(
       tx,
       requireBuyerId(updatedEscrow),
       `You rejected ${targetMilestone.title}`,
-      "Seller needs to revise this milestone",
+      revisionReason,
       "attention",
     );
     await createNotification(
       tx,
       requireSellerId(updatedEscrow),
       "Milestone needs revision",
-      `${targetMilestone.title} was rejected and needs updates.`,
+      `${targetMilestone.title} needs revision: ${revisionReason}`,
       "Just now",
       updatedEscrow.id,
     );
@@ -2244,88 +2357,10 @@ export async function resubmitMilestone(
   userId: string,
   reference: string,
   milestoneId: number,
-): Promise<MilestoneActionResult> {
-  const escrow = await findEscrowForUser(prisma, userId, reference);
-  const sellerId = requireSellerId(escrow);
-  if (sellerId !== userId) {
-    throw new AppError("Only the seller can resubmit rejected milestones.", 403);
-  }
-  if (escrow.lifecycleStatus !== "funded") {
-    throw new AppError("Milestones can only be resubmitted after funding.", 400);
-  }
-
-  const targetMilestone = getMilestoneById(escrow, milestoneId);
-  if (targetMilestone.status !== "rejected") {
-    throw new AppError("This milestone is no longer awaiting resubmission. Refresh to see its current state.", 409);
-  }
-
-  return prisma.$transaction(async (tx) => {
-    const escrowLock = await tx.escrow.updateMany({
-      where: { id: escrow.id, lifecycleStatus: "funded" },
-      data: { updatedAt: new Date() },
-    });
-    if (escrowLock.count !== 1) {
-      throw new AppError("The escrow changed before this milestone could be resubmitted. Refresh and try again.", 409);
-    }
-
-    const milestoneTransition = await tx.escrowMilestone.updateMany({
-      where: {
-        id: milestoneId,
-        escrowId: escrow.id,
-        status: "rejected",
-      },
-      data: {
-        status: "pending",
-        rejectedAt: null,
-      },
-    });
-    if (milestoneTransition.count !== 1) {
-      throw new AppError("This milestone is no longer awaiting resubmission. Refresh to see its current state.", 409);
-    }
-
-    const milestones = await tx.escrowMilestone.findMany({
-      where: { escrowId: escrow.id },
-      orderBy: { orderIndex: "asc" },
-    });
-    const state = getEscrowStateFromMilestones(milestones);
-    const updatedEscrow = await tx.escrow.update({
-      where: { id: escrow.id },
-      data: state,
-      include: includeEscrowRelations,
-    });
-
-    await createTimeline(
-      tx,
-      requireBuyerId(updatedEscrow),
-      `Milestone resubmitted for ${updatedEscrow.reference}`,
-      `${targetMilestone.title} is ready for review again`,
-      "attention",
-    );
-    await createTimeline(
-      tx,
-      requireSellerId(updatedEscrow),
-      `You resubmitted ${targetMilestone.title}`,
-      "Waiting for buyer review",
-      "attention",
-    );
-    await createNotification(
-      tx,
-      requireBuyerId(updatedEscrow),
-      "Milestone resubmitted",
-      `${targetMilestone.title} was resubmitted and is ready for review.`,
-      "Just now",
-      updatedEscrow.id,
-    );
-    await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, {
-      label: "Milestone needs revision",
-      detailContains: targetMilestone.title,
-    });
-
-    return {
-      escrow: updatedEscrow,
-      milestone: updatedEscrow.milestones.find((item) => item.id === milestoneId)!,
-    };
-  });
+  data: MilestoneSubmissionInput,
+  idempotencyKey: string,
+) {
+  return submitMilestoneWork(prisma, userId, reference, milestoneId, data, idempotencyKey);
 }
 
 export async function listDisputes(prisma: PrismaClient, userId: string): Promise<DisputeResponse[]> {
@@ -2406,10 +2441,10 @@ const isMilestoneNotificationStillActionable = (
     return matchingMilestones.some((milestone) => milestone.changeRequestedAt !== null);
   }
   if (notification.label === "Milestone resubmitted") {
-    return matchingMilestones.some((milestone) => milestone.status === "pending");
+    return matchingMilestones.some((milestone) => milestone.status === "submitted");
   }
   if (notification.label === "Milestone needs revision") {
-    return matchingMilestones.some((milestone) => milestone.status === "rejected");
+    return matchingMilestones.some((milestone) => milestone.status === "revision_requested");
   }
   return true;
 };

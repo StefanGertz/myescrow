@@ -82,6 +82,14 @@ async function approveMilestone(token, reference, milestoneId) {
   });
 }
 
+async function submitMilestone(token, reference, milestoneId) {
+  return request(`/api/dashboard/escrows/${reference}/milestones/${milestoneId}/submit`, {
+    method: 'POST',
+    headers: commandHeaders(token),
+    body: JSON.stringify({ note: `Smoke-test delivery for milestone ${milestoneId}` })
+  });
+}
+
 async function walletAction(token, path, amount) {
   return request(`/api/dashboard/wallet/${path}`, {
     method: 'POST',
@@ -172,12 +180,14 @@ function ensure(condition, message) {
   const fundingResult = await escrowAction(token, createResult.reference, 'fund');
   ensure(fundingResult?.success, 'Fund endpoint did not return success');
 
-  console.log('Approving each milestone on the funded escrow');
+  console.log('Submitting and approving each milestone on the funded escrow');
   const escrowsResult = await listEscrows(token);
   const fundedEscrow = escrowsResult.escrows?.find((escrow) => escrow.id === createResult.reference);
   ensure(fundedEscrow, 'Funded escrow not present in escrow list');
   ensure(fundedEscrow.milestones?.length, 'Funded escrow has no milestones to approve');
   for (const milestone of fundedEscrow.milestones) {
+    const submissionResult = await submitMilestone(counterpartyToken, createResult.reference, milestone.id);
+    ensure(submissionResult?.success, `Milestone ${milestone.id} submission did not return success`);
     const releaseResult = await approveMilestone(token, createResult.reference, milestone.id);
     ensure(releaseResult?.success, `Milestone ${milestone.id} approval did not return success`);
   }

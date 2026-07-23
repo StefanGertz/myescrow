@@ -29,6 +29,8 @@ model User {
   idempotencyRecords       IdempotencyRecord[]
   agreementVersionsCreated AgreementVersion[]       @relation("AgreementVersionCreator")
   agreementSignatures      AgreementSignature[]
+  milestoneSubmissions     MilestoneSubmission[]
+  milestoneReviews         MilestoneReview[]
   verificationTokens       EmailVerificationToken[]
   passwordResetTokens      PasswordResetToken[]
   businessProfile          BusinessProfile?
@@ -96,15 +98,15 @@ model Escrow {
 }
 
 model EscrowMilestone {
-  id                   Int                 @id @default(autoincrement())
+  id                   Int                   @id @default(autoincrement())
   escrowId             Int
-  escrow               Escrow              @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+  escrow               Escrow                @relation(fields: [escrowId], references: [id], onDelete: Cascade)
   title                String
   description          String?
   amountCents          Int
   deadline             DateTime?
   orderIndex           Int
-  status               String              @default("pending")
+  status               String                @default("not_started")
   requestedTitle       String?
   requestedDescription String?
   requestedAmountCents Int?
@@ -113,11 +115,62 @@ model EscrowMilestone {
   changeRequestedAt    DateTime?
   releasedAt           DateTime?
   rejectedAt           DateTime?
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  reviewDeadline       DateTime?
+  reminderAt           DateTime?
+  reminderSentAt       DateTime?
+  reviewOverdueAt      DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   ledgerEntries        EscrowLedgerEntry[]
+  submissions          MilestoneSubmission[]
 
   @@index([escrowId, orderIndex])
+  @@index([status, reviewDeadline])
+}
+
+model MilestoneSubmission {
+  id               Int                          @id @default(autoincrement())
+  milestoneId      Int
+  milestone        EscrowMilestone              @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
+  submitterId      String
+  submitter        User                         @relation(fields: [submitterId], references: [id], onDelete: Restrict)
+  submissionNumber Int
+  note             String?
+  submittedAt      DateTime                     @default(now())
+  reviewDeadline   DateTime
+  reminderAt       DateTime
+  evidence         MilestoneEvidenceReference[]
+  review           MilestoneReview?
+
+  @@unique([milestoneId, submissionNumber])
+  @@index([submitterId])
+}
+
+model MilestoneEvidenceReference {
+  id           Int                 @id @default(autoincrement())
+  submissionId Int
+  submission   MilestoneSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  objectKey    String
+  fileName     String
+  contentType  String
+  sizeBytes    Int
+  sha256       String
+  createdAt    DateTime            @default(now())
+
+  @@index([submissionId])
+}
+
+model MilestoneReview {
+  id           Int                 @id @default(autoincrement())
+  submissionId Int                 @unique
+  submission   MilestoneSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  reviewerId   String
+  reviewer     User                @relation(fields: [reviewerId], references: [id], onDelete: Restrict)
+  decision     String
+  reason       String?
+  reviewedAt   DateTime            @default(now())
+
+  @@index([reviewerId])
 }
 
 model Dispute {

@@ -88,6 +88,17 @@ const updateDraftEscrowSchema = z.object({
   ).optional(),
 });
 
+const milestoneSubmissionSchema = z.object({
+  note: z.string().trim().max(5_000).optional(),
+  evidence: z.array(z.object({
+    objectKey: z.string().trim().min(1).max(1_000),
+    fileName: z.string().trim().min(1).max(255),
+    contentType: z.string().trim().min(1).max(120),
+    sizeBytes: z.number().int().positive().max(25_000_000),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  })).max(10).optional(),
+});
+
 const walletSchema = z.object({
   amount: z.number().positive(),
 });
@@ -316,19 +327,22 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/approve", async (request) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const { reason } = z.object({ reason: z.string().trim().max(2_000).optional() }).parse(request.body ?? {});
       return approveMilestone(
         secured.prisma,
         user.id,
         id,
         milestoneId,
         requireIdempotencyKey(request),
+        reason,
       );
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/reject", async (request) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
-      const result = await rejectMilestone(secured.prisma, user.id, id, milestoneId);
+      const { reason } = z.object({ reason: z.string().trim().min(3).max(2_000) }).parse(request.body);
+      const result = await rejectMilestone(secured.prisma, user.id, id, milestoneId, reason);
       return {
         success: true,
         escrowId: result.escrow.reference,
@@ -337,16 +351,22 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       };
     });
 
-    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/resubmit", async (request) => {
+    const handleMilestoneSubmission = async (request: FastifyRequest) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
-      const result = await resubmitMilestone(secured.prisma, user.id, id, milestoneId);
-      return {
-        success: true,
-        escrowId: result.escrow.reference,
-        milestoneId: result.milestone.id,
-      };
-    });
+      const body = milestoneSubmissionSchema.parse(request.body ?? {});
+      return resubmitMilestone(
+        secured.prisma,
+        user.id,
+        id,
+        milestoneId,
+        body,
+        requireIdempotencyKey(request),
+      );
+    };
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/submit", handleMilestoneSubmission);
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/resubmit", handleMilestoneSubmission);
 
     const handleAgreementChangeRequest = async (request: FastifyRequest) => {
       const user = await requireUser(request);

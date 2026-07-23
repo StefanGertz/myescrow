@@ -12,6 +12,9 @@ async function main() {
   const data = JSON.parse(raw) as DatabaseSchema;
 
   await prisma.$transaction([
+    prisma.milestoneReview.deleteMany(),
+    prisma.milestoneEvidenceReference.deleteMany(),
+    prisma.milestoneSubmission.deleteMany(),
     prisma.outboxEvent.deleteMany(),
     prisma.invitationDelivery.deleteMany(),
     prisma.agreementSignature.deleteMany(),
@@ -79,7 +82,11 @@ async function main() {
       description: milestone.description,
       amountCents: milestone.amount,
       orderIndex: milestone.orderIndex,
-      status: milestone.status,
+      status: milestone.status === "pending"
+        ? "not_started"
+        : milestone.status === "rejected"
+          ? "revision_requested"
+          : milestone.status,
       releasedAt: milestone.releasedAt ? new Date(milestone.releasedAt) : undefined,
       rejectedAt: milestone.rejectedAt ? new Date(milestone.rejectedAt) : undefined,
       createdAt: new Date(milestone.createdAt),

@@ -74,11 +74,12 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run smoke` - end-to-end smoke test (signup -> overview -> milestone releases -> wallet/disputes).
 - `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
 - `npm run outbox:invitations` - process due escrow invitation events once; run this command every minute in deployed environments.
+- `npm run milestones:deadlines` - send due-soon milestone reminders and escalate overdue reviews once; run on a recurring schedule.
 
 ## API surface
 
 Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
-Escrow creation, funding, milestone approval, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
+Escrow creation, funding, milestone submission, milestone approval, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -98,6 +99,9 @@ Escrow creation, funding, milestone approval, wallet top-up, and wallet withdraw
 | POST | `/api/dashboard/escrows/:id/approve` | Mark escrow as approved. |
 | POST | `/api/dashboard/escrows/:id/reject` | Reject an escrow. |
 | POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/submit` | Submit or resubmit completed work with a note and optional private evidence metadata. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/approve` | Approve the latest seller submission and release that milestone's remaining held balance. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/reject` | Request a revision with a required reason saved to the review history. |
 | GET | `/api/dashboard/disputes` | Active disputes. |
 | POST | `/api/dashboard/disputes/:id/launch` | Mark a dispute workspace as launched. |
 | POST | `/api/dashboard/disputes/:id/resolve` | Resolve a dispute. |
@@ -140,7 +144,8 @@ px prisma migrate deploy) against the remote DB before booting the app.
 4. **Runtime** - Either run the Docker image above or 
 pm ci && npm run build && npm start on the host.
 5. **Invitation worker** - Schedule `npm run outbox:invitations` at least once per minute. The command is safe to run concurrently; due events are claimed before delivery.
-6. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
+6. **Milestone deadline worker** - Schedule `npm run milestones:deadlines` regularly. It sends reminders and marks overdue reviews for escalation while leaving funds held.
+7. **Observability** - Add HTTPS, logging, and restart policies (systemd, PM2, Kubernetes, etc.).
 
 Point the frontend-s NEXT_PUBLIC_API_BASE_URL at the deployed URL once the server is reachable.
 

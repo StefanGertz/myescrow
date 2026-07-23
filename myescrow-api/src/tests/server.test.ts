@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
+import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
 
 let server: FastifyInstance;
 let token: string;
@@ -1052,6 +1053,72 @@ describe("MyEscrow API", () => {
     );
   });
 
+  it("requires seller submission and enforces milestone order before buyer review", async () => {
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: createdEscrowReference },
+      include: { milestones: { orderBy: { orderIndex: "asc" } } },
+    });
+    const firstMilestone = escrow.milestones[0];
+    const secondMilestone = escrow.milestones[1];
+    if (!firstMilestone || !secondMilestone) throw new Error("Expected two milestones.");
+
+    const earlyApproval = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/approve`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `early-approve-${firstMilestone.id}`,
+      },
+    });
+    expect(earlyApproval.statusCode).toBe(409);
+
+    const outOfOrderSubmission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${secondMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `early-submit-${secondMilestone.id}`,
+      },
+      payload: { note: "Second milestone is ready." },
+    });
+    expect(outOfOrderSubmission.statusCode).toBe(409);
+
+    const submission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-${firstMilestone.id}-1`,
+      },
+      payload: {
+        note: "The first milestone is complete and ready for review.",
+        evidence: [{
+          objectKey: `escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/proof.pdf`,
+          fileName: "proof.pdf",
+          contentType: "application/pdf",
+          sizeBytes: 1_024,
+          sha256: "a".repeat(64),
+        }],
+      },
+    });
+    expect(submission.statusCode).toBe(200);
+
+    const submittedView = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === createdEscrowReference);
+    expect(submittedView.milestones[0]).toEqual(expect.objectContaining({
+      status: "submitted",
+      reviewDeadline: expect.any(String),
+      submissions: [expect.objectContaining({
+        submissionNumber: 1,
+        note: "The first milestone is complete and ready for review.",
+        evidence: [expect.objectContaining({ fileName: "proof.pdf" })],
+      })],
+    }));
+  });
+
   it("releases a milestone only once when duplicate requests arrive together", async () => {
     const escrowsResponse = await server.inject({
       method: "GET",
@@ -1159,7 +1226,7 @@ describe("MyEscrow API", () => {
     expect(targetEscrow.lifecycleStatus).toBe("funded");
     expect(targetEscrow.stage).toBe("Milestones active");
     expect(targetEscrow.milestones[0].status).toBe("released");
-    expect(targetEscrow.milestones[1].status).toBe("pending");
+    expect(targetEscrow.milestones[1].status).toBe("not_started");
   });
 
   it("allows only one outcome when milestone approval and rejection race", async () => {
@@ -1168,8 +1235,19 @@ describe("MyEscrow API", () => {
       include: { milestones: { orderBy: { orderIndex: "asc" } } },
     });
     const milestone = escrow.milestones[1];
-    expect(milestone?.status).toBe("pending");
+    expect(milestone?.status).toBe("not_started");
     if (!milestone) throw new Error("Expected a second milestone.");
+
+    const submissionResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `race-submit-${milestone.id}`,
+      },
+      payload: { note: "The second milestone is ready for review." },
+    });
+    expect(submissionResponse.statusCode).toBe(200);
 
     const sellerBefore = await server.prisma.user.findUniqueOrThrow({
       where: { email: "nora@example.com" },
@@ -1191,6 +1269,7 @@ describe("MyEscrow API", () => {
         method: "POST",
         url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${milestone.id}/reject`,
         headers: { Authorization: `Bearer ${token}` },
+        payload: { reason: "Please correct the final deliverable." },
       }),
     ]);
 
@@ -1211,7 +1290,7 @@ describe("MyEscrow API", () => {
       expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents + milestone.amountCents);
       expect(releaseEntriesAfter).toBe(releaseEntriesBefore + 1);
     } else {
-      expect(milestoneAfter.status).toBe("rejected");
+      expect(milestoneAfter.status).toBe("revision_requested");
       expect(sellerAfter.walletBalanceCents).toBe(sellerBefore.walletBalanceCents);
       expect(releaseEntriesAfter).toBe(releaseEntriesBefore);
     }
@@ -1272,17 +1351,52 @@ describe("MyEscrow API", () => {
     expect(targetEscrow).toBeDefined();
     rejectedMilestoneId = targetEscrow.milestones[0].id;
 
+    const submitResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-${rejectedMilestoneId}-1`,
+      },
+      payload: { note: "Initial draft is ready." },
+    });
+    expect(submitResponse.statusCode).toBe(200);
+
+    const missingReasonResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/reject`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(missingReasonResponse.statusCode).toBe(400);
+
     const rejectResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/reject`,
       headers: { Authorization: `Bearer ${token}` },
+      payload: { reason: "Please include the missing acceptance criteria." },
     });
     expect(rejectResponse.statusCode).toBe(200);
+
+    const unchangedResubmitResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/resubmit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-${rejectedMilestoneId}-unchanged`,
+      },
+      payload: { note: "Initial draft is ready." },
+    });
+    expect(unchangedResubmitResponse.statusCode).toBe(400);
 
     const sellerResubmitResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/milestones/${rejectedMilestoneId}/resubmit`,
-      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-${rejectedMilestoneId}-2`,
+      },
+      payload: { note: "Updated draft now includes all acceptance criteria." },
     });
     expect(sellerResubmitResponse.statusCode).toBe(200);
 
@@ -1295,7 +1409,57 @@ describe("MyEscrow API", () => {
       .json()
       .escrows.find((escrow: any) => escrow.id === secondMilestoneEscrowReference);
     expect(refreshedEscrow.lifecycleStatus).toBe("funded");
-    expect(refreshedEscrow.milestones[0].status).toBe("pending");
+    expect(refreshedEscrow.milestones[0].status).toBe("submitted");
+    expect(refreshedEscrow.milestones[0].submissions).toHaveLength(2);
+    expect(refreshedEscrow.milestones[0].submissions[0].review).toEqual(expect.objectContaining({
+      decision: "revision_requested",
+      reason: "Please include the missing acceptance criteria.",
+    }));
+  });
+
+  it("holds funds and escalates when a milestone review is overdue", async () => {
+    const escrow = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: secondMilestoneEscrowReference },
+    });
+    await server.prisma.escrowMilestone.update({
+      where: { id: rejectedMilestoneId },
+      data: {
+        reviewDeadline: new Date("2026-07-23T00:00:00.000Z"),
+        reminderAt: new Date("2026-07-21T00:00:00.000Z"),
+      },
+    });
+
+    const reminderResult = await processMilestoneReviewDeadlines(
+      server.prisma,
+      new Date("2026-07-22T12:00:00.000Z"),
+    );
+    expect(reminderResult).toEqual(expect.objectContaining({
+      policy: "hold_and_escalate",
+      remindersSent: 1,
+      escalated: 0,
+    }));
+
+    await server.prisma.escrowMilestone.update({
+      where: { id: rejectedMilestoneId },
+      data: { reviewDeadline: new Date("2026-07-20T00:00:00.000Z") },
+    });
+    const result = await processMilestoneReviewDeadlines(
+      server.prisma,
+      new Date("2026-07-22T12:00:00.000Z"),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      policy: "hold_and_escalate",
+      escalated: 1,
+    }));
+
+    const milestone = await server.prisma.escrowMilestone.findUniqueOrThrow({
+      where: { id: rejectedMilestoneId },
+    });
+    expect(milestone.status).toBe("submitted");
+    expect(milestone.reviewOverdueAt).toEqual(new Date("2026-07-22T12:00:00.000Z"));
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { escrowId: escrow.id, movementType: "release" },
+    })).toBe(0);
   });
 
   it("tops up the wallet", async () => {
