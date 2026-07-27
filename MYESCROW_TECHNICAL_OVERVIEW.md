@@ -1,6 +1,6 @@
 # MyEscrow product and technical overview
 
-Codebase snapshot reviewed: 2026-07-26
+Codebase and staging snapshot reviewed: 2026-07-27
 
 Status: functional staging MVP
 
@@ -17,10 +17,10 @@ The implemented product model includes immutable agreement versions, idempotent 
 | Item | Current value |
 | --- | --- |
 | Root repository | `git@github.com:StefanGertz/myescrow.git` |
-| Root branch / commit | `main` / `d5edf6a7d2c0aa080d7a838bb7bb95313c289641` |
+| Root branch / last deployed API source | `main` / `0f95234447ada3b47306f59ba55a344f55320650` |
 | Frontend repository | `git@github.com:StefanGertz/MyEscrowFrontEnd.git` |
-| Frontend branch / commit | `master` / `fac67c48bda4db77c7b454f3258fc9e6d90969bb` |
-| Frontend relationship | Git submodule at `myescrow-web/` |
+| Frontend branch / commit | `master` / `d839e778e111602af14bf96bfc37ac9de041bc74` |
+| Frontend relationship | Git submodule at `myescrow-web/`, recorded at `d839e778e111602af14bf96bfc37ac9de041bc74` |
 | API stack | Node 20, TypeScript, Fastify 5, Prisma 5, PostgreSQL |
 | Web stack | Next.js 16 App Router, React 19, React Query 5, Tailwind 4 |
 | Email provider | Resend |
@@ -30,8 +30,12 @@ The implemented product model includes immutable agreement versions, idempotent 
 | Public frontend | `https://app.myescrowdemo.xyz` |
 | Public API | `https://staging.myescrowdemo.xyz` |
 | Operations UI | `https://app.myescrowdemo.xyz/operations` |
+| Deployed API revision | `0f95234447ada3b47306f59ba55a344f55320650` |
+| Deployed API image | `ghcr.io/stefangertz/myescrow-api@sha256:efd78b63bc44b0b38ff2c6012c0573dffb67a8e0ea17f8b03acb53eea4c32139` |
 
-All three public endpoints returned HTTP 200 on 2026-07-26. That confirms reachability, not that the deployed build matches the Git commits above. The application has no public build/version endpoint, and the deployed SHA was not independently established.
+On 2026-07-27, `GET https://staging.myescrowdemo.xyz/version` reported the root revision above and advertised the `milestone_funding` capability. The protected milestone-funding route returned HTTP 401 without authentication through both the API hostname and the Vercel proxy, confirming that the route is registered rather than missing. The API and sole live operations worker were healthy, all 18 Prisma migrations were current, and the first automated deployment completed with a retained pre-deploy database backup.
+
+The frontend repository advanced to `d839e77` after the API release at root `0f95234`. Frontend CI passed, and this handoff update records the newer revision in the root submodule pointer.
 
 ## Product behavior
 
@@ -44,12 +48,13 @@ All three public endpoints returned HTTP 200 on 2026-07-26. That confirms reacha
 5. An existing counterparty receives the escrow immediately. A new or unverified counterparty claims pending escrows after signup/verification.
 6. The counterparty can sign/approve, reject, or request agreement/milestone changes. Material changes create a new agreement version and invalidate earlier consent.
 7. Both buyer and seller must sign the current locked agreement before funding.
-8. The buyer funds from the internal MyEscrow wallet. Funding creates a ledger entry and debits the buyer’s internal wallet.
-9. The seller submits milestone work with a note and optional evidence metadata. Earlier milestones must be completed first.
-10. The buyer can approve and release the milestone, request a revision with a reason, or open a dispute.
-11. A dispute freezes only the affected held amount. Parties can add evidence metadata, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence.
-12. A funded cancellation can be mutual or unilateral. Mutual acceptance refunds eligible unreleased and undisputed funds. A unilateral request escalates without moving money.
-13. Notifications, wallet history, escrow ledger history, and audit events provide a record of activity.
+8. The buyer chooses either full funding or sequential milestone funding. Full funding deposits the entire agreement amount; milestone funding deposits only the next eligible milestone and locks the escrow to that funding mode.
+9. Funding creates a ledger entry and debits the buyer’s internal MyEscrow wallet. Later milestones remain unfunded until their turn unless the full escrow was funded.
+10. The seller submits milestone work with a note and optional evidence metadata. Earlier milestones must be completed first, and the API rejects both work submissions and proof uploads unless that milestone is funded or the escrow uses full funding.
+11. The buyer can approve and release the milestone, request a revision with a reason, or open a dispute.
+12. A dispute freezes only the affected held amount. Parties can add evidence metadata, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence.
+13. A funded cancellation can be mutual or unilateral. Mutual acceptance refunds eligible unreleased and undisputed funds. A unilateral request escalates without moving money.
+14. Notifications, wallet history, escrow ledger history, and audit events provide a record of activity.
 
 ### Operational lifecycle
 
@@ -167,7 +172,7 @@ The root `index.html` and generated documents are design/presentation artifacts,
 | `emailService.ts` | Resend payloads for verification, reset, invitation, and change requests |
 | `userService.ts` | User lookup, password hashing/checking, account creation |
 
-`dashboardService.ts` is 2,650 lines and `src/app/page.tsx` in the frontend is 5,042 lines. These are the two clearest refactoring targets.
+`dashboardService.ts` is 2,799 lines and `src/app/page.tsx` in the frontend is 5,578 lines. These are the two clearest refactoring targets.
 
 ### Data model
 
@@ -205,6 +210,8 @@ rejected
 
 Milestone values include `not_started`, `submitted`, `revision_requested`, `released`, `disputed`, `settled`, and `cancelled`. Dispute values include `open`, `resolution_proposed`, `arbitration_requested`, `resolving`, and `resolved`.
 
+`Escrow.fundingMode` is `full`, `milestone`, or null before the buyer chooses. Milestone funding is derived from `fund` ledger entries linked to each milestone; it does not mark later milestones funded merely because the escrow has received some funds.
+
 Because these are strings spread across services, search all transitions before changing a status name.
 
 ### Financial model and invariants
@@ -229,6 +236,8 @@ released + refunded <= funded
 
 Active disputes are subtracted from available held funds. `applyEscrowTransfer` performs the process update, internal wallet movement, ledger record, and invariant check inside a Prisma transaction. Reconciliation compares ledger totals, milestones, and linked wallet transactions.
 
+Full funding transfers the entire agreement amount once. Milestone funding transfers only the next unreleased milestone amount and requires milestones to be funded in sequence. Submission and proof-storage services independently enforce the same funding prerequisite on the backend; the disabled frontend action is usability feedback, not the security boundary.
+
 The legacy full-escrow release endpoint remains registered for compatibility but deliberately throws an error. Milestone approval is the supported release path.
 
 ### Idempotency
@@ -249,7 +258,7 @@ Not every non-financial mutation uses the idempotency service. Sending the heade
 
 ### API surface
 
-All dashboard and operations routes require bearer authentication except auth endpoints and `GET /`. The route files are the source of truth.
+All dashboard and operations routes require bearer authentication except auth endpoints, `GET /`, and `GET /version`. The route files are the source of truth.
 
 Main route groups:
 
@@ -258,7 +267,7 @@ Main route groups:
 | Auth | signup, login, verify/resend email, forgot/reset/change password |
 | Dashboard reads | overview, escrows, business profile, disputes, notifications, wallet history |
 | Agreement | create/update escrow, approve/reject, sign, request/apply changes, invitation resend/extend |
-| Money | fund, milestone approve, ledger history, top-up, withdraw |
+| Money | fund entire escrow, fund next milestone, milestone approve, ledger history, top-up, withdraw |
 | Work review | submit/resubmit milestone, request revision, apply milestone changes |
 | Dispute/cancellation | open dispute, evidence, proposal, arbitration, resolve, request/accept cancellation |
 | Operations | health, jobs, retry, audit, evidence, invitation recovery, operator roles |
@@ -304,6 +313,8 @@ The same codebase contains three meaningful combinations:
 - Browser requests to `/api/*` remain same-origin.
 - Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
 - Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
+
+The immersive transaction screen treats the presence of `fundingMode` in live escrow responses as the milestone-funding compatibility signal. During a frontend/backend rollout gap, it disables the milestone-funding action and shows `Backend update pending` instead of calling a route that an older API does not have. This guard complements—but does not replace—the deployment verification described below.
 
 `NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable, so its value is part of public build-time configuration.
 
@@ -429,24 +440,26 @@ Verified on the exact commits in this document:
 
 | Project | Command | Result |
 | --- | --- | --- |
-| API | `npm test` | 1 file, 36 tests passed |
+| API | `npm test` | 1 file, 38 tests passed |
 | API | `npm run build` | passed |
 | API | `npm run lint` | TypeScript no-emit check passed |
-| Frontend | `npm test` | 11 files, 38 tests passed |
+| Frontend | `npm test` | 13 files, 42 tests passed |
 | Frontend | `npm run build` | passed; 32 pages/routes generated |
 | Frontend | `npm run lint` | passed |
 
-Backend tests create an isolated PostgreSQL schema, deploy all 17 migrations, seed it, run the suite, and drop the schema. If no test/database URL is reachable, the runner can start a disposable PostgreSQL 16 container.
+Backend tests create an isolated PostgreSQL schema, deploy all 18 migrations, seed it, run the suite, and drop the schema. If no test/database URL is reachable, the runner can start a disposable PostgreSQL 16 container.
 
 There is no measured coverage threshold, browser end-to-end suite, payment-provider contract suite, load test, penetration test, accessibility audit, or migration rollback test.
 
 CI:
 
-- Root `.github/workflows/backend-ci.yml` runs migrations, seed, backend tests, build, a smoke test, and docs encoding check. On `main`, it publishes mutable `latest`, `v1`, and immutable commit-SHA GHCR tags.
+- Root `.github/workflows/backend-ci.yml` runs migrations, seed, backend tests, build, functional smoke, deployment-contract smoke, and docs encoding checks. On `main`, it publishes mutable `latest`, `v1`, and immutable commit-SHA GHCR tags.
 - The live Oracle host checks the approved `latest` digest with `myescrow-autodeploy.timer`. A changed digest invokes `scripts/deploy-release.sh`, which pins the immutable digest, backs up PostgreSQL, applies migrations, recreates the API and sole live worker, verifies health/version/route registration, and restores the previous containers if verification fails.
 - Backend CI waits for `/version` to report the pushed commit SHA and then runs a non-mutating public deployment-contract smoke test. A release is not green merely because the image was published.
 - Frontend `.github/workflows/ci.yml` runs lint, tests, and build on `master`/`main` and pull requests.
 - Vercel deployment is triggered from the frontend repository, while API image publication is triggered from the root repository. A root submodule update does not by itself replace the frontend deployment.
+
+Backend CI passed for `0f95234`, including the automated public staging verification. Frontend CI passed for both the rollout guard at `310cbbd` and the current frontend head at `d839e77`.
 
 ## Staging and deployment
 
@@ -469,6 +482,25 @@ The API image is `ghcr.io/stefangertz/myescrow-api`. The live host uses `myescro
 
 The ignored `myescrow-api/.env.staging` on this workstation is incomplete and is not the staging source of truth.
 
+The public API path is:
+
+```text
+Oracle load balancer staging-api-lb (129.153.60.204)
+  -> api-backend on port 4000
+  -> myescrow-arm (private 10.0.0.250, public SSH 40.233.124.19)
+  -> /home/ubuntu/myescrow-api
+```
+
+SSH uses user `ubuntu` and local key `~/.ssh/id_ed25519_oracle`. The similarly named `myescrow-staging` VM is not the public backend. Its worker must remain stopped unless the load-balancer topology is deliberately changed; running a second worker against the same database can process jobs twice.
+
+The live Compose project runs exactly one PostgreSQL service, one API service, and one operations worker. The first automated release recorded:
+
+```text
+Build: 0f95234447ada3b47306f59ba55a344f55320650
+Image: ghcr.io/stefangertz/myescrow-api@sha256:efd78b63bc44b0b38ff2c6012c0573dffb67a8e0ea17f8b03acb53eea4c32139
+Backup: /home/ubuntu/myescrow-api/backups/pre-deploy-0f95234447ad-20260727T123455Z.dump
+```
+
 ### Deployment mechanics
 
 The deployment flow is:
@@ -482,6 +514,35 @@ The deployment flow is:
 7. Backend CI waits for the public API to report the expected SHA and runs `npm run smoke:deployment`.
 
 `GET /version` returns the deployed source SHA and advertised API capabilities. The immersive frontend uses the funding capability present in current escrow responses to keep milestone funding disabled during a backend/frontend rollout gap.
+
+Useful live checks:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_oracle ubuntu@40.233.124.19
+cd /home/ubuntu/myescrow-api
+systemctl status --no-pager myescrow-autodeploy.timer
+cat .deployed-image
+docker compose -f docker-compose.staging.yml --env-file .env.staging ps
+docker compose -f docker-compose.staging.yml --env-file .env.staging logs --tail=100 operations-worker
+curl -fsS https://staging.myescrowdemo.xyz/version
+```
+
+For a deliberate manual release, use an approved immutable digest:
+
+```bash
+./scripts/deploy-release.sh \
+  ghcr.io/stefangertz/myescrow-api@sha256:<approved-digest>
+```
+
+Do not return to a bare `docker compose pull && up` deployment; that bypasses the backup, migration, revision, route, and rollback checks. Ordinary API images deploy automatically. Changes to the deployment scripts, Compose file, or systemd units do not self-install from the image: copy those reviewed files to `/home/ubuntu/myescrow-api` and rerun `scripts/install-staging-autodeploy.sh` before relying on new deployment-agent behavior.
+
+### 2026-07-27 milestone-funding incident and resolution
+
+The buyer-facing milestone-funding dialog originally appeared to do nothing because the Vercel frontend called `POST /api/dashboard/escrows/:id/milestones/:milestoneId/fund`, while the live Oracle API was still an older image and returned `Route ... not found`. Backend CI had successfully built and published the corrected image, but image publication did not deploy it to the VM.
+
+Root commit `3c71555` added and tested server-side funding enforcement for both milestone submissions and proof uploads. It permits seller work only when the full escrow was funded or the specific milestone has a linked funding entry. Frontend commit `310cbbd` added a rollout compatibility guard. Root commit `0f95234` then added immutable build metadata, `GET /version`, deployment smoke tests, guarded backup/migration/deploy/rollback scripts, and the Oracle auto-deploy timer.
+
+The first automated run deployed `0f95234`; CI did not turn green until the public version and protected route checks passed. Future diagnosis should begin with `/version`, the Backend CI “Wait for staging deployment” step, `.deployed-image`, and the timer status rather than assuming that a successful image build reached the VM.
 
 ## Known limitations and incomplete areas
 
@@ -514,7 +575,7 @@ The deployment flow is:
 
 ### Code structure, testing, and operations
 
-- `dashboardService.ts` is 2,650 lines and owns both read models and many commands. The immersive `src/app/page.tsx` is 5,042 lines.
+- `dashboardService.ts` is 2,799 lines and owns both read models and many commands. The immersive `src/app/page.tsx` is 5,578 lines.
 - Frontend response types are partly derived from mock models rather than a shared/generated API contract.
 - Lifecycle, milestone, delivery, and dispute statuses are unrestricted strings spread across services.
 - Automated coverage consists primarily of API integration tests and frontend component/utility tests. There is no browser end-to-end suite, coverage threshold, load test, accessibility audit, payment-provider contract suite, or migration rollback test.
