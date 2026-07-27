@@ -20,6 +20,9 @@ services:
       DATABASE_URL: postgresql://myescrow:myescrow@db:5432/myescrow
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PORT: ${PORT:-4000}
+      MILESTONE_PROOF_STORAGE_DIR: /app/data/milestone-proofs
+    volumes:
+      - milestone-proof-data:/app/data/milestone-proofs
     ports:
       - "4000:4000"
     healthcheck:
@@ -29,3 +32,6 @@ services:
       retries: 5
     profiles:
       - api
+
+volumes:
+  milestone-proof-data:

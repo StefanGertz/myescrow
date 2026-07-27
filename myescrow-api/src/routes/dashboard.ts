@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   applyAgreementChanges,
@@ -37,6 +37,12 @@ import {
 } from "../services/disputeService";
 import { sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { processInvitationOutbox } from "../services/invitationService";
+import {
+  authorizeMilestoneProofUpload,
+  openMilestoneProof,
+  parseMilestoneProofSubmission,
+  removeMilestoneProofs,
+} from "../services/milestoneProofService";
 import { findUserById } from "../services/userService";
 import { recordStandaloneWalletTransfer } from "../services/moneyIntegrityService";
 import { AppError } from "../utils/errors";
@@ -140,6 +146,10 @@ const notificationQuerySchema = z.object({ history: z.coerce.boolean().optional(
 const milestoneParamsSchema = z.object({
   id: z.string().min(1),
   milestoneId: z.coerce.number().int().positive(),
+});
+const milestoneEvidenceParamsSchema = milestoneParamsSchema.extend({
+  submissionId: z.coerce.number().int().positive(),
+  evidenceId: z.coerce.number().int().positive(),
 });
 const milestoneChangeRequestSchema = z.object({
   title: z.string().min(1),
@@ -410,19 +420,59 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     const handleMilestoneSubmission = async (request: FastifyRequest) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
-      const body = milestoneSubmissionSchema.parse(request.body ?? {});
-      return resubmitMilestone(
-        secured.prisma,
-        user.id,
-        id,
-        milestoneId,
-        body,
-        requireIdempotencyKey(request),
-      );
+      const isMultipart = request.isMultipart();
+      if (isMultipart) {
+        await authorizeMilestoneProofUpload(secured.prisma, user.id, id);
+      }
+      const parsed = isMultipart
+        ? await parseMilestoneProofSubmission(request)
+        : { input: milestoneSubmissionSchema.parse(request.body ?? {}), storedEvidence: [] };
+      try {
+        const result = await resubmitMilestone(
+          secured.prisma,
+          user.id,
+          id,
+          milestoneId,
+          parsed.input,
+          requireIdempotencyKey(request),
+        );
+        if (result.replayed) {
+          await removeMilestoneProofs(parsed.storedEvidence);
+        }
+        return result;
+      } catch (error) {
+        await removeMilestoneProofs(parsed.storedEvidence);
+        throw error;
+      }
     };
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/submit", handleMilestoneSubmission);
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/resubmit", handleMilestoneSubmission);
+    secured.get(
+      "/api/dashboard/escrows/:id/milestones/:milestoneId/submissions/:submissionId/evidence/:evidenceId",
+      async (request, reply: FastifyReply) => {
+        const user = await requireUser(request);
+        const { id, milestoneId, submissionId, evidenceId } = milestoneEvidenceParamsSchema.parse(request.params);
+        const { evidence, stream } = await openMilestoneProof(
+          secured.prisma,
+          user.id,
+          id,
+          milestoneId,
+          submissionId,
+          evidenceId,
+        );
+        const fallbackName = evidence.fileName.replace(/[^\x20-\x7e]|[\r\n"\\]/g, "_");
+        const encodedName = encodeURIComponent(evidence.fileName).replace(/[!'()*]/g, (character) =>
+          `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+        reply
+          .header("Cache-Control", "private, no-store")
+          .header("Content-Disposition", `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`)
+          .header("Content-Length", evidence.sizeBytes)
+          .header("Content-Type", evidence.contentType)
+          .header("X-Content-Type-Options", "nosniff");
+        return reply.send(stream);
+      },
+    );
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/dispute", async (request) => {
       const user = await requireUser(request);

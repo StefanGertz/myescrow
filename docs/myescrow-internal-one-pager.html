@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyEscrow Internal One-Pager</title>
+    <style>
+      :root {
+        --brand: #0f4c81;
+        --brand-dark: #0a2d49;
+        --ink: #0f172a;
+        --muted: #5b6b7a;
+        --surface: #f6f9fc;
+        --border: #dfe7ef;
+        --accent: #2f8fdb;
+        --accent-soft: #e7f3ff;
+      }
+
+      @page {
+        size: A4 landscape;
+        margin: 0;
+      }
+
+      * { box-sizing: border-box; }
+
+      html {
+        background: #edf3f7;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+        line-height: 1.5;
+        color: var(--ink);
+        background: linear-gradient(180deg, #f7fafc 0%, #edf3f7 100%);
+      }
+
+      .page {
+        max-width: 1100px;
+        margin: 24px auto;
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: 0 20px 50px rgba(15, 76, 129, 0.10);
+        padding: 34px 38px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 24px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 22px;
+        margin-bottom: 22px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 10px 0 10px;
+        font-size: 30px;
+        line-height: 1.15;
+        color: var(--brand-dark);
+        letter-spacing: -0.02em;
+      }
+
+      .lead {
+        margin: 0;
+        font-size: 16px;
+        color: var(--muted);
+        max-width: 720px;
+      }
+
+      .panel {
+        background: linear-gradient(145deg, #f8fbff, #eef5fb);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 18px;
+      }
+
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        font-weight: 700;
+        color: var(--brand);
+        text-transform: uppercase;
+      }
+
+      .panel h2 {
+        font-size: 18px;
+        margin: 6px 0 8px;
+        color: var(--brand-dark);
+      }
+
+      .panel p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 16px;
+        background: var(--surface);
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        color: var(--brand-dark);
+      }
+
+      .card p, .card ul {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .card ul { padding-left: 18px; }
+      .card li + li { margin-top: 6px; }
+
+      .metric {
+        margin: 0 0 5px;
+        color: var(--brand-dark);
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+      }
+
+      .kicker {
+        display: block;
+        margin-bottom: 7px;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        font-weight: 800;
+        color: var(--accent);
+      }
+
+      .sources {
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
+      .sources strong { color: var(--brand-dark); }
+      .sources a { color: var(--brand); }
+
+      @media print {
+        body { background: #ffffff; }
+        .page {
+          width: 297mm;
+          height: 210mm;
+          box-shadow: none;
+          border: none;
+          margin: 0;
+          max-width: none;
+          border-radius: 0;
+          padding: 8mm 12mm;
+        }
+        .hero {
+          gap: 8mm;
+          padding-bottom: 4mm;
+          margin-bottom: 4mm;
+        }
+        h1 {
+          margin: 2.5mm 0;
+          font-size: 22pt;
+        }
+        .lead {
+          font-size: 10.5pt;
+          line-height: 1.4;
+        }
+        .panel {
+          border-radius: 4mm;
+          padding: 4mm;
+        }
+        .panel h2 {
+          margin: 1.5mm 0 2mm;
+          font-size: 13pt;
+        }
+        .panel p,
+        .card p,
+        .card ul {
+          font-size: 8.4pt;
+          line-height: 1.28;
+        }
+        .grid {
+          grid-template-columns: repeat(12, minmax(0, 1fr));
+          gap: 3.5mm;
+          align-items: stretch;
+        }
+        .card {
+          grid-column: span 3;
+          border-radius: 3.5mm;
+          padding: 3mm;
+        }
+        .card h3 {
+          margin-bottom: 1.5mm;
+          font-size: 11pt;
+        }
+        .metric {
+          margin-bottom: 1.2mm;
+          font-size: 15pt;
+        }
+        .card li + li {
+          margin-top: 1mm;
+        }
+        .sources {
+          margin-top: 2.5mm;
+          font-size: 6.3pt;
+          line-height: 1.2;
+        }
+        .card {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <div class="badge">Internal opportunity brief · July 2026</div>
+          <h1>MyEscrow addresses a broad transaction problem: how independent parties manage staged payments in project-based work.</h1>
+          <p class="lead">The opportunity spans freelance, agency, professional-service, marketplace, and construction transactions where scope, delivery, and payment occur over time. The market question is whether enough higher-value projects need added controls—and whether users will pay for them.</p>
+        </div>
+        <div class="panel">
+          <div class="eyebrow">Interpretation</div>
+          <h2>Adjacent indicators, not a TAM</h2>
+          <p>No authoritative dataset directly measures U.S. demand for milestone escrow across project-based services. These figures establish participant scale, financial friction, and vertical context—not addressable revenue.</p>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <div class="kicker">U.S. labour signal</div>
+          <div class="metric">11.9 million</div>
+          <h3>Independent contractors</h3>
+          <p>In July 2023, independent contractors—including consultants and freelance workers—represented 7.4% of U.S. employment on a sole or main job. This is a participant pool, not a count of escrow-ready users.<sup>1</sup></p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Small-business signal</div>
+          <div class="metric">51%</div>
+          <h3>Reported uneven cash flow</h3>
+          <p>In the Federal Reserve Banks’ 2024 survey, 51% of employer firms cited uneven cash flow—including collecting receivables—as a challenge. Escrow can clarify payment conditions, but prefunding may create a different liquidity burden.<sup>2</sup></p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Risk context</div>
+          <div class="metric">$16 billion</div>
+          <h3>Reported U.S. fraud losses in 2025</h3>
+          <p>FTC data show reported losses across all fraud categories reached about $16 billion. Most falls outside MyEscrow’s proposed use cases; only a subset of transaction losses may be preventable by escrow.<sup>3</sup></p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Construction context</div>
+          <div class="metric">$2.21 trillion</div>
+          <h3>Annualized U.S. construction activity</h3>
+          <p>Construction put in place reached a $2.21 trillion annual rate in May 2026; 18.5% of construction-industry workers were independent contractors in July 2023. Neither figure measures escrow demand.<sup>1,4</sup></p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Use case · Contracted services</div>
+          <h3>Freelance, agency, and professional work</h3>
+          <ul>
+            <li>Website, software, creative, or marketing work delivered by milestone</li>
+            <li>Consulting engagements with defined outputs and acceptance criteria</li>
+            <li>Agency projects involving independent specialists or subcontractors</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Use case · Construction</div>
+          <h3>General contractors and project draws</h3>
+          <ul>
+            <li>Owner-to-GC progress payments tied to documented stages</li>
+            <li>GC-to-subcontractor releases following work approval</li>
+            <li>Change-order, retainage, and lien-waiver records around payment events</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Use case · Platforms and commerce</div>
+          <h3>Transactions lacking native protection</h3>
+          <ul>
+            <li>Service marketplaces without milestone or dispute infrastructure</li>
+            <li>Custom goods using deposit, inspection, and delivery stages</li>
+            <li>Higher-value private transactions requiring verification before release</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Common workflow and boundary</div>
+          <h3>What the use cases share</h3>
+          <p>Parties agree scope, fund the transaction, submit delivery evidence, approve or request revision, and release, refund, or dispute funds. The best fit has identifiable parties and objective stages; immediate, low-value, anonymous, or highly regulated transactions are weaker candidates.</p>
+        </article>
+      </section>
+
+      <footer class="sources">
+        <strong>Sources:</strong>
+        <sup>1</sup> U.S. Bureau of Labor Statistics, <a href="https://www.bls.gov/news.release/conemp.nr0.htm">Contingent and Alternative Employment Arrangements, July 2023</a>.
+        <sup>2</sup> Federal Reserve Banks, <a href="https://www.fedsmallbusiness.org/-/media/project/clevelandfedtenant/fsbsite/reports/2025/2025-report-on-employer-firms.pdf">2025 Report on Employer Firms</a>.
+        <sup>3</sup> Federal Trade Commission, <a href="https://www.ftc.gov/news-events/news/press-releases/2026/06/ftc-data-show-people-reported-losing-3-point-5-billion-imposter-scams-2025">2025 fraud-loss data</a>.
+        <sup>4</sup> U.S. Census Bureau, <a href="https://www.census.gov/construction/c30/pdf/totsa.pdf">Value of Construction Put in Place, May 2026</a>.
+        Figures are contextual indicators, use different populations and periods, and should not be added together.
+      </footer>
+    </div>
+  </body>
+</html>

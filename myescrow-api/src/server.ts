@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { env } from "./config/env";
 import { authPlugin } from "./plugins/auth";
@@ -17,6 +18,7 @@ export async function buildServer() {
   });
 
   await fastify.register(cors, { origin: true });
+  await fastify.register(multipart);
   await fastify.register(prismaPlugin);
   await fastify.register(authPlugin);
 

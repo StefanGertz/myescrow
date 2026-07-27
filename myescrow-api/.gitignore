@@ -8,3 +8,4 @@ tmp/
 src/generated/
 
 /src/generated/prisma
+data/milestone-proofs/

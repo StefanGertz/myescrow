@@ -3,6 +3,8 @@ import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import os from "node:os";
 import { PrismaClient } from "@prisma/client";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
@@ -22,10 +24,12 @@ let phaseFourDisputeReference: string;
 let phaseFourCancellationReference: string;
 let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
+let proofStorageDir: string;
 const sentEmails: Array<{ from?: string; to?: string; subject?: string; html?: string; text?: string }> = [];
 
 beforeAll(async () => {
   schemaName = `vitest_${randomUUID().replaceAll("-", "")}`;
+  proofStorageDir = path.join(os.tmpdir(), `myescrow-proofs-${schemaName}`);
   const databaseUrl = new URL(
     process.env.DATABASE_URL ?? "postgresql://myescrow:myescrow@localhost:5432/myescrow",
   );
@@ -36,6 +40,7 @@ beforeAll(async () => {
   process.env.PORT = "0";
   process.env.NODE_ENV = "test";
   process.env.RESEND_API_KEY = "test-resend-key";
+  process.env.MILESTONE_PROOF_STORAGE_DIR = proofStorageDir;
   vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
     sentEmails.push(JSON.parse(String(init?.body ?? "{}")));
     return new Response(JSON.stringify({ id: `email-${sentEmails.length}` }), {
@@ -65,7 +70,11 @@ afterAll(async () => {
     }
   }
   vi.unstubAllGlobals();
+  if (proofStorageDir) {
+    await rm(proofStorageDir, { recursive: true, force: true });
+  }
   delete process.env.RESEND_API_KEY;
+  delete process.env.MILESTONE_PROOF_STORAGE_DIR;
 });
 
 describe("MyEscrow API", () => {
@@ -1089,25 +1098,41 @@ describe("MyEscrow API", () => {
     });
     expect(outOfOrderSubmission.statusCode).toBe(409);
 
+    const proofContents = Buffer.from("%PDF-1.4 milestone receipt");
+    const buildSubmissionRequest = () => {
+      const form = new FormData();
+      form.append("note", "The first milestone is complete and ready for review.");
+      form.append("proofs", new Blob([proofContents], { type: "application/pdf" }), "proof.pdf");
+      return new Request("http://localhost/upload", { method: "POST", body: form });
+    };
+    const submissionRequest = buildSubmissionRequest();
+    const idempotencyKey = `submit-${firstMilestone.id}-1`;
     const submission = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/submit`,
       headers: {
         Authorization: `Bearer ${counterpartyToken}`,
-        "Idempotency-Key": `submit-${firstMilestone.id}-1`,
+        "Idempotency-Key": idempotencyKey,
+        "Content-Type": submissionRequest.headers.get("Content-Type") ?? "",
       },
-      payload: {
-        note: "The first milestone is complete and ready for review.",
-        evidence: [{
-          objectKey: `escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/proof.pdf`,
-          fileName: "proof.pdf",
-          contentType: "application/pdf",
-          sizeBytes: 1_024,
-          sha256: "a".repeat(64),
-        }],
-      },
+      payload: Buffer.from(await submissionRequest.arrayBuffer()),
     });
     expect(submission.statusCode).toBe(200);
+    expect(submission.json().replayed).toBe(false);
+
+    const replayRequest = buildSubmissionRequest();
+    const replay = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": idempotencyKey,
+        "Content-Type": replayRequest.headers.get("Content-Type") ?? "",
+      },
+      payload: Buffer.from(await replayRequest.arrayBuffer()),
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().replayed).toBe(true);
 
     const submittedView = (await server.inject({
       method: "GET",
@@ -1123,6 +1148,22 @@ describe("MyEscrow API", () => {
         evidence: [expect.objectContaining({ fileName: "proof.pdf" })],
       })],
     }));
+
+    const storedSubmission = submittedView.milestones[0].submissions[0];
+    const storedEvidence = storedSubmission.evidence[0];
+    const downloadUrl = `/api/dashboard/escrows/${createdEscrowReference}/milestones/${firstMilestone.id}/submissions/${storedSubmission.id}/evidence/${storedEvidence.id}`;
+    const unauthorizedDownload = await server.inject({ method: "GET", url: downloadUrl });
+    expect(unauthorizedDownload.statusCode).toBe(401);
+
+    const buyerDownload = await server.inject({
+      method: "GET",
+      url: downloadUrl,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(buyerDownload.statusCode).toBe(200);
+    expect(buyerDownload.rawPayload).toEqual(proofContents);
+    expect(buyerDownload.headers["content-disposition"]).toContain("proof.pdf");
+    expect(buyerDownload.headers["x-content-type-options"]).toBe("nosniff");
   });
 
   it("releases a milestone only once when duplicate requests arrive together", async () => {

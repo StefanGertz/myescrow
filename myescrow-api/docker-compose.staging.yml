@@ -38,6 +38,9 @@ services:
     environment:
       <<: *api-environment
       PORT: ${PORT:-4000}
+      MILESTONE_PROOF_STORAGE_DIR: /app/data/milestone-proofs
+    volumes:
+      - milestone-proof-data:/app/data/milestone-proofs
     healthcheck:
       test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:4000/',x=>{x.resume();process.exit(x.statusCode===200?0:1)});r.on('error',()=>process.exit(1))"]
       interval: 15s
@@ -55,3 +58,4 @@ services:
       OPERATIONS_INTERVAL_MS: ${OPERATIONS_INTERVAL_MS:-60000}
 volumes:
   pgdata:
+  milestone-proof-data:

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { buildNotificationId } from "../utils/id";
 import { AppError } from "../utils/errors";
-import { executeIdempotentCommand } from "./idempotencyService";
+import { executeIdempotentCommandWithMetadata } from "./idempotencyService";
 import { getNextSequenceValue } from "./sequenceService";
 
 const REVIEW_DAYS = 7;
@@ -65,16 +65,26 @@ export async function submitMilestoneWork(
   const note = data.note?.trim() || null;
   const evidence = data.evidence ?? [];
   if (!note && evidence.length === 0) {
-    throw new AppError("Add a submission note or at least one evidence reference.", 400);
+    throw new AppError("Add a submission note or at least one proof file.", 400);
   }
 
-  return executeIdempotentCommand(
+  const idempotencyEvidence = evidence.map((item) => (
+    item.objectKey.startsWith("milestone-proofs/")
+      ? {
+          fileName: item.fileName,
+          contentType: item.contentType,
+          sizeBytes: item.sizeBytes,
+          sha256: item.sha256,
+        }
+      : item
+  ));
+  const result = await executeIdempotentCommandWithMetadata(
     prisma,
     {
       userId,
       key: idempotencyKey,
       command: "submit_milestone",
-      payload: { reference, milestoneId, note, evidence },
+      payload: { reference, milestoneId, note, evidence: idempotencyEvidence },
     },
     async (tx) => {
       const escrow = await tx.escrow.findFirst({
@@ -179,6 +189,7 @@ export async function submitMilestoneWork(
       };
     },
   );
+  return { ...result.value, replayed: result.replayed };
 }
 
 export async function processMilestoneReviewDeadlines(

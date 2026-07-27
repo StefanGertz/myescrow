@@ -1,247 +1,623 @@
-# MyEscrow Handoff
+# MyEscrow developer handoff
 
-## What this repo is
+Last code review: 2026-07-26
 
-This workspace contains the MyEscrow project split into:
+Audience: incoming lead/full-stack developer
 
-- `myescrow-api` - Fastify + Prisma backend on PostgreSQL
-- `myescrow-web` - Next.js frontend, included as a git submodule
-- `index.html` - standalone artifact at repo root
+Status: functional staging MVP; **not ready to hold or move real customer money**
 
-## Current git and deployment state
+## Read this first
 
-As of 2026-07-22:
+MyEscrow is a milestone-based escrow application for a buyer and seller. It has a working Next.js frontend, Fastify API, PostgreSQL/Prisma data model, retryable background worker, internal financial ledger, operational console, and staging deployment.
 
-- Root repo branch: `main`
-- `myescrow-web` branch: `master`
-- Latest runtime-affecting API source and deployed image: `2280fb8` (`Add operator escrow detail access`)
-- Deployed frontend commit: `6cb6777` (`Add operator escrow detail navigation`)
-- The root repo records the current frontend submodule commit.
-- `myescrow-api/.env.staging` is a local-only, ignored secret file created during deployment diagnosis. Never commit it. The authoritative staging environment file is on the live Oracle instance.
-- Email verification uses Resend with a verified sender domain; deployed environments should set `EMAIL_FROM`, `EMAIL_REPLY_TO`, and `RESEND_API_KEY` explicitly.
-- The signup and verification screens warn users that delivery can take a few minutes and suggest checking spam or junk folders.
+The word “escrow” currently describes an application-level ledger and simulated wallet. There is no payment processor, bank/custody integration, KYC/AML program, regulated funds flow, or production evidence-storage system. Treat all balances and top-ups as test data until those systems and the associated legal/compliance controls exist.
 
-Both production builds and test suites passed after the operations changes:
+The implementation has strong safety ideas for an MVP—immutable agreement versions, idempotent money commands, an append-only escrow ledger, reconciliation, conditional state transitions, audit events, and recovery jobs—but it still needs a deliberate security, architecture, product-policy, and production-readiness pass.
 
-- API: 36 tests
-- Frontend: 31 tests
+## Snapshot at handoff
 
-CI note: Backend CI for source head `e3855c9` failed during GitHub Actions `Initialize containers`, before project code ran. The preceding code commit `2280fb8` passed the full Backend CI workflow, published the current GHCR image, and is running on staging. Since `e3855c9` only updates `.gitignore`, no runtime code is missing, but rerun that workflow if a green check on the source head is desired.
+| Item | Current value |
+| --- | --- |
+| Root repository | `git@github.com:StefanGertz/myescrow.git` |
+| Root branch / commit | `main` / `d5edf6a7d2c0aa080d7a838bb7bb95313c289641` |
+| Frontend repository | `git@github.com:StefanGertz/MyEscrowFrontEnd.git` |
+| Frontend branch / commit | `master` / `fac67c48bda4db77c7b454f3258fc9e6d90969bb` |
+| Frontend relationship | Git submodule at `myescrow-web/` |
+| API stack | Node 20, TypeScript, Fastify 5, Prisma 5, PostgreSQL |
+| Web stack | Next.js 16 App Router, React 19, React Query 5, Tailwind 4 |
+| Email provider | Resend |
+| Frontend hosting | Vercel |
+| API hosting | Oracle VM behind an Oracle load balancer |
+| API image registry | GitHub Container Registry |
+| Public frontend | `https://app.myescrowdemo.xyz` |
+| Public API | `https://staging.myescrowdemo.xyz` |
+| Operations UI | `https://app.myescrowdemo.xyz/operations` |
 
-## Staging deployment topology
+All three public endpoints returned HTTP 200 on 2026-07-26. That confirms reachability, not that the deployed build matches the Git commits above. The application has no public build/version endpoint, and the current deployment SHA was not independently established during this handoff.
 
-Public endpoints:
+At review time the root worktree had three unrelated, untracked one-pager artifacts:
 
-- Frontend: `https://app.myescrowdemo.xyz` on Vercel
-- API: `https://staging.myescrowdemo.xyz`
-- Operations dashboard: `https://app.myescrowdemo.xyz/operations`
+- `docs/myescrow-internal-one-pager.html`
+- `docs/myescrow-internal-one-pager.pdf`
+- `docs/myescrow-internal-one-pager.txt`
 
-The API hostname resolves to Oracle load balancer `staging-api-lb` at `129.153.60.204`. Its `api-backend` set routes port 4000 traffic to private IP `10.0.0.250`, which is the Oracle instance named `myescrow-arm`:
+They were left untouched.
 
-- Live API instance: `myescrow-arm`
-- Private IP: `10.0.0.250`
-- Public SSH IP: `40.233.124.19`
-- SSH user: `ubuntu`
-- Local key path: `~/.ssh/id_ed25519_oracle`
-- Deployment directory: `/home/ubuntu/myescrow-api`
+## What is implemented
 
-Do not assume the Oracle instance named `myescrow-staging` is the live backend. It has private IP `10.0.0.116` and public IP `192.18.149.34`, but the load balancer does not route public staging traffic to it. It was migrated and updated during diagnosis; its operations worker was then intentionally stopped so it cannot process jobs in parallel with the live worker.
+### Customer lifecycle
 
-The live Compose deployment runs three healthy services:
+1. A person signs up as an individual or a business representative.
+2. Email verification is required by default. Login returns an expiring JWT.
+3. The creator chooses whether they are the buyer or seller, defines the counterparty, amount, description, and milestones, signs, and creates an escrow.
+4. Creation atomically stores the escrow, agreement version, signature, invitation delivery, and outbox event. The email provider can fail without losing the escrow.
+5. An existing counterparty receives the escrow immediately. A new or unverified counterparty claims pending escrows after signup/verification.
+6. The counterparty can sign/approve, reject, or request agreement/milestone changes. Material changes create a new agreement version and invalidate earlier consent.
+7. Both buyer and seller must sign the current locked agreement before funding.
+8. The buyer funds from the internal MyEscrow wallet. Funding creates a ledger entry and debits the buyer’s internal wallet.
+9. The seller submits milestone work with a note and optional evidence metadata. Earlier milestones must be completed first.
+10. The buyer can approve and release the milestone, request a revision with a reason, or open a dispute.
+11. A dispute freezes only the affected held amount. Parties can add evidence metadata, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence.
+12. A funded cancellation can be mutual or unilateral. Mutual acceptance refunds eligible unreleased and undisputed funds. A unilateral request escalates without moving money.
+13. Notifications, wallet history, escrow ledger history, and audit events provide a record of activity.
 
-- `myescrow-api-db-1` (`postgres:15`)
-- `myescrow-api-api-1` (`ghcr.io/stefangertz/myescrow-api:latest`)
-- `myescrow-api-operations-worker-1` (same image, continuous recovery worker)
+### Operational lifecycle
 
-Before the July 22 operations migration, a compressed live database backup was created at:
+A separate worker:
+
+- sends/retries invitation outbox messages;
+- schedules invitation reminders and expiry;
+- flags overdue funding;
+- processes milestone review reminders and overdue escalation;
+- sends dispute evidence reminders and closes/escalates evidence windows;
+- escalates unanswered cancellation requests;
+- reconciles escrow ledger, wallet transactions, and milestone state daily;
+- records heartbeat and failure information.
+
+Support/admin APIs expose worker health, failed jobs, outbox failures, aged escrows, duplicate command replays, reconciliation exceptions, dispute deadlines, arbitration requests, audit history, and safe retry/extension commands.
+
+The web operations console implements health/alert views, failed operational-job retry, operator management, and escrow detail drill-down. Some support APIs do not yet have corresponding web controls; see the risk register.
+
+## System architecture
 
 ```text
-/home/ubuntu/myescrow-api/backups/pre-operations-bootstrap-20260723.dump
+Browser
+  |
+  | same-origin /api requests
+  v
+Next.js application on Vercel
+  |-- mock route handlers when NEXT_PUBLIC_USE_MOCKS=true
+  `-- proxy route handlers when NEXT_PUBLIC_USE_MOCKS=false
+          |
+          v
+Fastify API on Oracle infrastructure
+  |
+  | Prisma
+  v
+PostgreSQL
+  ^
+  |
+Operations worker ----> Resend email API
+  |
+  `-- outbox, deadlines, retries, reconciliation, heartbeat
 ```
 
-### Deployment flow
+Important boundaries:
 
-Pushing root `main` runs `.github/workflows/backend-ci.yml`. CI tests and builds the API, then publishes `ghcr.io/stefangertz/myescrow-api:latest`. Deploy the approved image on the actual load-balancer backend:
+- The browser normally calls Next.js route handlers under `/api/*`; those handlers either serve mocks or forward the request to Fastify. This avoids browser CORS issues.
+- Authentication is a bearer JWT. The frontend keeps it in `sessionStorage`, restores it on refresh, and clears it at expiration or logout.
+- Fastify is the domain and persistence boundary. Next.js route handlers should remain thin proxies/mocks.
+- The API and worker use the same image and database but run as separate processes.
+- PostgreSQL stores process state and financial records. Resend is used only for email delivery.
 
-```bash
-ssh -i ~/.ssh/id_ed25519_oracle ubuntu@40.233.124.19
-cd /home/ubuntu/myescrow-api
-docker compose -f docker-compose.staging.yml --env-file .env.staging pull api operations-worker
-docker compose -f docker-compose.staging.yml --env-file .env.staging up -d api operations-worker
-docker compose -f docker-compose.staging.yml --env-file .env.staging ps
-```
-
-Pushing `myescrow-web` `master` triggers Vercel. Three Vercel projects currently report deployment statuses; `app.myescrowdemo.xyz` is served by the `myescrow-demo` project. Verify the public domain rather than assuming completion when only one of the other Vercel projects succeeds.
-
-## Operations and administrator access
-
-The first verified staging administrator was bootstrapped successfully:
+## Repository map
 
 ```text
-stefan.gertz@gmail.com (user usr_1017, role admin)
+myescrow/
+├── .github/workflows/backend-ci.yml
+├── HANDOFF.md
+├── docs/
+│   ├── operations-incident-runbook.md
+│   ├── unhappy-workflow-remediation-plan.md
+│   ├── unhappy-vs-remediated-paths.md
+│   └── unhappy-workflow-diagrams.md
+├── index.html
+├── myescrow-api/
+│   ├── prisma/
+│   │   ├── schema.prisma
+│   │   ├── seed.ts
+│   │   └── migrations/
+│   ├── scripts/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── plugins/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   ├── tests/
+│   │   ├── operationsWorker.ts
+│   │   └── server.ts
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── docker-compose.staging.yml
+└── myescrow-web/                 # separate Git repository/submodule
+    ├── .github/workflows/ci.yml
+    ├── src/app/                  # pages and Next.js API handlers
+    ├── src/components/
+    ├── src/hooks/
+    ├── src/lib/
+    └── src/tests/
 ```
 
-The one-time command, run only on the live deployment host, is:
+The root `index.html` and generated documents are design/presentation artifacts, not runtime dependencies.
+
+## Backend guide
+
+### Entry points
+
+- `src/server.ts`: Fastify creation, CORS, plugins, error handling, route registration, health root.
+- `src/routes/auth.ts`: signup, login, verification, password reset/change.
+- `src/routes/dashboard.ts`: authenticated customer API.
+- `src/routes/operations.ts`: authenticated support/admin API and customer audit route.
+- `src/operationsWorker.ts`: continuous or one-shot recovery worker.
+- `src/operatorCli.ts`: first-admin bootstrap.
+
+### Service responsibilities
+
+| Service | Responsibility |
+| --- | --- |
+| `dashboardService.ts` | Dashboard read models and most escrow/agreement/milestone commands |
+| `agreementService.ts` | Immutable agreement versions, signatures, locking, funding consent |
+| `moneyIntegrityService.ts` | Internal wallet transfers, escrow ledger, balance derivation, reconciliation |
+| `idempotencyService.ts` | Request hashing, replay detection, original-response replay |
+| `invitationService.ts` | Transactional invitation outbox, delivery status, retry/backoff |
+| `milestoneReviewService.ts` | Submissions, review history, review deadlines |
+| `disputeService.ts` | Disputes, evidence metadata, settlements, arbitration request, cancellations |
+| `operationsService.ts` | Audit events, durable jobs, worker health, safe recovery commands |
+| `operatorService.ts` | First admin, support/admin role management |
+| `emailService.ts` | Resend payloads for verification, reset, invitation, and change requests |
+| `userService.ts` | User lookup, password hashing/checking, account creation |
+
+`dashboardService.ts` is 2,650 lines and `src/app/page.tsx` in the frontend is 5,042 lines. These are the two clearest refactoring targets.
+
+### Data model
+
+The authoritative schema is `myescrow-api/prisma/schema.prisma`. Main groups:
+
+- Identity: `User`, `BusinessProfile`, `EmailVerificationToken`, `PasswordResetToken`
+- Escrow: `Escrow`, `EscrowMilestone`
+- Consent: `AgreementVersion`, `AgreementSignature`
+- Delivery: `InvitationDelivery`, `OutboxEvent`
+- Work review: `MilestoneSubmission`, `MilestoneEvidenceReference`, `MilestoneReview`
+- Dispute/cancellation: `Dispute`, `DisputeEvidenceSubmission`, `DisputeResolutionAllocation`, `CancellationRequest`
+- Money: `WalletTransaction`, `EscrowLedgerEntry`, `IdempotencyRecord`
+- Operations: `OperationalJob`, `OperationalWorkerState`, `ReconciliationRun`, `AuditEvent`
+- Read-model support: `Notification`, `TimelineEvent`, `Sequence`
+
+Money is stored as integer cents and currently hard-coded to USD.
+
+Many state fields are unrestricted `String` columns rather than database/application enums. Current escrow lifecycle values include:
+
+```text
+pending_counterparty_signup
+pending_approval
+changes_requested
+creator_signature_required
+invitation_expired
+funding_pending
+funded
+cancellation_pending
+cancellation_review
+dispute_resolution_pending
+completed
+cancelled
+rejected
+```
+
+Milestone values include `not_started`, `submitted`, `revision_requested`, `released`, `disputed`, `settled`, and `cancelled`. Dispute values include `open`, `resolution_proposed`, `arbitration_requested`, `resolving`, and `resolved`.
+
+Because these are strings spread across services, search all transitions before changing a status name.
+
+### Financial model and invariants
+
+The internal wallet is a database balance on `User`; top-up and withdrawal endpoints directly change it. No external money moves.
+
+Escrow money movements are append-only `EscrowLedgerEntry` rows with linked wallet transactions:
+
+- `fund`
+- `release`
+- `refund`
+- `settlement_release`
+- `settlement_refund`
+
+The core invariant is:
+
+```text
+funded = held + released + refunded
+held >= 0
+released + refunded <= funded
+```
+
+Active disputes are subtracted from available held funds. `applyEscrowTransfer` performs the process update, internal wallet movement, ledger record, and invariant check inside a Prisma transaction. Reconciliation compares ledger totals, milestones, and linked wallet transactions.
+
+The legacy full-escrow release endpoint remains registered for compatibility but deliberately throws an error. Milestone approval is the supported release path.
+
+### Idempotency
+
+Consequential financial and workflow commands require an `Idempotency-Key` header of 8–200 characters. The record is unique by user and key. A matching replay returns the original JSON response; reuse with another command/payload returns HTTP 409.
+
+The strongest coverage is on:
+
+- escrow creation;
+- funding;
+- milestone submit/approve;
+- dispute open/evidence/proposal/arbitration/resolve;
+- funded cancellation request/accept;
+- wallet top-up/withdrawal;
+- operational retry/extension/role changes.
+
+Not every non-financial mutation uses the idempotency service. Do not assume that merely sending the header makes a route idempotent—check the called service.
+
+### API surface
+
+All dashboard and operations routes require bearer authentication except auth endpoints and `GET /`. The route files are the source of truth.
+
+Main route groups:
+
+| Group | Examples |
+| --- | --- |
+| Auth | signup, login, verify/resend email, forgot/reset/change password |
+| Dashboard reads | overview, escrows, business profile, disputes, notifications, wallet history |
+| Agreement | create/update escrow, approve/reject, sign, request/apply changes, invitation resend/extend |
+| Money | fund, milestone approve, ledger history, top-up, withdraw |
+| Work review | submit/resubmit milestone, request revision, apply milestone changes |
+| Dispute/cancellation | open dispute, evidence, proposal, arbitration, resolve, request/accept cancellation |
+| Operations | health, jobs, retry, audit, evidence, invitation recovery, operator roles |
+
+The API README route table is useful but is not exhaustive and should be generated or tested against registered routes in future.
+
+### Worker behavior
+
+Run continuously:
 
 ```bash
-docker compose -f docker-compose.staging.yml --env-file .env.staging run --rm api \
-  npm run operators:bootstrap -- verified-admin@example.com
+npm run operations:run
 ```
 
-The command requires an existing verified account and refuses to grant a second first-admin bootstrap. Additional support/admin access must be assigned through `/operations`. The final administrator cannot be demoted.
-
-The operations page now:
-
-- Restores the authenticated browser session before loading data and forwards the bearer token through the Next.js API proxy.
-- Shows worker heartbeat, reconciliation status, alerts, failed jobs, and operator role management.
-- Makes all five metric tiles keyboard- and mouse-accessible.
-- Opens record-level details for failed invitation jobs, failed recovery jobs, aged escrows, approaching dispute deadlines, and safe command replays.
-- Links aged escrow records to permissioned operator detail pages at `/operations/escrows/:reference`, backed by `GET /api/operations/escrows/:id`.
-- Limits operations APIs to authenticated `support` or `admin` users; role management remains admin-only.
-
-The worker heartbeat is healthy when its last successful cycle is less than two minutes old. Useful checks:
+Run one cycle:
 
 ```bash
-cd /home/ubuntu/myescrow-api
-docker compose -f docker-compose.staging.yml --env-file .env.staging ps
-docker compose -f docker-compose.staging.yml --env-file .env.staging logs --tail=100 operations-worker
+npm run operations:once
 ```
 
-A healthy cycle logs `operational_recovery_completed` with `failed: 0`. See `docs/operations-incident-runbook.md` for recovery and incident procedures.
+The staging Compose file runs the continuous worker every minute. It stores jobs, claims them conditionally, retries with backoff, recovers locks older than ten minutes, and updates the `primary` worker heartbeat. A healthy deployment should show a successful heartbeat within two minutes.
 
-## Repo shape
+See `docs/operations-incident-runbook.md` before manually intervening. Do not repair ledger, job, outbox, or operator state by editing PostgreSQL.
 
-`myescrow-web` is a submodule:
+## Frontend guide
 
-- path: `myescrow-web`
-- remote: `git@github.com:StefanGertz/MyEscrowFrontEnd.git`
+### Main application modes
 
-That means a normal copy of only the root repo is not enough if you expect git history and clean checkout behavior. On the Mac, clone with submodules:
+The same codebase contains three meaningful combinations:
 
-```bash
-git clone --recurse-submodules <root-repo-url>
-cd MyEscrow
-git submodule update --init --recursive
+| `NEXT_PUBLIC_USE_MOCKS` | `NEXT_PUBLIC_LIVE_DASHBOARD` | Result |
+| --- | --- | --- |
+| `true` or unset | `false` or unset | Immersive demo UI with Next.js mock API handlers |
+| `false` | `false` or unset | Immersive UI with live Fastify data |
+| `false` | `true` | Smaller `LiveDashboard` with live Fastify data |
+
+`src/app/page.tsx` is the immersive application and contains most screens and transaction workflows in one file. `src/components/LiveDashboard.tsx` is the smaller live layout.
+
+### API flow
+
+- React Query hooks live in `src/hooks/useAuthApi.ts` and `src/hooks/useDashboardData.ts`.
+- `src/lib/apiClient.ts` adds the runtime bearer token.
+- Browser requests to `/api/*` remain same-origin.
+- Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
+- Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
+
+`NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable. A production cleanup should replace it with a server-only variable and keep only genuinely public configuration under `NEXT_PUBLIC_*`.
+
+### Authentication
+
+- `AuthProvider` owns the current user/token.
+- Sessions are kept in `sessionStorage`, not durable `localStorage`.
+- The token is cleared on expiration, logout, or browser-session end.
+- Default API JWT lifetime is eight hours (`AUTH_SESSION_TTL_SECONDS`).
+- There are no refresh tokens, server-side revocation list, device/session management, or forced invalidation after password change.
+- Customer and operations login use the same underlying JWT/account system; authorization is enforced by API role checks.
+
+### Mock credentials
+
+Mock mode accepts:
+
+```text
+Email: scott@example.com
+Password: Escrow123!
 ```
 
-If you transfer by AirDrop/external drive instead of cloning, make sure the `myescrow-web/.git` submodule metadata comes across intact, or re-link it by cloning fresh.
+The Prisma seed creates verified `scott@example.com` and `nora@example.com` records from `data/store.json`, but the handoff does not document a plaintext live/seed password. Reset it through the normal reset flow or create fresh local accounts.
 
 ## Local setup
 
-### Backend
+### Clone correctly
 
-Requirements:
+The frontend is a submodule:
+
+```bash
+git clone --recurse-submodules git@github.com:StefanGertz/myescrow.git
+cd myescrow
+git submodule update --init --recursive
+```
+
+Commit frontend work in `myescrow-web` first, push it, then commit the updated submodule pointer in the root repo.
+
+### Prerequisites
 
 - Node.js 20+
 - npm 10+
-- Docker Desktop or another PostgreSQL 16 instance
+- Docker Desktop or another reachable PostgreSQL instance
+- Git/SSH access to both repositories
 
-Install and run:
+Versions used for this review:
+
+```text
+Node v20.20.2
+npm 10.8.2
+Docker 29.6.1
+```
+
+### API
 
 ```bash
 cd myescrow-api
-npm install
-docker compose up -d
+npm ci
+cp .env.example .env
+docker compose up -d db
 npm run db:migrate
 npm run db:seed
 npm run dev
 ```
 
-Backend default URL: `http://localhost:4000`
+The API defaults to `http://localhost:4000`.
 
-Suggested backend `.env` values:
+Important: `npm run db:seed` deletes and recreates application data in the configured database. Verify `DATABASE_URL` before running it. Never seed staging or production.
 
-```env
+Recommended local `.env`:
+
+```dotenv
 PORT=4000
-JWT_SECRET=dev-secret-change-me
+JWT_SECRET=replace-with-a-long-random-local-secret
+AUTH_SESSION_TTL_SECONDS=28800
 DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
 AUTH_REQUIRE_EMAIL_VERIFICATION=true
 AUTH_DEBUG_CODES=true
 EMAIL_VERIFICATION_CODE_DIGITS=6
 EMAIL_VERIFICATION_TTL_MINUTES=15
+PASSWORD_RESET_CODE_DIGITS=6
+PASSWORD_RESET_TTL_MINUTES=15
 APP_URL=http://localhost:3000
 EMAIL_FROM="MyEscrow <hello@myescrow.test>"
 EMAIL_REPLY_TO=""
 RESEND_API_KEY=
 ```
 
-### Frontend
+With no Resend key, verification/reset codes are logged locally, but escrow invitation delivery enters a visible failed/retryable state.
 
-Requirements:
-
-- Node.js 20+
-- npm 10+
-
-Install and run:
+### Frontend against mocks
 
 ```bash
 cd myescrow-web
-npm install
+npm ci
+printf 'NEXT_PUBLIC_USE_MOCKS=true\nNEXT_PUBLIC_LIVE_DASHBOARD=false\n' > .env.local
 npm run dev
 ```
 
-Frontend default URL: `http://localhost:3000`
+### Frontend against the local API
 
-Useful frontend env vars in `.env.local`:
+Create `myescrow-web/.env.local`:
 
-```env
+```dotenv
 NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 NEXT_PUBLIC_USE_MOCKS=false
-NEXT_PUBLIC_LIVE_DASHBOARD=true
+NEXT_PUBLIC_LIVE_DASHBOARD=false
 ```
 
-Notes:
+Then:
 
-- Set `NEXT_PUBLIC_USE_MOCKS=true` to work against mock handlers instead of the backend.
-- Leave `NEXT_PUBLIC_LIVE_DASHBOARD` unset or `false` to keep the immersive demo UI.
-- Optional: `NEXT_PUBLIC_API_TOKEN=<bearer token>` for authenticated staging requests.
+```bash
+cd myescrow-web
+npm run dev
+```
 
-## Common commands
+The frontend defaults to `http://localhost:3000`.
 
-Backend:
+Do not use `NEXT_PUBLIC_API_TOKEN` in a shared or deployed environment. It is a build-exposed fallback intended for temporary development.
+
+## Quality gates
+
+Verified on the exact commits in this document:
+
+| Project | Command | Result |
+| --- | --- | --- |
+| API | `npm test` | 1 file, 36 tests passed |
+| API | `npm run build` | passed |
+| API | `npm run lint` | TypeScript no-emit check passed |
+| Frontend | `npm test` | 11 files, 38 tests passed |
+| Frontend | `npm run build` | passed; 32 pages/routes generated |
+| Frontend | `npm run lint` | passed |
+
+Backend tests create an isolated PostgreSQL schema, deploy all 17 migrations, seed it, run the suite, and drop the schema. If no test/database URL is reachable, the runner can start a disposable PostgreSQL 16 container.
+
+There is no measured coverage threshold, browser end-to-end suite, payment-provider contract suite, load test, penetration test, accessibility audit, or migration rollback test.
+
+CI:
+
+- Root `.github/workflows/backend-ci.yml` runs migrations, seed, backend tests, build, a smoke test, and docs encoding check. On `main`, it publishes mutable `latest`, `v1`, and immutable commit-SHA GHCR tags.
+- Frontend `.github/workflows/ci.yml` runs lint, tests, and build on `master`/`main` and pull requests.
+- Vercel deployment is triggered from the frontend repository, while API image publication is triggered from the root repository. A root submodule update does not by itself replace the frontend deployment.
+
+## Staging and deployment
+
+Current documented topology:
+
+```text
+app.myescrowdemo.xyz
+  -> Vercel project serving myescrow-web
+
+staging.myescrowdemo.xyz
+  -> Oracle load balancer
+  -> Oracle VM
+  -> Docker Compose:
+       PostgreSQL
+       Fastify API
+       operations worker
+```
+
+The API image is `ghcr.io/stefangertz/myescrow-api`. The live host uses `myescrow-api/docker-compose.staging.yml` and a host-only `.env.staging`.
+
+The ignored `myescrow-api/.env.staging` on this workstation is incomplete and is not the staging source of truth. Do not deploy from it or copy it over the host configuration.
+
+The previous handoff contained host IPs, SSH key paths, and an administrator email in this public repository. Those details have intentionally been removed from this version, but remain in Git history. Review the history with secret scanning, assume any actual secret ever committed is exposed, and rotate it. Transfer infrastructure access through a password manager or another private operations record.
+
+### Safe API deployment shape
+
+1. Confirm backend CI passes for the intended commit.
+2. Back up PostgreSQL.
+3. Pull the immutable commit-SHA image, not only `latest`.
+4. Run `npm run db:migrate:deploy` against the target database as an explicit release step.
+5. Restart/update both `api` and `operations-worker` from the same image.
+6. Verify API health, worker heartbeat, reconciliation, and logs.
+7. Run a staging smoke test.
+8. Record the deployed API SHA and frontend SHA somewhere queryable.
+
+The current helper script and Compose flow do **not** provide a complete migration/rollback release system. `scripts/deploy-staging.sh` writes `.env.staging` and brings services up, but does not run Prisma migrations. Do not assume pulling the newest image updates the database.
+
+### Access that must be transferred privately
+
+- Both GitHub repositories and branch protection/settings
+- GHCR package and `GHCR_PAT` secret
+- Vercel team/project, environment variables, and domain mapping
+- Oracle tenancy, load balancer, VM, networking, SSH access, and backups
+- DNS registrar/zone
+- Resend account, verified sender domain, API key, and delivery logs
+- Staging PostgreSQL credentials and backup/restore procedure
+- Existing support/admin account recovery
+- Any monitoring/alert destination
+
+Do not paste secret values into issues, chat logs, commits, or this document.
+
+## Risk register and recommended order of work
+
+### P0 — before real users or real funds
+
+1. **Define the regulated product and funds flow.** Engage qualified legal/compliance counsel and determine custody, licensing, KYC/KYB, AML/sanctions, consumer protection, privacy, records, dispute authority, and jurisdiction requirements.
+2. **Integrate real payment/custody rails.** Replace database top-up/withdrawal with a provider whose webhooks, settlement states, reversals, chargebacks, and idempotency are authoritative. Never treat `walletBalanceCents` as proof of real funds.
+3. **Perform a security review.** Add threat modeling, dependency/vulnerability scanning, SAST/secret scanning, penetration testing, security headers, CSRF strategy, strict CORS origins, authorization matrix tests, and abuse controls.
+4. **Remove sensitive codes from logs.** `emailService.ts` currently logs verification and password-reset codes unconditionally, including when an email provider is configured. Production logs must never contain these codes.
+5. **Fail closed on secrets.** The API currently falls back to `dev-secret-change-me` if `JWT_SECRET` is absent, even in production. Production startup should reject missing/weak secrets.
+6. **Add rate limits and account protections.** Login, signup, verification, resend, forgot/reset password, invitation, and financial endpoints have no rate limiting, lockout, bot protection, or comprehensive anti-enumeration controls.
+7. **Build evidence storage.** The database accepts object-key/hash metadata, but there is no object upload/download, authorization, malware scanning, encryption/key policy, retention, or deletion workflow.
+8. **Set production policies.** Arbitration is only a user request and operations alert; there is no implemented adjudication/payout command for staff. Define who decides disputes, evidence rules, fees, appeals, and legal notices before enabling it.
+9. **Build controlled releases and recovery.** Automate migrations, immutable deployment selection, version reporting, backups, restore drills, rollback/forward-fix procedure, worker singleton/locking policy, and monitoring.
+
+### P1 — correctness and maintainability
+
+1. **Fix the slim live dashboard create flow.** `LiveDashboard` submits escrow creation without the PNG signature required by the API schema. The TypeScript hook incorrectly marks `signatureDataUrl` optional, so builds pass while the live request can fail with HTTP 400.
+2. **Preserve idempotency keys across retries.** The web hooks generate a new UUID when each mutation function runs. A user retry after an uncertain network outcome can therefore use a new key and create a second business command. Generate a key once per user intent and retain it until a definitive result.
+3. **Complete operations UI coverage.** The API supports outbox retry, invitation extension, dispute evidence, and audit views, but the frontend proxy/UI only exposes part of that surface. Either implement the missing controls/routes or narrow the documented support promise.
+4. **Split the god files.** Move escrow commands/read models out of `dashboardService.ts`; split `src/app/page.tsx` into feature modules/routes. Keep state transitions in explicit domain services.
+5. **Create shared API contracts.** Frontend types currently reuse mock types and duplicate backend shapes. Generate or share schemas/types and test proxy route parity.
+6. **Use typed states.** Replace unrestricted status strings with TypeScript/Prisma enums or validated transition types. Centralize the state machine and available-action calculation.
+7. **Improve auth lifecycle.** Add token rotation/refresh or secure session cookies, revocation, password-change invalidation, operator MFA, recovery policy, and auditable session management.
+8. **Tighten the API boundary.** Replace `origin: true` CORS, cap JSON/body sizes globally, validate query/path/body consistently, add security headers, and avoid returning raw upstream headers blindly through the proxy.
+9. **Add true end-to-end tests.** Cover both users through create → invite → sign → fund → submit → approve/dispute/cancel in a browser, including timeouts, duplicate clicks, worker cycles, and staging smoke tests.
+
+### P2 — product and documentation
+
+1. Decide whether the immersive dashboard or `LiveDashboard` is the product. Maintaining both creates inconsistent features and tests.
+2. Replace poll-heavy dashboard refresh with an intentional freshness strategy.
+3. Add accessibility, responsive, cross-browser, and PDF/signature export testing.
+4. Add observability: structured logs without secrets, metrics, traces, error tracking, uptime checks, alert routing, and data-retention policy.
+5. Remove or clearly label stale artifacts. `docs/unhappy-workflow-diagrams.md` describes the old unsafe implementation, while the remediation documents describe later work.
+6. Generate API documentation from route schemas. The current README omits some implemented endpoints.
+7. Remove stale configuration such as unused `DATA_STORE_PATH` and align PostgreSQL versions (local/test use 16; staging Compose currently declares 15).
+
+## Product/policy decisions still required
+
+The code has made temporary assumptions that need explicit ownership:
+
+- Supported countries, currencies, transaction sizes, prohibited activities, and user types
+- Whether MyEscrow is a custodian, marketplace, agent, or UI over a licensed provider
+- Invitation, funding, review, evidence, cancellation, and dispute deadlines
+- Buyer non-response policy (current behavior is hold and escalate, never auto-release)
+- When milestones may proceed out of order
+- Who can cancel at each lifecycle state
+- Who adjudicates arbitration and how allocations are authorized
+- Refund, reversal, chargeback, fee, tax, and FX behavior
+- Evidence/file retention and privacy rights
+- Notification channels and legally effective notice
+- Support service levels and escalation ownership
+
+Do not encode more policy in scattered conditionals until these decisions are documented as acceptance criteria.
+
+## Suggested first week for the incoming developer
+
+1. Clone both repositories and reproduce all six quality gates.
+2. Run the complete two-party lifecycle locally in live-data mode, not only mocks.
+3. Read, in order:
+   - this handoff;
+   - `prisma/schema.prisma`;
+   - `src/routes/*.ts`;
+   - `moneyIntegrityService.ts`;
+   - `agreementService.ts`;
+   - `disputeService.ts`;
+   - `operationsService.ts`;
+   - `docs/operations-incident-runbook.md`.
+4. Obtain private infrastructure access and inventory every secret, owner, backup, alert, and deployed SHA.
+5. Fix code/reset-code logging and production secret validation.
+6. Fix the `LiveDashboard` signature mismatch or remove that mode.
+7. Write an architecture decision record for real payment rails and the regulated funds flow.
+8. Turn the P0/P1 items above into an owned backlog with acceptance tests.
+9. Establish protected branches/reviews and require both backend and frontend CI before deployment.
+
+## Useful commands
+
+API:
 
 ```bash
 cd myescrow-api
+npm run dev
 npm test
+npm run lint
 npm run build
 npm run smoke
+npm run db:migrate
+npm run db:migrate:deploy
+npm run db:seed
+npm run reconcile:ledger
+npm run operations:dev
+npm run operations:run
 ```
 
 Frontend:
 
 ```bash
 cd myescrow-web
+npm run dev
 npm test
-npm run build
 npm run lint
+npm run build
 ```
 
-## Transfer checklist for the Mac
+Repository/submodule:
 
-1. Push any commits in the root repo and in `myescrow-web` if you want the cleanest migration.
-2. Confirm the root repo records the intended `myescrow-web` submodule commit.
-3. Copy local development env files if they exist, but do not treat the local `.env.staging` as authoritative:
-   - `myescrow-api/.env`
-   - `myescrow-web/.env.local`
-4. Move your SSH key and git config if you use SSH remotes:
-   - `~/.ssh`
-   - `~/.gitconfig`
-5. Install Node 20+, npm 10+, Docker Desktop, and Git on the Mac.
-6. Clone the root repo with `--recurse-submodules`, or copy the workspace and then run `git submodule update --init --recursive`.
-
-## Recommended restart prompt
-
-Use this prompt in the first chat on the Mac:
-
-```text
-This is the MyEscrow workspace. The root repo contains `myescrow-api` and a `myescrow-web` git submodule. Please read `HANDOFF.md`, inspect current git status in both repos, then help me continue from the current local state without overwriting uncommitted work.
+```bash
+git status --short
+git submodule status
+git -C myescrow-web status --short
+git -C myescrow-web log -1 --oneline
 ```
 
-## Known context worth preserving
+## Final handoff principle
 
-- The backend is already migrated from JSON fixtures to PostgreSQL + Prisma, but seed/demo flows are still important.
-- The frontend supports both mock and live API modes.
-- Email verification and password reset flows exist in both API and web layers.
-- The public staging load balancer targets `myescrow-arm`, not the similarly named `myescrow-staging` instance.
-- The live operations worker must be unique; keep the non-routed instance's worker stopped unless the load-balancer topology is deliberately changed.
-- `/operations` is the supported path for operator role changes and operational drill-downs. Do not edit roles or recovery records directly in PostgreSQL.
+Preserve the existing safety invariants, but do not confuse them with production escrow readiness. The next phase is less about adding screens and more about making the domain explicit, integrating regulated financial infrastructure, hardening security and operations, and proving the complete system under failure and concurrency.

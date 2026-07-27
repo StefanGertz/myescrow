@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyEscrow Internal One-Pager</title>
+    <style>
+      :root {
+        --brand: #0f4c81;
+        --brand-dark: #0a2d49;
+        --ink: #0f172a;
+        --muted: #5b6b7a;
+        --surface: #f6f9fc;
+        --border: #dfe7ef;
+        --accent: #2f8fdb;
+        --accent-soft: #e7f3ff;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+        line-height: 1.5;
+        color: var(--ink);
+        background: linear-gradient(180deg, #f7fafc 0%, #edf3f7 100%);
+      }
+
+      .page {
+        max-width: 1100px;
+        margin: 24px auto;
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: 0 20px 50px rgba(15, 76, 129, 0.10);
+        padding: 34px 38px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 24px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 22px;
+        margin-bottom: 22px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--brand);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 10px 0 10px;
+        font-size: 30px;
+        line-height: 1.15;
+        color: var(--brand-dark);
+        letter-spacing: -0.02em;
+      }
+
+      .lead {
+        margin: 0;
+        font-size: 16px;
+        color: var(--muted);
+        max-width: 720px;
+      }
+
+      .panel {
+        background: linear-gradient(145deg, #f8fbff, #eef5fb);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 18px;
+      }
+
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        font-weight: 700;
+        color: var(--brand);
+        text-transform: uppercase;
+      }
+
+      .panel h2 {
+        font-size: 18px;
+        margin: 6px 0 8px;
+        color: var(--brand-dark);
+      }
+
+      .panel p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 16px;
+        background: var(--surface);
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        color: var(--brand-dark);
+      }
+
+      .card p, .card ul {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .card ul { padding-left: 18px; }
+      .card li + li { margin-top: 6px; }
+
+      .kicker {
+        display: block;
+        margin-bottom: 7px;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        font-weight: 800;
+        color: var(--accent);
+      }
+
+      @media print {
+        body { background: #ffffff; }
+        .page {
+          box-shadow: none;
+          border: none;
+          margin: 0;
+          max-width: none;
+          border-radius: 0;
+          padding: 16mm 18mm;
+        }
+        .card {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <div class="badge">Internal one-pager</div>
+          <h1>MyEscrow is building trusted escrow infrastructure for digital transactions that need confidence, clarity, and fast resolution.</h1>
+          <p class="lead">The product brings agreement creation, milestone tracking, funding controls, and dispute management into one workflow so buyers and sellers can transact with less friction and more assurance.</p>
+        </div>
+        <div class="panel">
+          <div class="eyebrow">At a glance</div>
+          <h2>From trust gap to reliable execution</h2>
+          <p>MyEscrow helps teams move from ad hoc payment handoffs to a structured, auditable settlement experience.</p>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <div class="kicker">Summary</div>
+          <h3>What MyEscrow is</h3>
+          <p>MyEscrow is a workflow-first escrow platform that safeguards digital transactions with clear approvals, milestone-based releases, and transparent dispute handling. It combines a modern web experience with a robust API and operational tooling for support teams.</p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Problem</div>
+          <h3>Why the market still struggles</h3>
+          <p>Buyers and sellers often lack confidence in remote transactions because payment timing is unclear, commitments are hard to verify, and resolution paths are fragmented. That creates hesitation, dispute volume, and avoidable support overhead.</p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Product Scope</div>
+          <h3>What is in scope today</h3>
+          <ul>
+            <li>Escrow proposal creation, funding, and milestone-based release flows</li>
+            <li>Agreement signing, invitations, and approval or revision states</li>
+            <li>Wallet management, cancellation requests, and dispute workflows</li>
+            <li>Operations tools for health monitoring, recovery, and admin oversight</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Target Users</div>
+          <h3>Who benefits most</h3>
+          <ul>
+            <li>Buyers and sellers in freelance, services, and marketplace transactions</li>
+            <li>Teams that need stronger trust for contract-based work and milestone delivery</li>
+            <li>Support and operations teams managing exceptions and recovery</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Why This Matters</div>
+          <h3>Business impact</h3>
+          <p>Trust is a product growth lever. A clearer escrow experience can reduce churn, improve conversion, and lower the cost of disputes by giving users a credible path to resolution when expectations diverge.</p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Market Position</div>
+          <h3>How we stand out</h3>
+          <p>MyEscrow is positioned as a workflow-oriented escrow layer for digital commerce rather than a generic wallet or payment processor. It is designed to fit alongside marketplaces and service platforms that need stronger settlement guarantees without forcing a full payment-stack rewrite.</p>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Near-Term Priorities</div>
+          <h3>What matters next</h3>
+          <ul>
+            <li>Polish the core escrow experience for faster onboarding and clearer milestone decisions</li>
+            <li>Strengthen operational visibility, recovery automation, and auditability</li>
+            <li>Expand integrations and communication flows that make trust visible to both parties</li>
+          </ul>
+        </article>
+      </section>
+    </div>
+  </body>
+</html>
