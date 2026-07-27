@@ -78,6 +78,16 @@ afterAll(async () => {
 });
 
 describe("MyEscrow API", () => {
+  it("reports its build and deployment capabilities", async () => {
+    const response = await server.inject({ method: "GET", url: "/version" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: "ok",
+      buildSha: process.env.APP_BUILD_SHA ?? "development",
+      capabilities: ["milestone_funding"],
+    });
+  });
+
   it("logs in with the seeded account", async () => {
     const response = await server.inject({
       method: "POST",

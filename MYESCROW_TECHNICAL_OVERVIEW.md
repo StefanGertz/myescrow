@@ -443,6 +443,8 @@ There is no measured coverage threshold, browser end-to-end suite, payment-provi
 CI:
 
 - Root `.github/workflows/backend-ci.yml` runs migrations, seed, backend tests, build, a smoke test, and docs encoding check. On `main`, it publishes mutable `latest`, `v1`, and immutable commit-SHA GHCR tags.
+- The live Oracle host checks the approved `latest` digest with `myescrow-autodeploy.timer`. A changed digest invokes `scripts/deploy-release.sh`, which pins the immutable digest, backs up PostgreSQL, applies migrations, recreates the API and sole live worker, verifies health/version/route registration, and restores the previous containers if verification fails.
+- Backend CI waits for `/version` to report the pushed commit SHA and then runs a non-mutating public deployment-contract smoke test. A release is not green merely because the image was published.
 - Frontend `.github/workflows/ci.yml` runs lint, tests, and build on `master`/`main` and pull requests.
 - Vercel deployment is triggered from the frontend repository, while API image publication is triggered from the root repository. A root submodule update does not by itself replace the frontend deployment.
 
@@ -463,21 +465,23 @@ staging.myescrowdemo.xyz
        operations worker
 ```
 
-The API image is `ghcr.io/stefangertz/myescrow-api`. The live host uses `myescrow-api/docker-compose.staging.yml` and a host-only `.env.staging`.
+The API image is `ghcr.io/stefangertz/myescrow-api`. The live host uses `myescrow-api/docker-compose.staging.yml`, a host-only `.env.staging`, and the `myescrow-autodeploy.timer` systemd timer.
 
 The ignored `myescrow-api/.env.staging` on this workstation is incomplete and is not the staging source of truth.
 
 ### Deployment mechanics
 
-The deployment flow represented by the repository is:
+The deployment flow is:
 
 1. Backend CI tests and builds the API.
 2. A successful `main` build publishes GHCR tags for `latest`, `v1`, and the commit SHA.
-3. Prisma migrations are applied separately with `npm run db:migrate:deploy`.
-4. The API and operations worker are updated from the same image.
-5. Health, worker heartbeat, reconciliation state, and the smoke flow are checked after deployment.
+3. The Oracle timer detects the new registry digest and calls `scripts/deploy-release.sh`.
+4. The release script creates a compressed database backup and runs `prisma migrate deploy` from the target image.
+5. The API and operations worker are recreated from the same immutable digest.
+6. The script verifies container health, image identity, `/version`, milestone-funding route registration, and the worker process. Failed verification restores the previous containers; database backups are retained and migrations are never automatically reversed.
+7. Backend CI waits for the public API to report the expected SHA and runs `npm run smoke:deployment`.
 
-The current helper script and Compose flow do not form a complete migration/rollback release system. `scripts/deploy-staging.sh` writes `.env.staging` and starts the services, but does not run Prisma migrations. The API also has no version endpoint that identifies the deployed source SHA.
+`GET /version` returns the deployed source SHA and advertised API capabilities. The immersive frontend uses the funding capability present in current escrow responses to keep milestone funding disabled during a backend/frontend rollout gap.
 
 ## Known limitations and incomplete areas
 

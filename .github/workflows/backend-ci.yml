@@ -7,6 +7,10 @@ on:
     branches: ['main']
   workflow_dispatch:
 
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -28,6 +32,7 @@ jobs:
       DATABASE_URL: postgresql://myescrow:myescrow@localhost:5432/myescrow
       PORT: 4000
       JWT_SECRET: ci-secret
+      APP_BUILD_SHA: ${{ github.sha }}
 
     steps:
       - name: Checkout
@@ -86,6 +91,13 @@ jobs:
         run: SMOKE_API_BASE=http://127.0.0.1:4000 npm run smoke
         working-directory: myescrow-api
 
+      - name: Deployment contract smoke test
+        run: >-
+          SMOKE_API_BASE=http://127.0.0.1:4000
+          SMOKE_EXPECTED_SHA=${{ github.sha }}
+          npm run smoke:deployment
+        working-directory: myescrow-api
+
       - name: README encoding check
         run: npm run lint:docs
         working-directory: myescrow-api
@@ -111,10 +123,35 @@ jobs:
         with:
           context: myescrow-api
           push: true
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:v1
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Wait for staging deployment
+        if: github.ref == 'refs/heads/main'
+        env:
+          STAGING_API_BASE: https://staging.myescrowdemo.xyz
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          for attempt in {1..60}; do
+            deployed_sha=$(curl -fsS "$STAGING_API_BASE/version" \
+              | node -e 'let b="";process.stdin.on("data",c=>b+=c).on("end",()=>process.stdout.write(JSON.parse(b).buildSha||""))' \
+              || true)
+            if [ "$deployed_sha" = "$EXPECTED_SHA" ]; then
+              SMOKE_API_BASE="$STAGING_API_BASE" \
+                SMOKE_EXPECTED_SHA="$EXPECTED_SHA" \
+                npm run smoke:deployment
+              exit 0
+            fi
+            echo "Waiting for staging deployment (attempt $attempt/60; currently ${deployed_sha:-unknown})."
+            sleep 10
+          done
+          echo "Staging did not deploy $EXPECTED_SHA within 10 minutes." >&2
+          exit 1
+        working-directory: myescrow-api
 
       - name: Stop API
         if: always()

@@ -9,3 +9,6 @@ src/generated/
 
 /src/generated/prisma
 data/milestone-proofs/
+.deploy.lock
+.deployed-image
+backups/

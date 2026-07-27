@@ -33,8 +33,6 @@ fi
 
 echo "Using image: $IMAGE"
 
-docker pull "$IMAGE"
-
 cat <<ENV > .env.staging
 PORT=$PORT_VALUE
 JWT_SECRET=$JWT_SECRET
@@ -50,6 +48,6 @@ RESEND_API_KEY="$RESEND_API_KEY_VALUE"
 OPERATIONS_INTERVAL_MS=$OPERATIONS_INTERVAL_MS_VALUE
 ENV
 
-docker compose -f docker-compose.staging.yml --env-file .env.staging up -d
+"$(dirname "$0")/deploy-release.sh" "$IMAGE"
 
 echo "Deployment complete. Logs: docker compose -f docker-compose.staging.yml logs -f"

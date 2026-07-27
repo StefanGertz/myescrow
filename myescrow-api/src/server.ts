@@ -42,9 +42,14 @@ export async function buildServer() {
   await fastify.register(dashboardRoutes);
   await fastify.register(operationsRoutes);
 
-  fastify.get("/", async () => {
-    return { status: "ok" };
-  });
+  const version = {
+    status: "ok" as const,
+    buildSha: process.env.APP_BUILD_SHA ?? "development",
+    capabilities: ["milestone_funding"] as const,
+  };
+
+  fastify.get("/", async () => version);
+  fastify.get("/version", async () => version);
 
   return fastify;
 }

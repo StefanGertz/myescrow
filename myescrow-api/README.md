@@ -168,9 +168,42 @@ The image contains the compiled API, operations worker, and first-admin bootstra
 
 Point the frontend's `NEXT_PUBLIC_API_BASE_URL` at the deployed URL once the server is reachable.
 
+### Automated Oracle deployment
+
+The live Oracle host runs `myescrow-autodeploy.timer`. After backend CI publishes a changed
+`ghcr.io/stefangertz/myescrow-api:latest` digest, the timer invokes
+`scripts/auto-deploy-staging.sh`, which delegates to `scripts/deploy-release.sh`.
+
+Each release:
+
+1. resolves and pins the immutable registry digest;
+2. creates a compressed PostgreSQL backup under `backups/`;
+3. runs `prisma migrate deploy` from the target image;
+4. recreates the API and the single active operations worker;
+5. verifies health, image identity, `GET /version`, route registration, and worker state;
+6. restores the previous API/worker containers when verification fails.
+
+Migrations are not automatically reversed. The backup path is printed and stored in
+`.deployed-image`. Install or repair the timer on the documented live host with:
+
+```bash
+cd /home/ubuntu/myescrow-api
+./scripts/install-staging-autodeploy.sh
+```
+
+For an explicit release:
+
+```bash
+./scripts/deploy-release.sh \
+  ghcr.io/stefangertz/myescrow-api@sha256:<approved-digest>
+```
+
+`docker-compose.staging.yml` accepts `API_IMAGE` so both runtime services always use the same
+immutable image. `GET /version` identifies the deployed Git SHA and advertised capabilities.
+
 ## Continuous integration
 
-GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) installs dependencies, executes `npm test`, builds the backend, boots it locally, runs `npm run smoke` against `http://localhost:4000`, and finishes with `npm run lint:docs`. When the branch is `main`, the workflow also builds and pushes a Docker image to `ghcr.io/<owner>/myescrow-api`. Treat that pipeline as the gate before tagging/pushing new Docker images.
+GitHub Actions workflow `.github/workflows/backend-ci.yml` (runs on push/PR) installs dependencies, executes `npm test`, builds the backend, boots it locally, runs the functional and deployment-contract smoke tests, and finishes with `npm run lint:docs`. When the branch is `main`, the workflow builds and pushes a Docker image to `ghcr.io/<owner>/myescrow-api`, waits for the Oracle deployment timer to report the same commit from `/version`, and verifies the protected milestone-funding route through the public API.
 ## Notes / next steps
 
 - Update `docker-compose.yml` credentials or `DATABASE_URL` if you already have managed Postgres.

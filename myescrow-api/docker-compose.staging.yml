@@ -28,7 +28,7 @@ services:
       timeout: 5s
       retries: 5
   api:
-    image: ghcr.io/stefangertz/myescrow-api:latest
+    image: ${API_IMAGE:-ghcr.io/stefangertz/myescrow-api:latest}
     restart: unless-stopped
     depends_on:
       db:
@@ -47,7 +47,7 @@ services:
       timeout: 5s
       retries: 5
   operations-worker:
-    image: ghcr.io/stefangertz/myescrow-api:latest
+    image: ${API_IMAGE:-ghcr.io/stefangertz/myescrow-api:latest}
     command: ["node", "dist/operationsWorker.js"]
     restart: unless-stopped
     depends_on:

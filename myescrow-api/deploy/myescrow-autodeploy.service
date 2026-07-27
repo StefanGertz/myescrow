@@ -1,0 +1,14 @@
+[Unit]
+Description=Deploy approved MyEscrow API images from GHCR
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/myescrow-api
+ExecStart=/home/ubuntu/myescrow-api/scripts/auto-deploy-staging.sh
+
+[Install]
+WantedBy=multi-user.target

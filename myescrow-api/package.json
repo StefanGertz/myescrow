@@ -13,6 +13,7 @@
     "test:direct": "vitest run",
     "test:watch": "node scripts/run-integration-tests.mjs --watch",
     "smoke": "node scripts/backend-smoke.mjs",
+    "smoke:deployment": "node scripts/deployment-smoke.mjs",
     "reconcile:ledger": "tsx scripts/reconcile-ledger.ts",
     "outbox:invitations": "tsx scripts/process-invitation-outbox.ts",
     "milestones:deadlines": "tsx scripts/process-milestone-deadlines.ts",

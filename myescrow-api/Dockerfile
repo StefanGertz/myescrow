@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
 ARG DATABASE_URL=postgresql://myescrow:myescrow@localhost:5432/myescrow
+ARG BUILD_SHA=development
 
 FROM node:20-alpine AS base
 RUN apk add --no-cache openssl
@@ -25,8 +26,11 @@ RUN npm run build
 
 FROM base AS prod
 ARG DATABASE_URL
+ARG BUILD_SHA
 ENV NODE_ENV=production
 ENV DATABASE_URL=${DATABASE_URL}
+ENV APP_BUILD_SHA=${BUILD_SHA}
+LABEL org.opencontainers.image.revision=${BUILD_SHA}
 COPY package*.json ./
 COPY prisma ./prisma
 COPY --from=build /app/node_modules ./node_modules
