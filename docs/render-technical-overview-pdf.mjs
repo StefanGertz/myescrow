@@ -1,7 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const [markdownArg = "HANDOFF.md", htmlArg = "HANDOFF.html"] = process.argv.slice(2);
+const [
+  markdownArg = "MYESCROW_TECHNICAL_OVERVIEW.md",
+  htmlArg = "MYESCROW_TECHNICAL_OVERVIEW.html",
+] = process.argv.slice(2);
 const markdownPath = path.resolve(markdownArg);
 const htmlPath = path.resolve(htmlArg);
 const markdown = await readFile(markdownPath, "utf8");
@@ -178,7 +181,7 @@ const html = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MyEscrow developer handoff</title>
+    <title>MyEscrow product and technical overview</title>
     <style>
       @page { size: A4; margin: 20mm 17mm 18mm; }
       * { box-sizing: border-box; }

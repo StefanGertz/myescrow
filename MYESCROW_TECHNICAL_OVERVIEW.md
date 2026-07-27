@@ -1,20 +1,18 @@
-# MyEscrow developer handoff
+# MyEscrow product and technical overview
 
-Last code review: 2026-07-26
+Codebase snapshot reviewed: 2026-07-26
 
-Audience: incoming lead/full-stack developer
+Status: functional staging MVP
 
-Status: functional staging MVP; **not ready to hold or move real customer money**
+## Purpose and scope
 
-## Read this first
-
-MyEscrow is a milestone-based escrow application for a buyer and seller. It has a working Next.js frontend, Fastify API, PostgreSQL/Prisma data model, retryable background worker, internal financial ledger, operational console, and staging deployment.
+MyEscrow is a milestone-based transaction application for buyers and sellers. The current system includes a Next.js frontend, Fastify API, PostgreSQL/Prisma data model, retryable background worker, internal financial ledger, operations console, and staging deployment.
 
 The word “escrow” currently describes an application-level ledger and simulated wallet. There is no payment processor, bank/custody integration, KYC/AML program, regulated funds flow, or production evidence-storage system. Treat all balances and top-ups as test data until those systems and the associated legal/compliance controls exist.
 
-The implementation has strong safety ideas for an MVP—immutable agreement versions, idempotent money commands, an append-only escrow ledger, reconciliation, conditional state transitions, audit events, and recovery jobs—but it still needs a deliberate security, architecture, product-policy, and production-readiness pass.
+The implemented product model includes immutable agreement versions, idempotent money commands, an append-only escrow ledger, reconciliation, conditional state transitions, audit events, and recovery jobs. This document describes the product behavior and technical implementation as they exist in the reviewed snapshot.
 
-## Snapshot at handoff
+## Codebase and runtime snapshot
 
 | Item | Current value |
 | --- | --- |
@@ -33,17 +31,9 @@ The implementation has strong safety ideas for an MVP—immutable agreement vers
 | Public API | `https://staging.myescrowdemo.xyz` |
 | Operations UI | `https://app.myescrowdemo.xyz/operations` |
 
-All three public endpoints returned HTTP 200 on 2026-07-26. That confirms reachability, not that the deployed build matches the Git commits above. The application has no public build/version endpoint, and the current deployment SHA was not independently established during this handoff.
+All three public endpoints returned HTTP 200 on 2026-07-26. That confirms reachability, not that the deployed build matches the Git commits above. The application has no public build/version endpoint, and the deployed SHA was not independently established.
 
-At review time the root worktree had three unrelated, untracked one-pager artifacts:
-
-- `docs/myescrow-internal-one-pager.html`
-- `docs/myescrow-internal-one-pager.pdf`
-- `docs/myescrow-internal-one-pager.txt`
-
-They were left untouched.
-
-## What is implemented
+## Product behavior
 
 ### Customer lifecycle
 
@@ -76,7 +66,7 @@ A separate worker:
 
 Support/admin APIs expose worker health, failed jobs, outbox failures, aged escrows, duplicate command replays, reconciliation exceptions, dispute deadlines, arbitration requests, audit history, and safe retry/extension commands.
 
-The web operations console implements health/alert views, failed operational-job retry, operator management, and escrow detail drill-down. Some support APIs do not yet have corresponding web controls; see the risk register.
+The web operations console implements health/alert views, failed operational-job retry, operator management, and escrow detail drill-down. Some support APIs do not yet have corresponding web controls; see “Known limitations and incomplete areas.”
 
 ## System architecture
 
@@ -115,7 +105,7 @@ Important boundaries:
 ```text
 myescrow/
 ├── .github/workflows/backend-ci.yml
-├── HANDOFF.md
+├── MYESCROW_TECHNICAL_OVERVIEW.md
 ├── docs/
 │   ├── operations-incident-runbook.md
 │   ├── unhappy-workflow-remediation-plan.md
@@ -150,7 +140,7 @@ myescrow/
 
 The root `index.html` and generated documents are design/presentation artifacts, not runtime dependencies.
 
-## Backend guide
+## Backend implementation
 
 ### Entry points
 
@@ -255,7 +245,7 @@ The strongest coverage is on:
 - wallet top-up/withdrawal;
 - operational retry/extension/role changes.
 
-Not every non-financial mutation uses the idempotency service. Do not assume that merely sending the header makes a route idempotent—check the called service.
+Not every non-financial mutation uses the idempotency service. Sending the header alone does not make a route idempotent; the called service must use `idempotencyService`.
 
 ### API surface
 
@@ -273,7 +263,7 @@ Main route groups:
 | Dispute/cancellation | open dispute, evidence, proposal, arbitration, resolve, request/accept cancellation |
 | Operations | health, jobs, retry, audit, evidence, invitation recovery, operator roles |
 
-The API README route table is useful but is not exhaustive and should be generated or tested against registered routes in future.
+The API README route table is useful but is not exhaustive relative to the registered routes.
 
 ### Worker behavior
 
@@ -293,7 +283,7 @@ The staging Compose file runs the continuous worker every minute. It stores jobs
 
 See `docs/operations-incident-runbook.md` before manually intervening. Do not repair ledger, job, outbox, or operator state by editing PostgreSQL.
 
-## Frontend guide
+## Frontend implementation
 
 ### Main application modes
 
@@ -315,7 +305,7 @@ The same codebase contains three meaningful combinations:
 - Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
 - Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
 
-`NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable. A production cleanup should replace it with a server-only variable and keep only genuinely public configuration under `NEXT_PUBLIC_*`.
+`NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable, so its value is part of public build-time configuration.
 
 ### Authentication
 
@@ -335,7 +325,7 @@ Email: scott@example.com
 Password: Escrow123!
 ```
 
-The Prisma seed creates verified `scott@example.com` and `nora@example.com` records from `data/store.json`, but the handoff does not document a plaintext live/seed password. Reset it through the normal reset flow or create fresh local accounts.
+The Prisma seed creates verified `scott@example.com` and `nora@example.com` records from `data/store.json`. This overview does not include a plaintext live/seed password; local access can be established through the reset flow or fresh accounts.
 
 ## Local setup
 
@@ -475,76 +465,64 @@ staging.myescrowdemo.xyz
 
 The API image is `ghcr.io/stefangertz/myescrow-api`. The live host uses `myescrow-api/docker-compose.staging.yml` and a host-only `.env.staging`.
 
-The ignored `myescrow-api/.env.staging` on this workstation is incomplete and is not the staging source of truth. Do not deploy from it or copy it over the host configuration.
+The ignored `myescrow-api/.env.staging` on this workstation is incomplete and is not the staging source of truth.
 
-The previous handoff contained host IPs, SSH key paths, and an administrator email in this public repository. Those details have intentionally been removed from this version, but remain in Git history. Review the history with secret scanning, assume any actual secret ever committed is exposed, and rotate it. Transfer infrastructure access through a password manager or another private operations record.
+### Deployment mechanics
 
-### Safe API deployment shape
+The deployment flow represented by the repository is:
 
-1. Confirm backend CI passes for the intended commit.
-2. Back up PostgreSQL.
-3. Pull the immutable commit-SHA image, not only `latest`.
-4. Run `npm run db:migrate:deploy` against the target database as an explicit release step.
-5. Restart/update both `api` and `operations-worker` from the same image.
-6. Verify API health, worker heartbeat, reconciliation, and logs.
-7. Run a staging smoke test.
-8. Record the deployed API SHA and frontend SHA somewhere queryable.
+1. Backend CI tests and builds the API.
+2. A successful `main` build publishes GHCR tags for `latest`, `v1`, and the commit SHA.
+3. Prisma migrations are applied separately with `npm run db:migrate:deploy`.
+4. The API and operations worker are updated from the same image.
+5. Health, worker heartbeat, reconciliation state, and the smoke flow are checked after deployment.
 
-The current helper script and Compose flow do **not** provide a complete migration/rollback release system. `scripts/deploy-staging.sh` writes `.env.staging` and brings services up, but does not run Prisma migrations. Do not assume pulling the newest image updates the database.
+The current helper script and Compose flow do not form a complete migration/rollback release system. `scripts/deploy-staging.sh` writes `.env.staging` and starts the services, but does not run Prisma migrations. The API also has no version endpoint that identifies the deployed source SHA.
 
-### Access that must be transferred privately
+## Known limitations and incomplete areas
 
-- Both GitHub repositories and branch protection/settings
-- GHCR package and `GHCR_PAT` secret
-- Vercel team/project, environment variables, and domain mapping
-- Oracle tenancy, load balancer, VM, networking, SSH access, and backups
-- DNS registrar/zone
-- Resend account, verified sender domain, API key, and delivery logs
-- Staging PostgreSQL credentials and backup/restore procedure
-- Existing support/admin account recovery
-- Any monitoring/alert destination
+### Funds, evidence, and dispute authority
 
-Do not paste secret values into issues, chat logs, commits, or this document.
+- Wallet top-up and withdrawal update database balances only. No payment provider, bank, custody account, webhook flow, settlement state, reversal, or chargeback integration exists.
+- KYC/KYB, AML/sanctions screening, transaction monitoring, regulated custody, and jurisdiction-specific compliance are outside the current system.
+- Evidence models contain object keys and file metadata, but there is no upload/download service, private object-store authorization, malware scanning, retention workflow, or encryption/key policy.
+- Arbitration creates an `arbitration_requested` state and operations alert. It does not implement a staff adjudication or staff-authorized payout command.
+- Currency is effectively fixed to USD even though currency appears on ledger and agreement records.
 
-## Risk register and recommended order of work
+### Security and authentication
 
-### P0 — before real users or real funds
+- `JWT_SECRET` falls back to `dev-secret-change-me` when absent, including under a production environment.
+- Verification and password-reset codes are written to application logs by `emailService.ts`.
+- Login, signup, verification, resend, forgot/reset password, invitation, and financial endpoints have no rate limits, account lockout, or bot/abuse controls.
+- Fastify CORS is configured with `origin: true`.
+- Browser authentication uses a bearer JWT in `sessionStorage`. There are no refresh tokens, server-side revocation, device/session management, or operator MFA.
+- Password changes do not revoke already issued JWTs.
+- No penetration test, dependency security gate, formal threat model, or authorization-matrix suite is represented in the repository.
 
-1. **Define the regulated product and funds flow.** Engage qualified legal/compliance counsel and determine custody, licensing, KYC/KYB, AML/sanctions, consumer protection, privacy, records, dispute authority, and jurisdiction requirements.
-2. **Integrate real payment/custody rails.** Replace database top-up/withdrawal with a provider whose webhooks, settlement states, reversals, chargebacks, and idempotency are authoritative. Never treat `walletBalanceCents` as proof of real funds.
-3. **Perform a security review.** Add threat modeling, dependency/vulnerability scanning, SAST/secret scanning, penetration testing, security headers, CSRF strategy, strict CORS origins, authorization matrix tests, and abuse controls.
-4. **Remove sensitive codes from logs.** `emailService.ts` currently logs verification and password-reset codes unconditionally, including when an email provider is configured. Production logs must never contain these codes.
-5. **Fail closed on secrets.** The API currently falls back to `dev-secret-change-me` if `JWT_SECRET` is absent, even in production. Production startup should reject missing/weak secrets.
-6. **Add rate limits and account protections.** Login, signup, verification, resend, forgot/reset password, invitation, and financial endpoints have no rate limiting, lockout, bot protection, or comprehensive anti-enumeration controls.
-7. **Build evidence storage.** The database accepts object-key/hash metadata, but there is no object upload/download, authorization, malware scanning, encryption/key policy, retention, or deletion workflow.
-8. **Set production policies.** Arbitration is only a user request and operations alert; there is no implemented adjudication/payout command for staff. Define who decides disputes, evidence rules, fees, appeals, and legal notices before enabling it.
-9. **Build controlled releases and recovery.** Automate migrations, immutable deployment selection, version reporting, backups, restore drills, rollback/forward-fix procedure, worker singleton/locking policy, and monitoring.
+### Functional and client/API inconsistencies
 
-### P1 — correctness and maintainability
+- `LiveDashboard` submits escrow creation without the PNG signature required by the Fastify schema. The frontend hook marks `signatureDataUrl` optional, so the mismatch is not caught by TypeScript.
+- Frontend mutation hooks create a new UUID when a mutation is invoked. A separate user retry after an uncertain response uses a new idempotency key rather than the original command key.
+- The operations API supports outbox retry, invitation extension, dispute evidence inspection, and audit history, while the web operations interface exposes only part of that functionality.
+- The immersive dashboard and `LiveDashboard` are different product surfaces with different feature coverage.
+- Some Next.js mock handlers implement behavior that is intentionally simpler than the live API.
+- The API README route table is incomplete relative to registered Fastify routes.
 
-1. **Fix the slim live dashboard create flow.** `LiveDashboard` submits escrow creation without the PNG signature required by the API schema. The TypeScript hook incorrectly marks `signatureDataUrl` optional, so builds pass while the live request can fail with HTTP 400.
-2. **Preserve idempotency keys across retries.** The web hooks generate a new UUID when each mutation function runs. A user retry after an uncertain network outcome can therefore use a new key and create a second business command. Generate a key once per user intent and retain it until a definitive result.
-3. **Complete operations UI coverage.** The API supports outbox retry, invitation extension, dispute evidence, and audit views, but the frontend proxy/UI only exposes part of that surface. Either implement the missing controls/routes or narrow the documented support promise.
-4. **Split the god files.** Move escrow commands/read models out of `dashboardService.ts`; split `src/app/page.tsx` into feature modules/routes. Keep state transitions in explicit domain services.
-5. **Create shared API contracts.** Frontend types currently reuse mock types and duplicate backend shapes. Generate or share schemas/types and test proxy route parity.
-6. **Use typed states.** Replace unrestricted status strings with TypeScript/Prisma enums or validated transition types. Centralize the state machine and available-action calculation.
-7. **Improve auth lifecycle.** Add token rotation/refresh or secure session cookies, revocation, password-change invalidation, operator MFA, recovery policy, and auditable session management.
-8. **Tighten the API boundary.** Replace `origin: true` CORS, cap JSON/body sizes globally, validate query/path/body consistently, add security headers, and avoid returning raw upstream headers blindly through the proxy.
-9. **Add true end-to-end tests.** Cover both users through create → invite → sign → fund → submit → approve/dispute/cancel in a browser, including timeouts, duplicate clicks, worker cycles, and staging smoke tests.
+### Code structure, testing, and operations
 
-### P2 — product and documentation
+- `dashboardService.ts` is 2,650 lines and owns both read models and many commands. The immersive `src/app/page.tsx` is 5,042 lines.
+- Frontend response types are partly derived from mock models rather than a shared/generated API contract.
+- Lifecycle, milestone, delivery, and dispute statuses are unrestricted strings spread across services.
+- Automated coverage consists primarily of API integration tests and frontend component/utility tests. There is no browser end-to-end suite, coverage threshold, load test, accessibility audit, payment-provider contract suite, or migration rollback test.
+- Dashboard freshness relies partly on polling.
+- Observability is limited to structured application/container logs, stored worker heartbeat, operations health queries, and database reconciliation records; there is no tracing or error-tracking integration.
+- Local and test Compose use PostgreSQL 16, while staging Compose declares PostgreSQL 15.
+- `.env.example` contains the unused `DATA_STORE_PATH` variable.
+- `docs/unhappy-workflow-diagrams.md` describes the earlier unsafe workflow, while the remediation documents describe later implementation phases.
 
-1. Decide whether the immersive dashboard or `LiveDashboard` is the product. Maintaining both creates inconsistent features and tests.
-2. Replace poll-heavy dashboard refresh with an intentional freshness strategy.
-3. Add accessibility, responsive, cross-browser, and PDF/signature export testing.
-4. Add observability: structured logs without secrets, metrics, traces, error tracking, uptime checks, alert routing, and data-retention policy.
-5. Remove or clearly label stale artifacts. `docs/unhappy-workflow-diagrams.md` describes the old unsafe implementation, while the remediation documents describe later work.
-6. Generate API documentation from route schemas. The current README omits some implemented endpoints.
-7. Remove stale configuration such as unused `DATA_STORE_PATH` and align PostgreSQL versions (local/test use 16; staging Compose currently declares 15).
+## Product behavior not yet defined
 
-## Product/policy decisions still required
-
-The code has made temporary assumptions that need explicit ownership:
+The code makes temporary assumptions in areas where final product behavior has not been defined:
 
 - Supported countries, currencies, transaction sizes, prohibited activities, and user types
 - Whether MyEscrow is a custodian, marketplace, agent, or UI over a licensed provider
@@ -557,28 +535,6 @@ The code has made temporary assumptions that need explicit ownership:
 - Evidence/file retention and privacy rights
 - Notification channels and legally effective notice
 - Support service levels and escalation ownership
-
-Do not encode more policy in scattered conditionals until these decisions are documented as acceptance criteria.
-
-## Suggested first week for the incoming developer
-
-1. Clone both repositories and reproduce all six quality gates.
-2. Run the complete two-party lifecycle locally in live-data mode, not only mocks.
-3. Read, in order:
-   - this handoff;
-   - `prisma/schema.prisma`;
-   - `src/routes/*.ts`;
-   - `moneyIntegrityService.ts`;
-   - `agreementService.ts`;
-   - `disputeService.ts`;
-   - `operationsService.ts`;
-   - `docs/operations-incident-runbook.md`.
-4. Obtain private infrastructure access and inventory every secret, owner, backup, alert, and deployed SHA.
-5. Fix code/reset-code logging and production secret validation.
-6. Fix the `LiveDashboard` signature mismatch or remove that mode.
-7. Write an architecture decision record for real payment rails and the regulated funds flow.
-8. Turn the P0/P1 items above into an owned backlog with acceptance tests.
-9. Establish protected branches/reviews and require both backend and frontend CI before deployment.
 
 ## Useful commands
 
@@ -618,6 +574,10 @@ git -C myescrow-web status --short
 git -C myescrow-web log -1 --oneline
 ```
 
-## Final handoff principle
+## Related technical documents
 
-Preserve the existing safety invariants, but do not confuse them with production escrow readiness. The next phase is less about adding screens and more about making the domain explicit, integrating regulated financial infrastructure, hardening security and operations, and proving the complete system under failure and concurrency.
+- `myescrow-api/README.md`: API setup, scripts, route summary, testing, and deployment notes
+- `myescrow-web/README.md`: frontend setup, runtime modes, proxy behavior, and authentication
+- `docs/operations-incident-runbook.md`: worker behavior, support roles, and incident procedures
+- `docs/unhappy-workflow-remediation-plan.md`: rationale behind the ledger, agreement, evidence, dispute, and recovery models
+- `docs/unhappy-vs-remediated-paths.md`: comparison of the earlier and current failure-handling paths
