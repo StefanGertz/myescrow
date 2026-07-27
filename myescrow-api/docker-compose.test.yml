@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    ports:
+      - "127.0.0.1:${TEST_POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: myescrow_test
+      POSTGRES_PASSWORD: myescrow_test
+      POSTGRES_DB: myescrow_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myescrow_test -d myescrow_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data

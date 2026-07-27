@@ -66,7 +66,8 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run dev` - Fastify + tsx watcher.
 - `npm run build` / `npm start` - compile to `dist/` and run.
 - `npm run lint` - type-check only.
-- `npm test` - Vitest integration tests (assumes Postgres is running).
+- `npm test` - Vitest integration tests. Uses `TEST_DATABASE_URL` or a reachable `DATABASE_URL`; otherwise it starts and removes a disposable PostgreSQL container automatically.
+- `npm run test:direct` - run Vitest directly when you are managing the test database yourself.
 - `npm run lint:docs` - verify `README.md` contains ASCII-only text (prevents GitHub Pages build failures).
 - `npm run db:migrate` - `prisma migrate dev` against `DATABASE_URL`.
 - `npm run db:push` - sync schema without migrations.
@@ -129,13 +130,15 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 
 ## Testing
 
-The Vitest suite spins up Fastify in-memory and talks to a dedicated Postgres schema. Before running the tests, ensure Postgres is running (e.g., `docker compose up -d`). Then:
+The Vitest suite spins up Fastify in-memory and talks to a fresh, isolated Postgres schema. Run:
 
 ```bash
 npm test
 ```
 
-The tests will provision a fresh schema (`vitest_<timestamp>`), run `prisma migrate deploy` + `prisma db seed`, and drop the schema when finished.
+The test runner uses `TEST_DATABASE_URL` when supplied, then tries `DATABASE_URL`. If neither points to a reachable server, it starts a disposable PostgreSQL 16 container on an available local port and removes it when the suite finishes. Docker is therefore only required when an external test database is not available.
+
+The tests provision a fresh schema (`vitest_<uuid>`), run `prisma migrate deploy` + `prisma db seed`, and drop the schema when finished. CI continues to use its PostgreSQL service through `DATABASE_URL`; if that required service is unavailable, the test command fails instead of silently starting another database.
 
 ## Deployment
 

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
@@ -24,9 +25,12 @@ let invitedCounterpartyToken: string;
 const sentEmails: Array<{ from?: string; to?: string; subject?: string; html?: string; text?: string }> = [];
 
 beforeAll(async () => {
-  schemaName = `vitest_${Date.now()}`;
-  const baseUrl = process.env.DATABASE_URL ?? "postgresql://myescrow:myescrow@localhost:5432/myescrow";
-  process.env.DATABASE_URL = `${baseUrl}?schema=${schemaName}`;
+  schemaName = `vitest_${randomUUID().replaceAll("-", "")}`;
+  const databaseUrl = new URL(
+    process.env.DATABASE_URL ?? "postgresql://myescrow:myescrow@localhost:5432/myescrow",
+  );
+  databaseUrl.searchParams.set("schema", schemaName);
+  process.env.DATABASE_URL = databaseUrl.toString();
   process.env.JWT_SECRET = "test-secret";
   process.env.AUTH_SESSION_TTL_SECONDS = "28800";
   process.env.PORT = "0";
