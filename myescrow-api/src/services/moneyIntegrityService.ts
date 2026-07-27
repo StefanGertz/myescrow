@@ -134,8 +134,15 @@ export async function applyEscrowTransfer(
   }
 
   const before = await getEscrowLedgerBalances(tx, input.escrowId);
-  if (input.movementType === "fund" && before.fundedCents !== 0) {
-    throw new AppError("This escrow already has a funding ledger entry.", 409);
+  if (input.movementType === "fund") {
+    const escrow = await tx.escrow.findUnique({
+      where: { id: input.escrowId },
+      select: { amountCents: true },
+    });
+    if (!escrow) throw new AppError("Escrow not found.", 404);
+    if (before.fundedCents + input.amountCents > escrow.amountCents) {
+      throw new AppError("This deposit would fund more than the escrow agreement amount.", 409);
+    }
   }
   const isSettlement = ["settlement_release", "settlement_refund"].includes(input.movementType);
   const availableCents = before.heldCents - before.disputedCents;
@@ -198,7 +205,9 @@ export async function reconcileEscrowLedger(prisma: PrismaClient) {
   for (const escrow of escrows) {
     const balances = deriveLedgerBalances(escrow.ledgerEntries);
     const issues: string[] = [];
-    const expectedFunded = balances.fundedCents > 0 ? escrow.amountCents : 0;
+    const expectedFunded = escrow.fundingStatus === "funded"
+      ? escrow.amountCents
+      : balances.fundedCents;
     const expectedReleased = escrow.milestones.reduce((total, milestone) => {
       if (milestone.status === "released") return total + milestone.amountCents;
       if (milestone.status !== "settled") return total;

@@ -112,6 +112,19 @@ export async function submitMilestoneWork(
       }
       const milestone = escrow.milestones.find((item) => item.id === milestoneId);
       if (!milestone) throw new AppError("Milestone not found.", 404);
+      if (escrow.fundingMode === "milestone") {
+        const funding = await tx.escrowLedgerEntry.aggregate({
+          where: {
+            escrowId: escrow.id,
+            milestoneId: milestone.id,
+            movementType: "fund",
+          },
+          _sum: { amountCents: true },
+        });
+        if ((funding._sum.amountCents ?? 0) < milestone.amountCents) {
+          throw new AppError("The buyer must fund this milestone before work can be submitted.", 409);
+        }
+      }
       if (!["not_started", "revision_requested"].includes(milestone.status)) {
         throw new AppError("This milestone is not awaiting a seller submission.", 409);
       }

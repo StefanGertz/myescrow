@@ -10,6 +10,7 @@ import {
   dismissNotification,
   extendEscrowInvitation,
   fundEscrow,
+  fundMilestone,
   getEscrowLedgerHistory,
   getOverview,
   listDisputes,
@@ -388,6 +389,18 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
       return fundEscrow(secured.prisma, user.id, id, requireIdempotencyKey(request));
+    });
+
+    secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/fund", async (request) => {
+      const user = await requireUser(request);
+      const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      return fundMilestone(
+        secured.prisma,
+        user.id,
+        id,
+        milestoneId,
+        requireIdempotencyKey(request),
+      );
     });
 
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/approve", async (request) => {

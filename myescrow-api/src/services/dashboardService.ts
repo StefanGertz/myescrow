@@ -42,6 +42,8 @@ export type EscrowMilestoneResponse = {
   title: string;
   amount: string;
   status: string;
+  fundingStatus: "not_funded" | "funded";
+  fundedCents: number;
   description?: string;
   deadline?: string;
   requestedTitle?: string;
@@ -92,6 +94,7 @@ export type EscrowResponse = {
   counterpartyApproved: boolean;
   lifecycleStatus: string;
   fundingStatus: string;
+  fundingMode: "full" | "milestone" | null;
   creatorRole: "buyer" | "seller";
   createdAt: string;
   approvedAt?: string;
@@ -226,7 +229,7 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
         };
       };
     };
-    ledgerEntries: { select: { movementType: true; amountCents: true } };
+    ledgerEntries: { select: { milestoneId: true; movementType: true; amountCents: true } };
     disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] } } };
     currentAgreementVersion: { include: { signatures: true } };
     invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
@@ -325,7 +328,7 @@ const includeEscrowRelations = {
       },
     },
   },
-  ledgerEntries: { select: { movementType: true, amountCents: true } },
+  ledgerEntries: { select: { milestoneId: true, movementType: true, amountCents: true } },
   disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] as string[] } } },
   currentAgreementVersion: { include: { signatures: true } },
   invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
@@ -577,6 +580,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     counterpartyApproved: record.counterpartyApproved,
     lifecycleStatus: record.lifecycleStatus,
     fundingStatus: record.fundingStatus,
+    fundingMode: record.fundingMode as "full" | "milestone" | null,
     creatorRole: record.creatorRole as "buyer" | "seller",
     createdAt: record.createdAt.toISOString(),
     ...(record.approvedAt ? { approvedAt: record.approvedAt.toISOString() } : {}),
@@ -639,58 +643,67 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
           refundAmountCents: cancellation.refundAmountCents,
         }
       : null,
-    milestones: record.milestones.map((milestone) => ({
-      id: milestone.id,
-      title: isProposedNewMilestone(milestone) ? milestone.requestedTitle ?? "New milestone" : milestone.title,
-      amount: formatCurrencyFromCents(milestone.amountCents),
-      status: milestone.status,
-      ...(milestone.description ? { description: milestone.description } : {}),
-      ...(milestone.deadline ? { deadline: milestone.deadline.toISOString() } : {}),
-      ...(milestone.requestedTitle ? { requestedTitle: milestone.requestedTitle } : {}),
-      ...(milestone.requestedDescription !== null
-        ? { requestedDescription: milestone.requestedDescription }
-        : {}),
-      ...(milestone.requestedAmountCents !== null
-        ? { requestedAmount: formatCurrencyFromCents(milestone.requestedAmountCents) }
-        : {}),
-      ...(milestone.requestedDeadline ? { requestedDeadline: milestone.requestedDeadline.toISOString() } : {}),
-      ...(milestone.changeRequestNote ? { changeRequestNote: milestone.changeRequestNote } : {}),
-      ...(milestone.changeRequestedAt ? { changeRequestedAt: milestone.changeRequestedAt.toISOString() } : {}),
-      ...(milestone.releasedAt ? { releasedAt: milestone.releasedAt.toISOString() } : {}),
-      ...(milestone.rejectedAt ? { rejectedAt: milestone.rejectedAt.toISOString() } : {}),
-      ...(milestone.reviewDeadline ? { reviewDeadline: milestone.reviewDeadline.toISOString() } : {}),
-      ...(milestone.reminderSentAt ? { reminderSentAt: milestone.reminderSentAt.toISOString() } : {}),
-      ...(milestone.reviewOverdueAt ? { reviewOverdueAt: milestone.reviewOverdueAt.toISOString() } : {}),
-      submissions: milestone.submissions.map((submission) => ({
-        id: submission.id,
-        submissionNumber: submission.submissionNumber,
-        ...(submission.note ? { note: submission.note } : {}),
-        submittedAt: submission.submittedAt.toISOString(),
-        reviewDeadline: submission.reviewDeadline.toISOString(),
-        submitter: { id: submission.submitter.id, name: submission.submitter.name },
-        evidence: submission.evidence.map((evidence) => ({
-          id: evidence.id,
-          objectKey: evidence.objectKey,
-          fileName: evidence.fileName,
-          contentType: evidence.contentType,
-          sizeBytes: evidence.sizeBytes,
-          sha256: evidence.sha256,
-        })),
-        ...(submission.review
-          ? {
-              review: {
-                decision: submission.review.decision,
-                ...(submission.review.reason ? { reason: submission.review.reason } : {}),
-                reviewedAt: submission.review.reviewedAt.toISOString(),
-                reviewer: {
-                  id: submission.review.reviewer.id,
-                  name: submission.review.reviewer.name,
-                },
-              },
-            }
+    milestones: record.milestones.map((milestone) => {
+      const fundedCents = record.fundingMode === "full"
+        ? milestone.amountCents
+        : record.ledgerEntries
+            .filter((entry) => entry.movementType === "fund" && entry.milestoneId === milestone.id)
+            .reduce((total, entry) => total + entry.amountCents, 0);
+      return {
+        id: milestone.id,
+        title: isProposedNewMilestone(milestone) ? milestone.requestedTitle ?? "New milestone" : milestone.title,
+        amount: formatCurrencyFromCents(milestone.amountCents),
+        status: milestone.status,
+        fundingStatus: fundedCents >= milestone.amountCents ? "funded" : "not_funded",
+        fundedCents,
+        ...(milestone.description ? { description: milestone.description } : {}),
+        ...(milestone.deadline ? { deadline: milestone.deadline.toISOString() } : {}),
+        ...(milestone.requestedTitle ? { requestedTitle: milestone.requestedTitle } : {}),
+        ...(milestone.requestedDescription !== null
+          ? { requestedDescription: milestone.requestedDescription }
           : {}),
-      })),
-    })),
+        ...(milestone.requestedAmountCents !== null
+          ? { requestedAmount: formatCurrencyFromCents(milestone.requestedAmountCents) }
+          : {}),
+        ...(milestone.requestedDeadline ? { requestedDeadline: milestone.requestedDeadline.toISOString() } : {}),
+        ...(milestone.changeRequestNote ? { changeRequestNote: milestone.changeRequestNote } : {}),
+        ...(milestone.changeRequestedAt ? { changeRequestedAt: milestone.changeRequestedAt.toISOString() } : {}),
+        ...(milestone.releasedAt ? { releasedAt: milestone.releasedAt.toISOString() } : {}),
+        ...(milestone.rejectedAt ? { rejectedAt: milestone.rejectedAt.toISOString() } : {}),
+        ...(milestone.reviewDeadline ? { reviewDeadline: milestone.reviewDeadline.toISOString() } : {}),
+        ...(milestone.reminderSentAt ? { reminderSentAt: milestone.reminderSentAt.toISOString() } : {}),
+        ...(milestone.reviewOverdueAt ? { reviewOverdueAt: milestone.reviewOverdueAt.toISOString() } : {}),
+        submissions: milestone.submissions.map((submission) => ({
+          id: submission.id,
+          submissionNumber: submission.submissionNumber,
+          ...(submission.note ? { note: submission.note } : {}),
+          submittedAt: submission.submittedAt.toISOString(),
+          reviewDeadline: submission.reviewDeadline.toISOString(),
+          submitter: { id: submission.submitter.id, name: submission.submitter.name },
+          evidence: submission.evidence.map((evidence) => ({
+            id: evidence.id,
+            objectKey: evidence.objectKey,
+            fileName: evidence.fileName,
+            contentType: evidence.contentType,
+            sizeBytes: evidence.sizeBytes,
+            sha256: evidence.sha256,
+          })),
+          ...(submission.review
+            ? {
+                review: {
+                  decision: submission.review.decision,
+                  ...(submission.review.reason ? { reason: submission.review.reason } : {}),
+                  reviewedAt: submission.review.reviewedAt.toISOString(),
+                  reviewer: {
+                    id: submission.review.reviewer.id,
+                    name: submission.review.reviewer.name,
+                  },
+                },
+              }
+            : {}),
+        })),
+      };
+    }),
   };
 }
 
@@ -2084,6 +2097,9 @@ export async function fundEscrow(
         throw new AppError("Only the buyer can fund this escrow.", 403);
       }
       if (escrow.lifecycleStatus !== "funding_pending") {
+        if (escrow.fundingMode === "milestone") {
+          throw new AppError("This escrow uses milestone funding. Fund the next milestone instead.", 409);
+        }
         if (escrow.fundingStatus === "funded") {
           throw new AppError("This escrow has already been funded.", 409);
         }
@@ -2104,10 +2120,12 @@ export async function fundEscrow(
         id: escrow.id,
         lifecycleStatus: "funding_pending",
         fundingStatus: "not_funded",
+        fundingMode: null,
       },
       data: {
         lifecycleStatus: "funded",
         fundingStatus: "funded",
+        fundingMode: "full",
         stage: "Milestones active",
         dueDescription: "Funds secured in escrow",
         status: "success",
@@ -2156,6 +2174,137 @@ export async function fundEscrow(
         fundedAt: fundedAt.toISOString(),
       };
     });
+}
+
+export async function fundMilestone(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  milestoneId: number,
+  idempotencyKey: string,
+) {
+  return executeIdempotentCommand(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "fund_milestone",
+      payload: { reference, milestoneId },
+    },
+    async (tx) => {
+      const escrow = await tx.escrow.findFirst({
+        where: { reference, ...visibleEscrowWhere(userId) },
+        include: includeEscrowRelations,
+      });
+      if (!escrow) throw new AppError("Escrow not found.", 404);
+      const buyerId = requireBuyerId(escrow);
+      if (buyerId !== userId) {
+        throw new AppError("Only the buyer can fund this milestone.", 403);
+      }
+      if (!["funding_pending", "funded"].includes(escrow.lifecycleStatus)) {
+        throw new AppError("This escrow is not ready for milestone funding.", 400);
+      }
+      if (escrow.fundingMode === "full") {
+        throw new AppError("This escrow was funded in full.", 409);
+      }
+      if (hasPendingAgreementChanges(escrow)) {
+        throw new AppError("Requested agreement changes must be resolved before funding.", 400);
+      }
+      await assertFundableAgreement(tx, {
+        currentAgreementVersionId: escrow.currentAgreementVersionId,
+        buyerId,
+        sellerId: requireSellerId(escrow),
+      });
+
+      const milestone = getMilestoneById(escrow, milestoneId);
+      if (["released", "refunded", "settled", "cancelled", "disputed"].includes(milestone.status)) {
+        throw new AppError("This milestone can no longer be funded.", 409);
+      }
+      const fundedForMilestone = escrow.ledgerEntries
+        .filter((entry) => entry.movementType === "fund" && entry.milestoneId === milestone.id)
+        .reduce((total, entry) => total + entry.amountCents, 0);
+      if (fundedForMilestone >= milestone.amountCents) {
+        throw new AppError("This milestone has already been funded.", 409);
+      }
+      const blockedBy = escrow.milestones.find(
+        (item) => item.orderIndex < milestone.orderIndex
+          && !["released", "refunded", "settled", "cancelled"].includes(item.status),
+      );
+      if (blockedBy) {
+        throw new AppError(`Complete the earlier milestone "${blockedBy.title}" before funding this one.`, 409);
+      }
+
+      const fundedAt = new Date();
+      const amountCents = milestone.amountCents - fundedForMilestone;
+      const transfer = await applyEscrowTransfer(tx, {
+        escrowId: escrow.id,
+        milestoneId: milestone.id,
+        movementType: "fund",
+        amountCents,
+        idempotencyKey,
+        businessReference: `escrow:${escrow.reference}:milestone:${milestone.id}:fund`,
+        actorId: userId,
+        sourceCommand: "fund_milestone",
+        walletUserId: userId,
+      });
+      const isFullyFunded = transfer.balances.fundedCents === escrow.amountCents;
+      const transition = await tx.escrow.updateMany({
+        where: {
+          id: escrow.id,
+          lifecycleStatus: { in: ["funding_pending", "funded"] },
+          OR: [{ fundingMode: null }, { fundingMode: "milestone" }],
+        },
+        data: {
+          lifecycleStatus: "funded",
+          fundingStatus: isFullyFunded ? "funded" : "partially_funded",
+          fundingMode: "milestone",
+          stage: "Milestones active",
+          dueDescription: isFullyFunded
+            ? "All milestones funded"
+            : `${milestone.title} funded; future milestones fund separately`,
+          status: "success",
+          fundedAt: escrow.fundedAt ?? fundedAt,
+        },
+      });
+      if (transition.count !== 1) {
+        throw new AppError("The escrow funding mode changed. Refresh and try again.", 409);
+      }
+
+      const sellerId = requireSellerId(escrow);
+      await createTimeline(
+        tx,
+        userId,
+        `${milestone.title} funded`,
+        `${formatCurrencyFromCents(amountCents)} secured for ${escrow.reference}`,
+        "funding",
+      );
+      await createTimeline(
+        tx,
+        sellerId,
+        `${milestone.title} funded`,
+        "Work can begin on this milestone",
+        "funding",
+      );
+      await createNotification(
+        tx,
+        sellerId,
+        "Milestone funded",
+        `${milestone.title} is funded and ready for work.`,
+        "Just now",
+        escrow.id,
+      );
+      await dismissOpenNotificationsForEscrow(tx, userId, escrow.id);
+
+      return {
+        success: true,
+        escrowId: escrow.reference,
+        milestoneId: milestone.id,
+        fundingStatus: isFullyFunded ? "funded" : "partially_funded",
+        fundedCents: transfer.balances.fundedCents,
+        fundedAt: fundedAt.toISOString(),
+      };
+    },
+  );
 }
 
 export async function releaseEscrow(prisma: PrismaClient, userId: string, reference: string) {

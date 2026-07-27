@@ -1044,6 +1044,116 @@ describe("MyEscrow API", () => {
       refundedCents: 0,
       disputedCents: 0,
     });
+    expect(fundedView.fundingMode).toBe("full");
+  });
+
+  it("funds only the first milestone when milestone funding is selected", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-tier-funded-escrow",
+      },
+      payload: {
+        title: "Tier-funded project",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        creatorParty: { type: "individual" },
+        amount: 300,
+        signatureDataUrl: creatorSignature,
+        milestones: [
+          { title: "Discovery", amount: 100 },
+          { title: "Delivery", amount: 200 },
+        ],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+
+    const approval = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    });
+    expect(approval.statusCode).toBe(200);
+
+    const beforeFunding = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === reference);
+    const [firstMilestone, secondMilestone] = beforeFunding.milestones;
+
+    const funding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${firstMilestone.id}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-tier-${reference}-${firstMilestone.id}`,
+      },
+    });
+    expect(funding.statusCode).toBe(200);
+    expect(funding.json()).toEqual(expect.objectContaining({
+      milestoneId: firstMilestone.id,
+      fundingStatus: "partially_funded",
+      fundedCents: 10_000,
+    }));
+
+    const fundedView = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === reference);
+    expect(fundedView).toEqual(expect.objectContaining({
+      lifecycleStatus: "funded",
+      fundingStatus: "partially_funded",
+      fundingMode: "milestone",
+    }));
+    expect(fundedView.balances.fundedCents).toBe(10_000);
+    expect(fundedView.milestones[0]).toEqual(expect.objectContaining({
+      fundingStatus: "funded",
+      fundedCents: 10_000,
+    }));
+    expect(fundedView.milestones[1]).toEqual(expect.objectContaining({
+      fundingStatus: "not_funded",
+      fundedCents: 0,
+    }));
+
+    const earlySecondFunding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-tier-early-${reference}-${secondMilestone.id}`,
+      },
+    });
+    expect(earlySecondFunding.statusCode).toBe(409);
+    expect(earlySecondFunding.json().error).toContain("Complete the earlier milestone");
+
+    const unfundedSubmission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-unfunded-${reference}-${secondMilestone.id}`,
+      },
+      payload: { note: "Trying to submit before this tier is funded." },
+    });
+    expect(unfundedSubmission.statusCode).toBe(409);
+    expect(unfundedSubmission.json().error).toContain("must fund this milestone");
+
+    const fullFunding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-full-after-tier-${reference}`,
+      },
+    });
+    expect(fullFunding.statusCode).toBe(409);
+    expect(fullFunding.json().error).toContain("uses milestone funding");
   });
 
   it("blocks legacy full release and cancellation after funding", async () => {

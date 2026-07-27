@@ -8,6 +8,10 @@ const [
 const markdownPath = path.resolve(markdownArg);
 const htmlPath = path.resolve(htmlArg);
 const markdown = await readFile(markdownPath, "utf8");
+const isMeetingNotes = path.basename(markdownPath).includes("MEETING_NOTES");
+const documentTitle = isMeetingNotes
+  ? "MyEscrow developer meeting notes"
+  : "MyEscrow product and technical overview";
 
 const escapeHtml = (value) =>
   value
@@ -181,7 +185,7 @@ const html = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MyEscrow product and technical overview</title>
+    <title>${documentTitle}</title>
     <style>
       @page { size: A4; margin: 20mm 17mm 18mm; }
       * { box-sizing: border-box; }
@@ -306,6 +310,35 @@ const html = `<!doctype html>
       @media print {
         html, body { background: #fff; }
       }
+      ${isMeetingNotes ? `
+      @page { size: A4; margin: 16mm 17mm 16mm; }
+      body {
+        font-size: 9.5pt;
+        line-height: 1.4;
+      }
+      h1 {
+        margin: 10mm 0 7mm;
+        max-width: 170mm;
+        font-size: 28pt;
+      }
+      h1::before {
+        content: "MYESCROW MEETING BRIEF";
+      }
+      h2 {
+        margin: 5.5mm 0 3mm;
+        padding: 0 0 2mm;
+        font-size: 16.5pt;
+        break-before: auto;
+        page-break-before: auto;
+      }
+      h3 {
+        margin: 4mm 0 2mm;
+        font-size: 12.5pt;
+      }
+      p { margin-bottom: 2.6mm; }
+      ul, ol { margin: 1.8mm 0 3.2mm; }
+      li + li { margin-top: .9mm; }
+      ` : ""}
     </style>
   </head>
   <body>

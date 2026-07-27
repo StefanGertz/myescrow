@@ -556,11 +556,18 @@ export async function requestFundedCancellation(
       const escrow = await tx.escrow.findUnique({ where: { reference } });
       if (!escrow) throw new AppError("Escrow not found.", 404);
       requireEscrowParty(escrow, userId);
-      if (escrow.lifecycleStatus !== "funded" || escrow.fundingStatus !== "funded") {
+      if (
+        escrow.lifecycleStatus !== "funded"
+        || !["funded", "partially_funded"].includes(escrow.fundingStatus)
+      ) {
         throw new AppError("A funded cancellation request is not available in this escrow state.", 409);
       }
       const transition = await tx.escrow.updateMany({
-        where: { id: escrow.id, lifecycleStatus: "funded", fundingStatus: "funded" },
+        where: {
+          id: escrow.id,
+          lifecycleStatus: "funded",
+          fundingStatus: { in: ["funded", "partially_funded"] },
+        },
         data: {
           lifecycleStatus: input.mode === "mutual" ? "cancellation_pending" : "cancellation_review",
           stage: input.mode === "mutual" ? "Cancellation requested" : "Cancellation under review",
