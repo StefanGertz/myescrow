@@ -37,17 +37,45 @@ export async function authorizeMilestoneProofUpload(
   prisma: PrismaClient,
   userId: string,
   reference: string,
+  milestoneId: number,
 ) {
   const escrow = await prisma.escrow.findFirst({
     where: {
       reference,
       OR: [{ ownerId: userId }, { buyerId: userId }, { sellerId: userId }],
     },
-    select: { sellerId: true },
+    select: {
+      id: true,
+      sellerId: true,
+      lifecycleStatus: true,
+      fundingMode: true,
+      milestones: {
+        where: { id: milestoneId },
+        select: { id: true, amountCents: true },
+      },
+    },
   });
   if (!escrow) throw new AppError("Escrow not found.", 404);
   if (escrow.sellerId !== userId) {
     throw new AppError("Only the seller can upload milestone proof.", 403);
+  }
+  if (escrow.lifecycleStatus !== "funded") {
+    throw new AppError("Milestone proof can only be uploaded after funding.", 400);
+  }
+  const milestone = escrow.milestones[0];
+  if (!milestone) throw new AppError("Milestone not found.", 404);
+  if (escrow.fundingMode !== "full") {
+    const funding = await prisma.escrowLedgerEntry.aggregate({
+      where: {
+        escrowId: escrow.id,
+        milestoneId: milestone.id,
+        movementType: "fund",
+      },
+      _sum: { amountCents: true },
+    });
+    if ((funding._sum.amountCents ?? 0) < milestone.amountCents) {
+      throw new AppError("The buyer must fund this milestone before proof can be uploaded.", 409);
+    }
   }
 }
 

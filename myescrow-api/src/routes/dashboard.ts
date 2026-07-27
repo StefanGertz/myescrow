@@ -435,7 +435,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
       const isMultipart = request.isMultipart();
       if (isMultipart) {
-        await authorizeMilestoneProofUpload(secured.prisma, user.id, id);
+        await authorizeMilestoneProofUpload(secured.prisma, user.id, id, milestoneId);
       }
       const parsed = isMultipart
         ? await parseMilestoneProofSubmission(request)

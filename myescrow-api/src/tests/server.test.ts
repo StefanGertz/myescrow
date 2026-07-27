@@ -1144,6 +1144,32 @@ describe("MyEscrow API", () => {
     expect(unfundedSubmission.statusCode).toBe(409);
     expect(unfundedSubmission.json().error).toContain("must fund this milestone");
 
+    const unfundedProofForm = new FormData();
+    unfundedProofForm.append("note", "Trying to upload proof before this tier is funded.");
+    unfundedProofForm.append(
+      "proofs",
+      new Blob(["unfunded proof"], { type: "text/plain" }),
+      "unfunded-proof.txt",
+    );
+    const unfundedProofRequest = new Request("http://localhost/upload", {
+      method: "POST",
+      body: unfundedProofForm,
+    });
+    const unfundedProofSubmission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-unfunded-proof-${reference}-${secondMilestone.id}`,
+        "Content-Type": unfundedProofRequest.headers.get("Content-Type") ?? "",
+      },
+      payload: Buffer.from(await unfundedProofRequest.arrayBuffer()),
+    });
+    expect(unfundedProofSubmission.statusCode).toBe(409);
+    expect(unfundedProofSubmission.json().error).toContain(
+      "must fund this milestone before proof can be uploaded",
+    );
+
     const fullFunding = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${reference}/fund`,

@@ -112,7 +112,7 @@ export async function submitMilestoneWork(
       }
       const milestone = escrow.milestones.find((item) => item.id === milestoneId);
       if (!milestone) throw new AppError("Milestone not found.", 404);
-      if (escrow.fundingMode === "milestone") {
+      if (escrow.fundingMode !== "full") {
         const funding = await tx.escrowLedgerEntry.aggregate({
           where: {
             escrowId: escrow.id,
