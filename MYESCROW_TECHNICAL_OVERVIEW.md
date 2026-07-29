@@ -8,7 +8,7 @@ Status: functional staging MVP
 
 MyEscrow is a milestone-based transaction application for buyers and sellers. The current system includes a Next.js frontend, Fastify API, PostgreSQL/Prisma data model, retryable background worker, internal financial ledger, operations console, and staging deployment.
 
-The word “escrow” currently describes an application-level ledger and simulated wallet. There is no payment processor, bank/custody integration, KYC/AML program, regulated funds flow, or production evidence-storage system. Treat all balances and top-ups as test data until those systems and the associated legal/compliance controls exist.
+The word “escrow” currently describes an application-level ledger and simulated wallet. There is no payment processor, bank/custody integration, KYC/AML program, regulated funds flow, or production-grade evidence object store and governance program. Treat all balances and top-ups as test data until those systems and the associated legal/compliance controls exist.
 
 The implemented product model includes immutable agreement versions, idempotent money commands, an append-only escrow ledger, reconciliation, conditional state transitions, audit events, and recovery jobs. This document describes the product behavior and technical implementation as they exist in the reviewed snapshot.
 
@@ -43,18 +43,19 @@ The frontend repository advanced to `d839e77` after the API release at root `0f9
 
 1. A person signs up as an individual or a business representative.
 2. Email verification is required by default. Login returns an expiring JWT.
-3. The creator chooses whether they are the buyer or seller, defines the counterparty, amount, description, and milestones, signs, and creates an escrow.
+3. The creator chooses whether they are the buyer or seller, defines the counterparty, amount, description, funding plan, and milestones, signs, and creates an escrow. The funding plan is part of the agreement rather than a choice made after signing.
 4. Creation atomically stores the escrow, agreement version, signature, invitation delivery, and outbox event. The email provider can fail without losing the escrow.
 5. An existing counterparty receives the escrow immediately. A new or unverified counterparty claims pending escrows after signup/verification.
 6. The counterparty can sign/approve, reject, or request agreement/milestone changes. Material changes create a new agreement version and invalidate earlier consent.
 7. Both buyer and seller must sign the current locked agreement before funding.
-8. The buyer chooses either full funding or staged funding. Full funding deposits the entire agreement amount; staged funding accepts any positive deposit up to the remaining agreement total.
+8. The buyer funds using the signed agreement's plan. Full funding deposits the entire agreement amount; staged funding accepts any positive deposit up to the remaining agreement total.
 9. Each staged deposit creates one ledger and wallet transaction. Cumulative staged funds are allocated across milestones in agreement order, so one deposit may fully secure several milestones and partially secure the next.
-10. The seller submits milestone work with a note and optional evidence metadata. Earlier milestones must be completed first, and the API rejects both work submissions and proof uploads unless that milestone is funded or the escrow uses full funding.
+10. The seller submits milestone work with a note and optional managed proof files. Earlier milestones must be completed first, and the API rejects both work submissions and proof uploads unless that milestone is funded or the escrow uses full funding.
 11. The buyer can approve and release the milestone, request a revision with a reason, or open a dispute.
-12. A dispute freezes only the affected held amount. Parties can add evidence metadata, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence.
+12. A dispute freezes only the affected held amount. Parties can add managed evidence files, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence. Historic metadata-only references remain visible but the API no longer accepts new client-authored storage keys. Once arbitration is requested, support/admin operators and the affected buyer/seller can view and download the same integrity-identified arbitration report.
 13. A funded cancellation can be mutual or unilateral. Mutual acceptance refunds eligible unreleased and undisputed funds. A unilateral request escalates without moving money.
-14. Notifications, wallet history, escrow ledger history, and audit events provide a record of activity.
+14. Once both accounts are attached, the buyer and seller can exchange append-only messages on the escrow at any lifecycle state, including during a dispute and after completion or cancellation. A new message notifies the other party. The complete timestamped conversation is retained with the escrow and is included in the permissioned arbitration record; material that must be treated as formal dispute evidence still goes through the evidence flow.
+15. Notifications, wallet history, escrow ledger history, chat history, and audit events provide a record of activity.
 
 ### Operational lifecycle
 
@@ -69,9 +70,9 @@ A separate worker:
 - reconciles escrow ledger, wallet transactions, and milestone state daily;
 - records heartbeat and failure information.
 
-Support/admin APIs expose worker health, failed jobs, outbox failures, aged escrows, duplicate command replays, reconciliation exceptions, dispute deadlines, arbitration requests, audit history, and safe retry/extension commands.
+Support/admin APIs expose worker health, failed jobs, outbox failures, aged escrows, duplicate command replays, reconciliation exceptions, dispute deadlines, arbitration requests, arbitration reports containing the signed agreement, parties, evidence manifests, complete chat transcripts, ledger and chronology, audit history, and safe retry/extension commands.
 
-The web operations console implements health/alert views, failed operational-job retry, operator management, and escrow detail drill-down. Some support APIs do not yet have corresponding web controls; see “Known limitations and incomplete areas.”
+The web operations console implements health/alert views, printable/downloadable arbitration reports, failed operational-job retry, operator management, and escrow detail drill-down. The affected buyer and seller can access the same arbitration report from their dispute workspace. Its PDF embeds managed evidence as original-file attachments and adds visible preview pages for valid, safety-limited PDF, JPEG, and PNG exhibits; other formats are not converted. Exhibit retrieval is arbitration-only and limited to those parties or support/admin operators. The API and browser both verify each managed file’s stored byte count and SHA-256, and generation stops when managed exhibits exceed 100 MB in aggregate or any exhibit fails verification. Some support APIs do not yet have corresponding web controls; see “Known limitations and incomplete areas.”
 
 ## System architecture
 
@@ -166,7 +167,8 @@ The root `index.html` and generated documents are design/presentation artifacts,
 | `idempotencyService.ts` | Request hashing, replay detection, original-response replay |
 | `invitationService.ts` | Transactional invitation outbox, delivery status, retry/backoff |
 | `milestoneReviewService.ts` | Submissions, review history, review deadlines |
-| `disputeService.ts` | Disputes, evidence metadata, settlements, arbitration request, cancellations |
+| `disputeService.ts` | Disputes, managed evidence records and legacy metadata, settlements, arbitration request, cancellations |
+| `arbitrationReportService.ts` | Arbitration-only canonical reports, exhibit resolution, integrity-checked file retrieval, and party/operator authorization |
 | `operationsService.ts` | Audit events, durable jobs, worker health, safe recovery commands |
 | `operatorService.ts` | First admin, support/admin role management |
 | `emailService.ts` | Resend payloads for verification, reset, invitation, and change requests |
@@ -183,7 +185,8 @@ The authoritative schema is `myescrow-api/prisma/schema.prisma`. Main groups:
 - Consent: `AgreementVersion`, `AgreementSignature`
 - Delivery: `InvitationDelivery`, `OutboxEvent`
 - Work review: `MilestoneSubmission`, `MilestoneEvidenceReference`, `MilestoneReview`
-- Dispute/cancellation: `Dispute`, `DisputeEvidenceSubmission`, `DisputeResolutionAllocation`, `CancellationRequest`
+- Dispute/cancellation: `Dispute`, `DisputeEvidenceSubmission`, `DisputeEvidenceReference`, `DisputeResolutionAllocation`, `CancellationRequest`
+- Communication: `EscrowMessage`
 - Money: `WalletTransaction`, `EscrowLedgerEntry`, `IdempotencyRecord`
 - Operations: `OperationalJob`, `OperationalWorkerState`, `ReconciliationRun`, `AuditEvent`
 - Read-model support: `Notification`, `TimelineEvent`, `Sequence`
@@ -210,7 +213,7 @@ rejected
 
 Milestone values include `not_started`, `submitted`, `revision_requested`, `released`, `disputed`, `settled`, and `cancelled`. Dispute values include `open`, `resolution_proposed`, `arbitration_requested`, `resolving`, and `resolved`.
 
-`Escrow.fundingMode` is `full`, `milestone`, or null before the buyer chooses. The legacy database value `milestone` represents staged funding in the product UI. Coverage is derived by allocating cumulative `fund` ledger amounts across ordered milestone amounts; individual staged deposits do not need to equal or belong to one milestone.
+`Escrow.fundingMode` is `full`, `milestone`, or null only for legacy proposals created before funding-plan selection became an agreement term. New creation flows require the creator to choose a plan, store it on both `Escrow` and the immutable `AgreementVersion`, and show it to the counterparty before signing. The legacy database value `milestone` represents staged funding in the product UI. Coverage is derived by allocating cumulative `fund` ledger amounts across ordered milestone amounts; individual staged deposits do not need to equal or belong to one milestone.
 
 Because these are strings spread across services, search all transitions before changing a status name.
 
@@ -250,6 +253,7 @@ The strongest coverage is on:
 - funding;
 - milestone submit/approve;
 - dispute open/evidence/proposal/arbitration/resolve;
+- escrow chat messages;
 - funded cancellation request/accept;
 - wallet top-up/withdrawal;
 - operational retry/extension/role changes.
@@ -269,8 +273,9 @@ Main route groups:
 | Agreement | create/update escrow, approve/reject, sign, request/apply changes, invitation resend/extend |
 | Money | fund entire escrow, add staged funding, milestone approve, ledger history, top-up, withdraw |
 | Work review | submit/resubmit milestone, request revision, apply milestone changes |
-| Dispute/cancellation | open dispute, evidence, proposal, arbitration, resolve, request/accept cancellation |
-| Operations | health, jobs, retry, audit, evidence, invitation recovery, operator roles |
+| Communication | list and send escrow-scoped buyer/seller messages |
+| Dispute/cancellation | open dispute, managed or metadata-only evidence, proposal, arbitration, resolve, request/accept cancellation |
+| Operations | health, jobs, retry, audit, arbitration reports and authorized exhibit downloads, invitation recovery, operator roles |
 
 The API README route table is useful but is not exhaustive relative to the registered routes.
 
@@ -314,7 +319,7 @@ The same codebase contains three meaningful combinations:
 - Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
 - Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
 
-The immersive transaction screen uses `stagedFundingSupported` in live escrow responses as the arbitrary-amount compatibility signal. During a frontend/backend rollout gap, it disables staged funding and shows `Backend update pending`; this prevents a newer UI from confirming one deposit amount while an older API applies another. This guard complements—but does not replace—the deployment verification described below.
+The immersive transaction screen uses `stagedFundingSupported` in live escrow responses as the arbitrary-amount compatibility signal. Escrow-list responses similarly advertise `fundingPlanSelectionSupported` before the creation wizard allows a funding plan to become an agreement term. During a frontend/backend rollout gap, the affected control is disabled and shows `Backend update pending`; this prevents a newer UI from collecting terms an older API would silently discard. These guards complement—but do not replace—the deployment verification described below.
 
 `NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable, so its value is part of public build-time configuration.
 
@@ -440,14 +445,14 @@ Latest local verification:
 
 | Project | Command | Result |
 | --- | --- | --- |
-| API | `npm test` | 2 files, 41 tests passed |
+| API | `npm test` | 2 files, 42 tests passed |
 | API | `npm run build` | passed |
 | API | `npm run lint` | TypeScript no-emit check passed |
-| Frontend | `npm test` | 15 files, 45 tests passed |
+| Frontend | `npm test` | 16 files, 54 tests passed |
 | Frontend | `npm run build` | passed; 32 pages/routes generated |
 | Frontend | `npm run lint` | passed |
 
-Backend tests create an isolated PostgreSQL schema, deploy all 18 migrations, seed it, run the suite, and drop the schema. If no test/database URL is reachable, the runner can start a disposable PostgreSQL 16 container.
+Backend tests create an isolated PostgreSQL schema, deploy all 19 migrations, seed it, run the suite, and drop the schema. If no test/database URL is reachable, the runner can start a disposable PostgreSQL 16 container.
 
 There is no measured coverage threshold, browser end-to-end suite, payment-provider contract suite, load test, penetration test, accessibility audit, or migration rollback test.
 
@@ -513,7 +518,7 @@ The deployment flow is:
 6. The script verifies container health, image identity, `/version`, milestone-funding route registration, and the worker process. Failed verification restores the previous containers; database backups are retained and migrations are never automatically reversed.
 7. Backend CI waits for the public API to report the expected SHA and runs `npm run smoke:deployment`.
 
-`GET /version` returns the deployed source SHA and advertised API capabilities, including `staged_funding_amounts` on compatible releases. The immersive frontend uses the corresponding capability present in current escrow responses to keep staged funding disabled during a backend/frontend rollout gap.
+`GET /version` returns the deployed source SHA and advertised API capabilities, including `staged_funding_amounts` and `agreement_funding_plan` on compatible releases. The immersive frontend uses corresponding capability fields in customer responses to keep staged funding and agreement-plan selection disabled during a backend/frontend rollout gap.
 
 Useful live checks:
 
@@ -550,7 +555,7 @@ The first automated run deployed `0f95234`; CI did not turn green until the publ
 
 - Wallet top-up and withdrawal update database balances only. No payment provider, bank, custody account, webhook flow, settlement state, reversal, or chargeback integration exists.
 - KYC/KYB, AML/sanctions screening, transaction monitoring, regulated custody, and jurisdiction-specific compliance are outside the current system.
-- Evidence models contain object keys and file metadata, but there is no upload/download service, private object-store authorization, malware scanning, retention workflow, or encryption/key policy.
+- Managed milestone and dispute evidence uses filesystem storage with generated object keys, file metadata, and SHA-256 values. Arbitration downloads authorize the linked parties or support/admin operators, verify size and hash on the API and in the browser, and embed managed originals as PDF attachments. Valid PDF, JPEG, and PNG exhibits can also appear as visible preview pages; other formats are not converted. Legacy JSON references remain metadata-only unless they match a managed file in the same arbitration. The packet has a 100 MB managed-exhibit limit. There is still no production private object-store policy, malware scanning, retention workflow, or encryption/key policy.
 - Arbitration creates an `arbitration_requested` state and operations alert. It does not implement a staff adjudication or staff-authorized payout command.
 - Currency is effectively fixed to USD even though currency appears on ledger and agreement records.
 
@@ -568,7 +573,7 @@ The first automated run deployed `0f95234`; CI did not turn green until the publ
 
 - `LiveDashboard` submits escrow creation without the PNG signature required by the Fastify schema. The frontend hook marks `signatureDataUrl` optional, so the mismatch is not caught by TypeScript.
 - Frontend mutation hooks create a new UUID when a mutation is invoked. A separate user retry after an uncertain response uses a new idempotency key rather than the original command key.
-- The operations API supports outbox retry, invitation extension, dispute evidence inspection, and audit history, while the web operations interface exposes only part of that functionality.
+- The operations API supports outbox retry, invitation extension, arbitration report inspection, and audit history, while the web operations interface exposes only part of that functionality.
 - The immersive dashboard and `LiveDashboard` are different product surfaces with different feature coverage.
 - Some Next.js mock handlers implement behavior that is intentionally simpler than the live API.
 - The API README route table is incomplete relative to registered Fastify routes.
@@ -580,6 +585,7 @@ The first automated run deployed `0f95234`; CI did not turn green until the publ
 - Lifecycle, milestone, delivery, and dispute statuses are unrestricted strings spread across services.
 - Automated coverage consists primarily of API integration tests and frontend component/utility tests. There is no browser end-to-end suite, coverage threshold, load test, accessibility audit, payment-provider contract suite, or migration rollback test.
 - Dashboard freshness relies partly on polling.
+- Escrow chat uses three-second polling rather than WebSockets and currently has no attachments, edit/delete controls, read receipts, typing/presence signals, moderation controls, or configurable retention/purge workflow. Messages are currently retained in the primary database with restrictive escrow and sender foreign keys and are available to support/admin reviewers only through a linked dispute’s arbitration record.
 - Observability is limited to structured application/container logs, stored worker heartbeat, operations health queries, and database reconciliation records; there is no tracing or error-tracking integration.
 - Local and test Compose use PostgreSQL 16, while staging Compose declares PostgreSQL 15.
 - `.env.example` contains the unused `DATA_STORE_PATH` variable.
@@ -598,6 +604,7 @@ The code makes temporary assumptions in areas where final product behavior has n
 - Who adjudicates arbitration and how allocations are authorized
 - Refund, reversal, chargeback, fee, tax, and FX behavior
 - Evidence/file retention and privacy rights
+- Chat retention, moderation, abuse reporting, and when chat content can be admitted into a dispute record
 - Notification channels and legally effective notice
 - Support service levels and escalation ownership
 
@@ -646,3 +653,4 @@ git -C myescrow-web log -1 --oneline
 - `docs/operations-incident-runbook.md`: worker behavior, support roles, and incident procedures
 - `docs/unhappy-workflow-remediation-plan.md`: rationale behind the ledger, agreement, evidence, dispute, and recovery models
 - `docs/unhappy-vs-remediated-paths.md`: comparison of the earlier and current failure-handling paths
+- `docs/arbitration-report.md`: arbitration report contents, access boundaries, integrity model, and exhibit handling limits

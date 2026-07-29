@@ -1,12 +1,20 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
 import {
   buildCancellationReference,
   buildDisputeReference,
   buildNotificationId,
 } from "../utils/id";
-import { executeIdempotentCommand } from "./idempotencyService";
+import {
+  executeIdempotentCommand,
+  executeIdempotentCommandWithMetadata,
+} from "./idempotencyService";
+import {
+  MAX_ARBITRATION_EVIDENCE_BYTES,
+  MAX_ARBITRATION_EVIDENCE_FILES,
+} from "./milestoneProofService";
 import { applyEscrowTransfer, getEscrowLedgerBalances } from "./moneyIntegrityService";
+import type { MilestoneEvidenceInput } from "./milestoneReviewService";
 import { getNextSequenceValue } from "./sequenceService";
 
 const ACTIVE_DISPUTE_STATUSES = ["open", "resolution_proposed", "resolving", "arbitration_requested"];
@@ -20,6 +28,25 @@ export type EvidenceReferenceInput = {
   sizeBytes: number;
   sha256: string;
 };
+
+export async function authorizeDisputeEvidenceUpload(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+) {
+  const dispute = await prisma.dispute.findUnique({
+    where: { reference },
+    include: { escrow: true },
+  });
+  if (!dispute?.escrow) throw new AppError("Dispute not found.", 404);
+  requireEscrowParty(dispute.escrow, userId);
+  if (!["open", "resolution_proposed"].includes(dispute.status)) {
+    throw new AppError("This dispute is no longer accepting evidence.", 409);
+  }
+  if (dispute.evidenceWindowEndsAt && dispute.evidenceWindowEndsAt < new Date()) {
+    throw new AppError("The evidence window has closed.", 409);
+  }
+}
 
 async function notify(
   tx: Prisma.TransactionClient,
@@ -56,6 +83,42 @@ function otherPartyId(
   const otherId = escrow.buyerId === userId ? escrow.sellerId : escrow.buyerId;
   if (!otherId) throw new AppError("Both escrow parties must be attached before this action.", 409);
   return otherId;
+}
+
+async function managedArbitrationEvidence(
+  tx: Prisma.TransactionClient,
+  disputeId: number,
+  milestoneId: number | null,
+) {
+  const [
+    milestoneEvidence,
+    milestoneEvidenceCount,
+    disputeEvidence,
+    disputeEvidenceCount,
+  ] = await Promise.all([
+    milestoneId
+      ? tx.milestoneEvidenceReference.aggregate({
+          where: { submission: { milestoneId } },
+          _sum: { sizeBytes: true },
+        })
+      : Promise.resolve({ _sum: { sizeBytes: null } }),
+    milestoneId
+      ? tx.milestoneEvidenceReference.count({
+          where: { submission: { milestoneId } },
+        })
+      : Promise.resolve(0),
+    tx.disputeEvidenceReference.aggregate({
+      where: { submission: { disputeId } },
+      _sum: { sizeBytes: true },
+    }),
+    tx.disputeEvidenceReference.count({
+      where: { submission: { disputeId } },
+    }),
+  ]);
+  return {
+    bytes: (milestoneEvidence._sum.sizeBytes ?? 0) + (disputeEvidence._sum.sizeBytes ?? 0),
+    files: milestoneEvidenceCount + disputeEvidenceCount,
+  };
 }
 
 export async function openMilestoneDispute(
@@ -172,21 +235,36 @@ export async function submitDisputeEvidence(
   prisma: PrismaClient,
   userId: string,
   reference: string,
-  input: { note?: string | undefined; evidence?: EvidenceReferenceInput[] | undefined },
+  input: {
+    note?: string | undefined;
+    evidence?: EvidenceReferenceInput[] | undefined;
+    storedEvidence?: MilestoneEvidenceInput[] | undefined;
+  },
   idempotencyKey: string,
 ) {
   const note = input.note?.trim() || null;
   const evidence = input.evidence ?? [];
-  if (!note && evidence.length === 0) {
+  const storedEvidence = input.storedEvidence ?? [];
+  if (!note && evidence.length === 0 && storedEvidence.length === 0) {
     throw new AppError("Add an evidence note or at least one evidence reference.", 400);
   }
-  return executeIdempotentCommand(
+  const idempotencyStoredEvidence = storedEvidence.map((item) => (
+    item.objectKey.startsWith("milestone-proofs/")
+      ? {
+          fileName: item.fileName,
+          contentType: item.contentType,
+          sizeBytes: item.sizeBytes,
+          sha256: item.sha256,
+        }
+      : item
+  ));
+  const result = await executeIdempotentCommandWithMetadata(
     prisma,
     {
       userId,
       key: idempotencyKey,
       command: "submit_dispute_evidence",
-      payload: { reference, note, evidence },
+      payload: { reference, note, evidence, storedEvidence: idempotencyStoredEvidence },
     },
     async (tx) => {
       const dispute = await tx.dispute.findUnique({
@@ -195,11 +273,42 @@ export async function submitDisputeEvidence(
       });
       if (!dispute?.escrow) throw new AppError("Dispute not found.", 404);
       requireEscrowParty(dispute.escrow, userId);
-      if (!["open", "resolution_proposed"].includes(dispute.status)) {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Dispute" WHERE "id" = ${dispute.id} FOR UPDATE`,
+      );
+      const lockedState = await tx.dispute.findUniqueOrThrow({
+        where: { id: dispute.id },
+        select: {
+          status: true,
+          evidenceWindowEndsAt: true,
+          milestoneId: true,
+        },
+      });
+      if (!["open", "resolution_proposed"].includes(lockedState.status)) {
         throw new AppError("This dispute is no longer accepting evidence.", 409);
       }
-      if (dispute.evidenceWindowEndsAt && dispute.evidenceWindowEndsAt < new Date()) {
+      if (lockedState.evidenceWindowEndsAt && lockedState.evidenceWindowEndsAt < new Date()) {
         throw new AppError("The evidence window has closed.", 409);
+      }
+      const existingEvidence = await managedArbitrationEvidence(
+        tx,
+        dispute.id,
+        lockedState.milestoneId,
+      );
+      const cumulativeEvidenceBytes =
+        existingEvidence.bytes
+        + storedEvidence.reduce((total, item) => total + item.sizeBytes, 0);
+      if (cumulativeEvidenceBytes > MAX_ARBITRATION_EVIDENCE_BYTES) {
+        throw new AppError(
+          "Managed evidence for one arbitration packet may total no more than 100 MB.",
+          413,
+        );
+      }
+      if (existingEvidence.files + storedEvidence.length > MAX_ARBITRATION_EVIDENCE_FILES) {
+        throw new AppError(
+          "Managed evidence for one arbitration packet may contain no more than 100 files.",
+          413,
+        );
       }
       const submission = await tx.disputeEvidenceSubmission.create({
         data: {
@@ -207,6 +316,7 @@ export async function submitDisputeEvidence(
           submitterId: userId,
           note,
           evidence,
+          files: { create: storedEvidence },
         },
       });
       await notify(
@@ -219,6 +329,7 @@ export async function submitDisputeEvidence(
       return { success: true, disputeId: dispute.reference, evidenceSubmissionId: submission.id };
     },
   );
+  return { ...result.value, replayed: result.replayed };
 }
 
 export async function requestDisputeArbitration(
@@ -250,6 +361,26 @@ export async function requestDisputeArbitration(
           dispute.status === "arbitration_requested"
             ? "Arbitration has already been requested."
             : "This dispute can no longer be moved to arbitration.",
+          409,
+        );
+      }
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Dispute" WHERE "id" = ${dispute.id} FOR UPDATE`,
+      );
+      const managedEvidence = await managedArbitrationEvidence(
+        tx,
+        dispute.id,
+        dispute.milestoneId,
+      );
+      if (managedEvidence.bytes > MAX_ARBITRATION_EVIDENCE_BYTES) {
+        throw new AppError(
+          "Managed evidence exceeds the 100 MB arbitration packet limit. Contact support before requesting arbitration.",
+          409,
+        );
+      }
+      if (managedEvidence.files > MAX_ARBITRATION_EVIDENCE_FILES) {
+        throw new AppError(
+          "Managed evidence exceeds the 100-file arbitration packet limit. Contact support before requesting arbitration.",
           409,
         );
       }

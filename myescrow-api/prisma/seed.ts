@@ -18,6 +18,7 @@ async function main() {
     prisma.reconciliationRun.deleteMany(),
     prisma.disputeResolutionAllocation.deleteMany(),
     prisma.disputeEvidenceSubmission.deleteMany(),
+    prisma.escrowMessage.deleteMany(),
     prisma.cancellationRequest.deleteMany(),
     prisma.milestoneReview.deleteMany(),
     prisma.milestoneEvidenceReference.deleteMany(),

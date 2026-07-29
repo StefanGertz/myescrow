@@ -21,6 +21,15 @@ if (!version.capabilities?.includes("milestone_funding")) {
 if (!version.capabilities?.includes("staged_funding_amounts")) {
   throw new Error("Deployed API does not advertise flexible staged funding amounts.");
 }
+if (!version.capabilities?.includes("agreement_funding_plan")) {
+  throw new Error("Deployed API does not advertise agreement funding-plan selection.");
+}
+if (!version.capabilities?.includes("escrow_chat")) {
+  throw new Error("Deployed API does not advertise escrow chat.");
+}
+if (!version.capabilities?.includes("arbitration_reports")) {
+  throw new Error("Deployed API does not advertise arbitration reports.");
+}
 
 const routeProbe = await fetch(
   `${apiBase}/api/dashboard/escrows/DEPLOYMENT-PROBE/milestones/1/fund`,
@@ -33,6 +42,26 @@ if (routeProbe.status !== 401) {
   const body = await routeProbe.text();
   throw new Error(
     `Milestone funding route probe returned ${routeProbe.status}; expected 401. ${body}`,
+  );
+}
+
+const chatRouteProbe = await fetch(
+  `${apiBase}/api/dashboard/escrows/DEPLOYMENT-PROBE/messages`,
+);
+if (chatRouteProbe.status !== 401) {
+  const body = await chatRouteProbe.text();
+  throw new Error(
+    `Escrow chat route probe returned ${chatRouteProbe.status}; expected 401. ${body}`,
+  );
+}
+
+const arbitrationReportRouteProbe = await fetch(
+  `${apiBase}/api/dashboard/disputes/DEPLOYMENT-PROBE/arbitration-report`,
+);
+if (arbitrationReportRouteProbe.status !== 401) {
+  const body = await arbitrationReportRouteProbe.text();
+  throw new Error(
+    `Arbitration report route probe returned ${arbitrationReportRouteProbe.status}; expected 401. ${body}`,
   );
 }
 

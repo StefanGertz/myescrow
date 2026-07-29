@@ -30,25 +30,31 @@ import {
 import {
   acceptDisputeResolution,
   acceptFundedCancellation,
+  authorizeDisputeEvidenceUpload,
   openMilestoneDispute,
   proposeDisputeResolution,
   requestDisputeArbitration,
   requestFundedCancellation,
   submitDisputeEvidence,
 } from "../services/disputeService";
+import { listEscrowMessages, sendEscrowMessage } from "../services/chatService";
+import { getArbitrationReport } from "../services/arbitrationReportService";
 import { sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { processInvitationOutbox } from "../services/invitationService";
 import {
   authorizeMilestoneProofUpload,
   openMilestoneProof,
+  parseDisputeEvidenceSubmission,
   parseMilestoneProofSubmission,
   removeMilestoneProofs,
+  removeStoredEvidenceFiles,
 } from "../services/milestoneProofService";
 import { findUserById } from "../services/userService";
 import { recordStandaloneWalletTransfer } from "../services/moneyIntegrityService";
 import { AppError } from "../utils/errors";
 import { dollarsToCents } from "../utils/currency";
 import { nowIso } from "../utils/dates";
+import { attachmentContentDisposition } from "../utils/contentDisposition";
 
 const signatureDataUrlSchema = z
   .string()
@@ -73,6 +79,7 @@ const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpartyEmail: z.string().email(),
   amount: z.number().positive(),
+  fundingMode: z.enum(["full", "milestone"]).optional(),
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
   creatorParty: partyIdentitySchema.default({ type: "individual" }),
   category: z.string().optional(),
@@ -105,27 +112,11 @@ const updateDraftEscrowSchema = z.object({
 
 const milestoneSubmissionSchema = z.object({
   note: z.string().trim().max(5_000).optional(),
-  evidence: z.array(z.object({
-    objectKey: z.string().trim().min(1).max(1_000),
-    fileName: z.string().trim().min(1).max(255),
-    contentType: z.string().trim().min(1).max(120),
-    sizeBytes: z.number().int().positive().max(25_000_000),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/i),
-  })).max(10).optional(),
-});
-
-const disputeEvidenceReferenceSchema = z.object({
-  objectKey: z.string().trim().min(1).max(1_000),
-  fileName: z.string().trim().min(1).max(255),
-  contentType: z.string().trim().min(1).max(120),
-  sizeBytes: z.number().int().positive().max(25_000_000),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
-});
+}).strict();
 
 const disputeEvidenceSchema = z.object({
   note: z.string().trim().max(5_000).optional(),
-  evidence: z.array(disputeEvidenceReferenceSchema).max(20).optional(),
-});
+}).strict();
 
 const disputeResolutionSchema = z.object({
   sellerAmount: z.number().nonnegative(),
@@ -148,6 +139,13 @@ const stagedFundingSchema = z.object({
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
 const notificationQuerySchema = z.object({ history: z.coerce.boolean().optional().default(false) });
+const chatQuerySchema = z.object({
+  beforeId: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(100),
+});
+const chatMessageSchema = z.object({
+  body: z.string().trim().min(1, "Message cannot be empty.").max(5_000),
+});
 const milestoneParamsSchema = z.object({
   id: z.string().min(1),
   milestoneId: z.coerce.number().int().positive(),
@@ -222,13 +220,38 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.get("/api/dashboard/escrows", async (request) => {
       const user = await requireUser(request);
       const escrows = await listEscrows(secured.prisma, user.id);
-      return { escrows };
+      return { escrows, fundingPlanSelectionSupported: true };
     });
 
     secured.get("/api/dashboard/escrows/:id/ledger", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
       return getEscrowLedgerHistory(secured.prisma, user.id, id);
+    });
+
+    secured.get("/api/dashboard/escrows/:id/messages", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const query = chatQuerySchema.parse(request.query);
+      return listEscrowMessages(secured.prisma, user.id, id, {
+        limit: query.limit,
+        ...(query.beforeId ? { beforeId: query.beforeId } : {}),
+      });
+    });
+
+    secured.post("/api/dashboard/escrows/:id/messages", async (request, reply) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const { body } = chatMessageSchema.parse(request.body);
+      const result = await sendEscrowMessage(
+        secured.prisma,
+        user.id,
+        id,
+        body,
+        requireIdempotencyKey(request),
+      );
+      reply.code(201);
+      return result;
     });
 
     secured.get("/api/dashboard/business-profile", async (request) => {
@@ -251,6 +274,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         title: body.title,
         counterpartyEmail: body.counterpartyEmail,
         amount: body.amount,
+        ...(body.fundingMode ? { fundingMode: body.fundingMode } : {}),
         creatorRole: body.creatorRole,
         creatorParty: body.creatorParty,
         signatureDataUrl: body.signatureDataUrl,
@@ -480,12 +504,9 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
           submissionId,
           evidenceId,
         );
-        const fallbackName = evidence.fileName.replace(/[^\x20-\x7e]|[\r\n"\\]/g, "_");
-        const encodedName = encodeURIComponent(evidence.fileName).replace(/[!'()*]/g, (character) =>
-          `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
         reply
           .header("Cache-Control", "private, no-store")
-          .header("Content-Disposition", `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`)
+          .header("Content-Disposition", attachmentContentDisposition(evidence.fileName))
           .header("Content-Length", evidence.sizeBytes)
           .header("Content-Type", evidence.contentType)
           .header("X-Content-Type-Options", "nosniff");
@@ -585,6 +606,13 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       return { disputes };
     });
 
+    secured.get("/api/dashboard/disputes/:id/arbitration-report", async (request, reply) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      reply.header("Cache-Control", "private, no-store");
+      return getArbitrationReport(secured.prisma, id, user.id);
+    });
+
     secured.post("/api/dashboard/disputes/:id/launch", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
@@ -608,14 +636,36 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/disputes/:id/evidence", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const body = disputeEvidenceSchema.parse(request.body ?? {});
-      return submitDisputeEvidence(
-        secured.prisma,
-        user.id,
-        id,
-        body,
-        requireIdempotencyKey(request),
-      );
+      const isMultipart = request.isMultipart();
+      if (isMultipart) {
+        await authorizeDisputeEvidenceUpload(secured.prisma, user.id, id);
+      }
+      const parsed = isMultipart
+        ? await parseDisputeEvidenceSubmission(request)
+        : null;
+      try {
+        const result = await submitDisputeEvidence(
+          secured.prisma,
+          user.id,
+          id,
+          parsed
+            ? {
+                ...(parsed.input.note !== undefined ? { note: parsed.input.note } : {}),
+                storedEvidence: parsed.storedEvidence,
+              }
+            : disputeEvidenceSchema.parse(request.body ?? {}),
+          requireIdempotencyKey(request),
+        );
+        if (result.replayed && parsed) {
+          await removeStoredEvidenceFiles(parsed.storedEvidence);
+        }
+        return result;
+      } catch (error) {
+        if (parsed) {
+          await removeStoredEvidenceFiles(parsed.storedEvidence);
+        }
+        throw error;
+      }
     });
 
     secured.post("/api/dashboard/disputes/:id/resolution", async (request) => {

@@ -82,7 +82,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 ## API surface
 
 Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
-Escrow creation, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
+Escrow creation, chat messages, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -94,7 +94,9 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | GET | `/api/dashboard/escrows` | Escrows requiring review, including derived funded, held, released, refunded, and disputed balances. |
 | GET | `/api/dashboard/escrows/:id/ledger` | Immutable escrow balance history for either party. |
 | GET | `/api/dashboard/escrows/:id/audit` | Chronological agreement, milestone, dispute, cancellation, recovery, and money history for either party. |
-| POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal and atomically queue its invitation. |
+| GET | `/api/dashboard/escrows/:id/messages` | Return the newest 100 append-only buyer/seller chat messages. Chat remains readable in every escrow lifecycle state. |
+| POST | `/api/dashboard/escrows/:id/messages` | Send an idempotent message of up to 5,000 characters and notify the other attached party. |
+| POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal, persist its `full` or `milestone` funding plan as an agreement term, and atomically queue its invitation. Legacy clients may omit `fundingMode`. |
 | PATCH | `/api/dashboard/escrows/:id` | Revise a pre-funding proposal, create a new agreement version, and correct/resend its invitation. |
 | POST | `/api/dashboard/escrows/:id/agreement/sign` | Sign the current immutable agreement version. |
 | POST | `/api/dashboard/escrows/:id/invitation/resend` | Supersede the prior delivery and queue a fresh invitation. |
@@ -105,15 +107,16 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow before funding. |
 | POST | `/api/dashboard/escrows/:id/fund` | Fund the complete escrow amount up front. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/fund` | Add a staged deposit (`{ "amount": 1000 }`) starting at the next unsecured milestone; funds allocate across milestones in order. Omitting the amount funds that milestone's remaining shortfall for older-client compatibility. |
-| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/submit` | Submit or resubmit completed work with a note and optional private evidence metadata. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/submit` | Submit or resubmit completed work with a note and optional multipart managed proof files. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/approve` | Approve the latest seller submission and release that milestone's remaining held balance. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/reject` | Request a revision with a required reason saved to the review history. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/dispute` | Open one active dispute and freeze that milestone's remaining held balance. |
 | POST | `/api/dashboard/escrows/:id/cancellation/request` | Request mutual funded cancellation or escalate a unilateral request without moving funds. |
 | POST | `/api/dashboard/cancellations/:id/accept` | Counterparty acceptance of mutual cancellation; refund only unreleased, undisputed funds. |
 | GET | `/api/dashboard/disputes` | Active disputes. |
+| GET | `/api/dashboard/disputes/:id/arbitration-report` | Complete arbitration-only report for the linked buyer or seller, including the signed agreement, chat, managed-exhibit index, legacy evidence manifest, ledger, chronology, and integrity hash. |
 | POST | `/api/dashboard/disputes/:id/launch` | Mark a dispute workspace as launched. |
-| POST | `/api/dashboard/disputes/:id/evidence` | Add a note and private evidence metadata during the evidence window. |
+| POST | `/api/dashboard/disputes/:id/evidence` | Add a note or multipart managed evidence files during the evidence window. |
 | POST | `/api/dashboard/disputes/:id/resolution` | Propose a complete seller/buyer allocation of the frozen amount. |
 | POST | `/api/dashboard/disputes/:id/resolve` | Accept the other party's complete proposal and create linked settlement ledger entries. |
 | GET | `/api/dashboard/notifications` | Dashboard notifications. |
@@ -123,12 +126,22 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | GET | `/api/operations/health` | Support/admin health summary and active operational alerts. |
 | GET | `/api/operations/jobs` | Support/admin operational job list, optionally filtered by status. |
 | GET | `/api/operations/escrows/:id/audit` | Support/admin escrow audit history. |
-| GET | `/api/operations/disputes/:id/evidence` | Support/admin dispute evidence inspection. |
+| GET | `/api/operations/disputes/:id/arbitration-report` | Support/admin arbitration-only report containing the signed agreement, parties, work/evidence records, complete chat, ledger, chronology, and integrity hash. |
+| GET | `/api/operations/disputes/:id/evidence` | Compatibility alias for the support/admin arbitration report. |
+| GET | `/api/arbitration/disputes/:id/exhibits/:exhibitId` | Download a verified managed exhibit after arbitration is requested; limited to the linked buyer/seller or a support/admin operator. |
 | POST | `/api/operations/jobs/:id/retry` | Idempotently queue a failed operational job for retry. |
 | POST | `/api/operations/outbox/:id/retry` | Idempotently queue a failed invitation event for retry. |
 | POST | `/api/operations/invitations/:id/extend` | Idempotently extend an active invitation deadline. |
 | GET | `/api/operations/operators` | Admin-only list of support and administrator accounts. |
 | POST | `/api/operations/operators/role` | Admin-only, idempotent grant, change, or revocation of operator access. |
+
+### Managed evidence and arbitration exhibits
+
+Multipart milestone proofs use the `proofs` field; multipart dispute evidence uses the `evidence` field. Each request accepts up to 10 files, 25 MB per file, and 100 MB total. Files are stored with a generated object key plus the original filename, media type, byte count, and SHA-256.
+
+Arbitration exhibit downloads are available only after `arbitrationRequestedAt` is set. The API authorizes the affected buyer or seller, or a support/administrator account, confirms that the exhibit belongs to that dispute, and verifies the stored byte count and SHA-256 before returning private, non-cacheable bytes. The web client verifies the same values again before building the PDF.
+
+The arbitration PDF embeds every managed exhibit as an original-file attachment. Valid, safety-limited PDF, JPEG, and PNG files also receive visible preview pages. Other formats remain original attachments and are not converted. Packet generation stops if the managed exhibits exceed 100 MB in aggregate or if a file is missing or fails integrity verification. Legacy JSON evidence references remain metadata-only unless they exactly match a managed file in the same arbitration.
 
 ## Testing
 

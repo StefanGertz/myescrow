@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, mkdir, rm, stat } from "node:fs/promises";
+import { access, mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -15,7 +15,8 @@ import type { MilestoneEvidenceInput, MilestoneSubmissionInput } from "./milesto
 
 export const MAX_MILESTONE_PROOF_FILES = 10;
 export const MAX_MILESTONE_PROOF_SIZE_BYTES = 25_000_000;
-const MAX_MILESTONE_PROOF_TOTAL_BYTES = 100_000_000;
+export const MAX_ARBITRATION_EVIDENCE_BYTES = 100_000_000;
+export const MAX_ARBITRATION_EVIDENCE_FILES = 100;
 const OBJECT_KEY_PREFIX = "milestone-proofs/";
 
 const acceptedContentTypes = new Set([
@@ -33,6 +34,22 @@ const acceptedContentTypes = new Set([
   "text/csv",
   "text/plain",
 ]);
+
+const acceptedExtensionsByContentType: Record<string, ReadonlySet<string>> = {
+  "application/msword": new Set([".doc"]),
+  "application/pdf": new Set([".pdf"]),
+  "application/rtf": new Set([".rtf"]),
+  "application/vnd.ms-excel": new Set([".xls"]),
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": new Set([".xlsx"]),
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": new Set([".docx"]),
+  "image/heic": new Set([".heic"]),
+  "image/heif": new Set([".heif"]),
+  "image/jpeg": new Set([".jpg", ".jpeg"]),
+  "image/png": new Set([".png"]),
+  "image/webp": new Set([".webp"]),
+  "text/csv": new Set([".csv"]),
+  "text/plain": new Set([".txt"]),
+};
 
 const storageRoot = () =>
   path.resolve(process.env.MILESTONE_PROOF_STORAGE_DIR ?? path.join(process.cwd(), "data", "milestone-proofs"));
@@ -107,21 +124,22 @@ export async function authorizeMilestoneProofUpload(
 function safeFileName(value: string) {
   const normalized = path.basename(value).replaceAll("\0", "").trim();
   if (!normalized) return "proof";
-  return normalized.slice(0, 255);
+  return Array.from(normalized).slice(0, 255).join("");
 }
 
 function resolveObjectPath(objectKey: string) {
   const objectId = objectKey.startsWith(OBJECT_KEY_PREFIX)
     ? objectKey.slice(OBJECT_KEY_PREFIX.length)
     : "";
-  if (!/^[0-9a-f-]{36}$/i.test(objectId)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(objectId)) {
     throw new AppError("Proof file is unavailable.", 404);
   }
   return path.join(storageRoot(), objectId);
 }
 
-export async function parseMilestoneProofSubmission(
+async function parseStoredEvidenceSubmission(
   request: FastifyRequest,
+  fileField: "proofs" | "evidence",
 ): Promise<{ input: MilestoneSubmissionInput; storedEvidence: MilestoneEvidenceInput[] }> {
   await mkdir(storageRoot(), { recursive: true });
   const evidence: MilestoneEvidenceInput[] = [];
@@ -143,7 +161,7 @@ export async function parseMilestoneProofSubmission(
     for await (const part of parts) {
       if (part.type === "field") {
         if (part.fieldname !== "note" || typeof part.value !== "string") {
-          throw new AppError("Only a submission note and proof files are accepted.", 400);
+          throw new AppError("Only a submission note and evidence files are accepted.", 400);
         }
         if (part.valueTruncated || part.value.length > 5_000) {
           throw new AppError("Submission notes may contain no more than 5,000 characters.", 400);
@@ -152,14 +170,20 @@ export async function parseMilestoneProofSubmission(
         continue;
       }
 
-      if (part.fieldname !== "proofs") {
+      if (part.fieldname !== fileField) {
         part.file.resume();
-        throw new AppError("Proof files must use the proofs field.", 400);
+        throw new AppError(`Evidence files must use the ${fileField} field.`, 400);
       }
-      if (!acceptedContentTypes.has(part.mimetype.toLowerCase())) {
+      const contentType = part.mimetype.toLowerCase();
+      const fileName = safeFileName(part.filename);
+      const acceptedExtensions = acceptedExtensionsByContentType[contentType];
+      if (
+        !acceptedContentTypes.has(contentType)
+        || !acceptedExtensions?.has(path.extname(fileName).toLowerCase())
+      ) {
         part.file.resume();
         throw new AppError(
-          "Unsupported proof file. Upload an image, PDF, text, Word, or spreadsheet document.",
+          "Unsupported evidence file or filename extension. Upload a matching image, PDF, text, Word, or spreadsheet document.",
           400,
         );
       }
@@ -175,7 +199,7 @@ export async function parseMilestoneProofSubmission(
           sizeBytes += chunk.length;
           totalBytes += chunk.length;
           hash.update(chunk);
-          if (totalBytes > MAX_MILESTONE_PROOF_TOTAL_BYTES) {
+          if (totalBytes > MAX_ARBITRATION_EVIDENCE_BYTES) {
             callback(new AppError("Proof files may total no more than 100 MB.", 413));
             return;
           }
@@ -195,8 +219,8 @@ export async function parseMilestoneProofSubmission(
 
       evidence.push({
         objectKey,
-        fileName: safeFileName(part.filename),
-        contentType: part.mimetype.toLowerCase(),
+        fileName,
+        contentType,
         sizeBytes,
         sha256: hash.digest("hex"),
       });
@@ -206,7 +230,7 @@ export async function parseMilestoneProofSubmission(
     if (error instanceof AppError) throw error;
     const statusCode = (error as { statusCode?: number }).statusCode;
     if (statusCode === 413) {
-      throw new AppError("Upload up to 10 proof files, no more than 25 MB each.", 413);
+      throw new AppError("Upload up to 10 evidence files, no more than 25 MB each.", 413);
     }
     throw error;
   }
@@ -220,9 +244,19 @@ export async function parseMilestoneProofSubmission(
   };
 }
 
+export async function parseMilestoneProofSubmission(request: FastifyRequest) {
+  return parseStoredEvidenceSubmission(request, "proofs");
+}
+
+export async function parseDisputeEvidenceSubmission(request: FastifyRequest) {
+  return parseStoredEvidenceSubmission(request, "evidence");
+}
+
 export async function removeMilestoneProofs(evidence: MilestoneEvidenceInput[]) {
   await removeProofObjectKeys(evidence.map((item) => item.objectKey));
 }
+
+export const removeStoredEvidenceFiles = removeMilestoneProofs;
 
 async function removeProofObjectKeys(objectKeys: string[]) {
   await Promise.all(objectKeys.map(async (objectKey) => {
@@ -232,6 +266,27 @@ async function removeProofObjectKeys(objectKeys: string[]) {
       // Cleanup is best-effort; invalid external object keys are never resolved.
     }
   }));
+}
+
+export async function readVerifiedEvidenceFile(evidence: {
+  objectKey: string;
+  sizeBytes: number;
+  sha256: string;
+}) {
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(resolveObjectPath(evidence.objectKey));
+  } catch {
+    throw new AppError("Evidence file is unavailable.", 404);
+  }
+  const actualHash = createHash("sha256").update(bytes).digest("hex");
+  if (
+    bytes.byteLength !== evidence.sizeBytes
+    || actualHash !== evidence.sha256.toLowerCase()
+  ) {
+    throw new AppError("Evidence file failed its stored size or SHA-256 integrity check.", 409);
+  }
+  return bytes;
 }
 
 export async function openMilestoneProof(

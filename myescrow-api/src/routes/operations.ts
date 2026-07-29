@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   getEscrowAuditTrail,
@@ -7,12 +7,21 @@ import {
   retryOperationalJob,
   supportExtendInvitation,
 } from "../services/operationsService";
+import {
+  getArbitrationReport,
+  openArbitrationExhibit,
+} from "../services/arbitrationReportService";
 import { AppError } from "../utils/errors";
 import { changeOperatorRole, listOperators } from "../services/operatorService";
 import { getEscrowForOperations } from "../services/dashboardService";
+import { attachmentContentDisposition } from "../utils/contentDisposition";
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 const escrowSchema = z.object({ id: z.string().min(1) });
+const arbitrationExhibitSchema = z.object({
+  id: z.string().min(1),
+  exhibitId: z.string().regex(/^(milestone|dispute)-[1-9]\d*$/),
+});
 
 function requireIdempotencyKey(request: FastifyRequest) {
   const value = request.headers["idempotency-key"];
@@ -96,18 +105,40 @@ export async function operationsRoutes(fastify: FastifyInstance) {
       return { escrow: await getEscrowForOperations(secured.prisma, id) };
     });
 
-    secured.get("/api/operations/disputes/:id/evidence", async (request) => {
+    secured.get(
+      "/api/arbitration/disputes/:id/exhibits/:exhibitId",
+      async (request, reply: FastifyReply) => {
+        const user = await requireUser(request);
+        const { id, exhibitId } = arbitrationExhibitSchema.parse(request.params);
+        const { evidence, bytes } = await openArbitrationExhibit(
+          secured.prisma,
+          id,
+          exhibitId,
+          user,
+        );
+        reply
+          .header("Cache-Control", "private, no-store")
+          .header("Content-Disposition", attachmentContentDisposition(evidence.fileName))
+          .header("Content-Length", evidence.sizeBytes)
+          .header("Content-Type", evidence.contentType)
+          .header("X-Content-SHA256", evidence.sha256.toLowerCase())
+          .header("X-Content-Type-Options", "nosniff");
+        return reply.send(bytes);
+      },
+    );
+
+    secured.get("/api/operations/disputes/:id/evidence", async (request, reply) => {
       await requireOperator(request);
       const { id } = escrowSchema.parse(request.params);
-      const dispute = await secured.prisma.dispute.findUnique({
-        where: { reference: id },
-        include: {
-          evidenceSubmissions: { include: { submitter: { select: { id: true, name: true } } }, orderBy: { submittedAt: "asc" } },
-          escrow: { select: { reference: true } },
-        },
-      });
-      if (!dispute) throw new AppError("Dispute not found.", 404);
-      return { disputeId: dispute.reference, escrowId: dispute.escrow?.reference, evidence: dispute.evidenceSubmissions };
+      reply.header("Cache-Control", "private, no-store");
+      return getArbitrationReport(secured.prisma, id);
+    });
+
+    secured.get("/api/operations/disputes/:id/arbitration-report", async (request, reply) => {
+      await requireOperator(request);
+      const { id } = escrowSchema.parse(request.params);
+      reply.header("Cache-Control", "private, no-store");
+      return getArbitrationReport(secured.prisma, id);
     });
 
     secured.post("/api/operations/jobs/:id/retry", async (request) => {

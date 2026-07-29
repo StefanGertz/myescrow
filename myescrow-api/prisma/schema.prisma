@@ -38,6 +38,7 @@ model User {
   agreementSignatures          AgreementSignature[]
   milestoneSubmissions         MilestoneSubmission[]
   milestoneReviews             MilestoneReview[]
+  escrowMessagesSent           EscrowMessage[]
   verificationTokens           EmailVerificationToken[]
   passwordResetTokens          PasswordResetToken[]
   businessProfile              BusinessProfile?
@@ -100,6 +101,7 @@ model Escrow {
   agreementResponseDueAt       DateTime?
   disputes                     Dispute[]
   cancellationRequests         CancellationRequest[]
+  messages                     EscrowMessage[]
   auditEvents                  AuditEvent[]
 
   @@index([ownerId])
@@ -107,6 +109,19 @@ model Escrow {
   @@index([sellerId])
   @@index([lifecycleStatus])
   @@index([counterpartyEmail])
+}
+
+model EscrowMessage {
+  id        Int      @id @default(autoincrement())
+  escrowId  Int
+  escrow    Escrow   @relation(fields: [escrowId], references: [id], onDelete: Restrict)
+  senderId  String
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([escrowId, createdAt, id])
+  @@index([senderId, createdAt])
 }
 
 model EscrowMilestone {
@@ -230,17 +245,32 @@ model Dispute {
 }
 
 model DisputeEvidenceSubmission {
-  id          Int      @id @default(autoincrement())
+  id          Int                       @id @default(autoincrement())
   disputeId   Int
-  dispute     Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  dispute     Dispute                   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
   submitterId String
-  submitter   User     @relation(fields: [submitterId], references: [id], onDelete: Restrict)
+  submitter   User                      @relation(fields: [submitterId], references: [id], onDelete: Restrict)
   note        String?
-  evidence    Json     @default("[]")
-  submittedAt DateTime @default(now())
+  evidence    Json                      @default("[]")
+  files       DisputeEvidenceReference[]
+  submittedAt DateTime                  @default(now())
 
   @@index([disputeId, submittedAt])
   @@index([submitterId])
+}
+
+model DisputeEvidenceReference {
+  id           Int                       @id @default(autoincrement())
+  submissionId Int
+  submission   DisputeEvidenceSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  objectKey    String
+  fileName     String
+  contentType  String
+  sizeBytes    Int
+  sha256       String
+  createdAt    DateTime                  @default(now())
+
+  @@index([submissionId])
 }
 
 model DisputeResolutionAllocation {
@@ -430,6 +460,7 @@ model AgreementVersion {
   description       String?
   amountCents       Int
   currency          String               @default("USD")
+  fundingMode       String?
   creatorRole       String
   creatorParty      Json
   counterpartyParty Json?

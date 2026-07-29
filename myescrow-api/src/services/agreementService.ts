@@ -22,6 +22,7 @@ export type AgreementTerms = {
   title: string;
   description: string | null;
   amountCents: number;
+  fundingMode: string | null;
   creatorRole: string;
   creatorParty: Prisma.InputJsonValue;
   counterpartyParty?: Prisma.InputJsonValue | null;
@@ -56,6 +57,7 @@ export async function createAgreementVersion(
       title: input.terms.title,
       description: input.terms.description,
       amountCents: input.terms.amountCents,
+      fundingMode: input.terms.fundingMode,
       creatorRole: input.terms.creatorRole,
       creatorParty: input.terms.creatorParty,
       ...(input.terms.counterpartyParty

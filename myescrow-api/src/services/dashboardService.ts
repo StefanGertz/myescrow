@@ -114,6 +114,7 @@ export type EscrowResponse = {
   agreement: {
     version: number;
     status: string;
+    fundingMode: "full" | "milestone" | null;
     creatorSigned: boolean;
     counterpartySigned: boolean;
     lockedAt?: string;
@@ -203,11 +204,12 @@ export type DisputeResponse = {
     submittedAt: string;
     submitter: { id: string; name: string };
     references: Array<{
-      objectKey: string;
+      id?: string;
       fileName: string;
       contentType: string;
       sizeBytes: number;
       sha256: string;
+      storageStatus: "managed" | "metadata_only";
     }>;
   }>;
 };
@@ -246,6 +248,7 @@ type CreateEscrowInput = {
   title: string;
   counterpartyEmail: string;
   amount: number;
+  fundingMode?: "full" | "milestone" | undefined;
   creatorRole: "buyer" | "seller";
   creatorParty: PartyIdentityInput;
   category?: string | undefined;
@@ -353,6 +356,7 @@ function agreementTermsFromEscrow(escrow: EscrowWithRelations) {
     title: escrow.title,
     description: escrow.description,
     amountCents: escrow.amountCents,
+    fundingMode: escrow.fundingMode,
     creatorRole: escrow.creatorRole,
     creatorParty: escrow.creatorPartySnapshot as Prisma.InputJsonValue,
     counterpartyParty: escrow.counterpartyPartySnapshot as Prisma.InputJsonValue | null,
@@ -626,6 +630,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
       ? {
           version: record.currentAgreementVersion.versionNumber,
           status: record.currentAgreementVersion.status,
+          fundingMode: record.currentAgreementVersion.fundingMode as "full" | "milestone" | null,
           creatorSigned: agreementSigners.has(record.ownerId),
           counterpartySigned: agreementSigners.has(
             record.ownerId === record.buyerId ? record.sellerId ?? "" : record.buyerId ?? "",
@@ -1040,6 +1045,7 @@ export async function createEscrow(
         counterpartyApproved: false,
         lifecycleStatus: counterpartyReady ? "pending_approval" : "pending_counterparty_signup",
         fundingStatus: "not_funded",
+        fundingMode: data.fundingMode ?? null,
         category: data.category ?? null,
         description: data.description ?? null,
         creatorSignatureDataUrl: data.signatureDataUrl,
@@ -2114,10 +2120,10 @@ export async function fundEscrow(
       if (buyerId !== userId) {
         throw new AppError("Only the buyer can fund this escrow.", 403);
       }
+      if (escrow.fundingMode === "milestone") {
+        throw new AppError("This agreement uses staged funding. Add staged funds instead.", 409);
+      }
       if (escrow.lifecycleStatus !== "funding_pending") {
-        if (escrow.fundingMode === "milestone") {
-          throw new AppError("This escrow uses staged funding. Add staged funds instead.", 409);
-        }
         if (escrow.fundingStatus === "funded") {
           throw new AppError("This escrow has already been funded.", 409);
         }
@@ -2138,7 +2144,7 @@ export async function fundEscrow(
         id: escrow.id,
         lifecycleStatus: "funding_pending",
         fundingStatus: "not_funded",
-        fundingMode: null,
+        OR: [{ fundingMode: null }, { fundingMode: "full" }],
       },
       data: {
         lifecycleStatus: "funded",
@@ -2646,6 +2652,27 @@ export async function resubmitMilestone(
   return submitMilestoneWork(prisma, userId, reference, milestoneId, data, idempotencyKey);
 }
 
+function publicLegacyEvidenceReferences(
+  value: Prisma.JsonValue,
+): DisputeResponse["evidence"][number]["references"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const fileName = typeof item.fileName === "string" ? item.fileName : "";
+    const contentType = typeof item.contentType === "string" ? item.contentType : "";
+    const sizeBytes = typeof item.sizeBytes === "number" ? item.sizeBytes : 0;
+    const sha256 = typeof item.sha256 === "string" ? item.sha256 : "";
+    if (!fileName && !sha256) return [];
+    return [{
+      fileName: fileName || "Unnamed evidence file",
+      contentType,
+      sizeBytes,
+      sha256,
+      storageStatus: "metadata_only" as const,
+    }];
+  });
+}
+
 export async function listDisputes(prisma: PrismaClient, userId: string): Promise<DisputeResponse[]> {
   const disputes = await prisma.dispute.findMany({
     where: {
@@ -2659,7 +2686,10 @@ export async function listDisputes(prisma: PrismaClient, userId: string): Promis
       escrow: { select: { reference: true } },
       openedBy: { select: { id: true, name: true } },
       evidenceSubmissions: {
-        include: { submitter: { select: { id: true, name: true } } },
+        include: {
+          submitter: { select: { id: true, name: true } },
+          files: { orderBy: { id: "asc" } },
+        },
         orderBy: { submittedAt: "asc" },
       },
     },
@@ -2706,9 +2736,17 @@ export async function listDisputes(prisma: PrismaClient, userId: string): Promis
       ...(submission.note ? { note: submission.note } : {}),
       submittedAt: submission.submittedAt.toISOString(),
       submitter: submission.submitter,
-      references: Array.isArray(submission.evidence)
-        ? submission.evidence as DisputeResponse["evidence"][number]["references"]
-        : [],
+      references: [
+        ...submission.files.map((file) => ({
+          id: `dispute-${file.id}`,
+          fileName: file.fileName,
+          contentType: file.contentType,
+          sizeBytes: file.sizeBytes,
+          sha256: file.sha256,
+          storageStatus: "managed" as const,
+        })),
+        ...publicLegacyEvidenceReferences(submission.evidence),
+      ],
     })),
   }));
 }

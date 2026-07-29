@@ -45,7 +45,13 @@ export async function buildServer() {
   const version = {
     status: "ok" as const,
     buildSha: process.env.APP_BUILD_SHA ?? "development",
-    capabilities: ["milestone_funding", "staged_funding_amounts"] as const,
+    capabilities: [
+      "milestone_funding",
+      "staged_funding_amounts",
+      "agreement_funding_plan",
+      "escrow_chat",
+      "arbitration_reports",
+    ] as const,
   };
 
   fastify.get("/", async () => version);

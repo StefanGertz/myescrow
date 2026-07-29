@@ -7,6 +7,10 @@ import {
   totalFundedFromLedger,
 } from "../utils/stagedFunding";
 import { executeIdempotentCommandWithMetadata } from "./idempotencyService";
+import {
+  MAX_ARBITRATION_EVIDENCE_BYTES,
+  MAX_ARBITRATION_EVIDENCE_FILES,
+} from "./milestoneProofService";
 import { getNextSequenceValue } from "./sequenceService";
 
 const REVIEW_DAYS = 7;
@@ -142,6 +146,30 @@ export async function submitMilestoneWork(
       );
       if (blockedBy) {
         throw new AppError(`Complete the earlier milestone \"${blockedBy.title}\" first.`, 409);
+      }
+      const [existingEvidence, existingEvidenceCount] = await Promise.all([
+        tx.milestoneEvidenceReference.aggregate({
+          where: { submission: { milestoneId: milestone.id } },
+          _sum: { sizeBytes: true },
+        }),
+        tx.milestoneEvidenceReference.count({
+          where: { submission: { milestoneId: milestone.id } },
+        }),
+      ]);
+      const cumulativeEvidenceBytes =
+        (existingEvidence._sum.sizeBytes ?? 0)
+        + evidence.reduce((total, item) => total + item.sizeBytes, 0);
+      if (cumulativeEvidenceBytes > MAX_ARBITRATION_EVIDENCE_BYTES) {
+        throw new AppError(
+          "Managed evidence for one milestone may total no more than 100 MB across all submissions.",
+          413,
+        );
+      }
+      if (existingEvidenceCount + evidence.length > MAX_ARBITRATION_EVIDENCE_FILES) {
+        throw new AppError(
+          "Managed evidence for one milestone may contain no more than 100 files across all submissions.",
+          413,
+        );
       }
 
       const previous = milestone.submissions[0];

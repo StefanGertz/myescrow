@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import os from "node:os";
 import { PrismaClient } from "@prisma/client";
@@ -25,6 +25,15 @@ let phaseFourCancellationReference: string;
 let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
 let proofStorageDir: string;
+let phaseFourDisputeExhibitId: string;
+const phaseFourDisputeEvidenceFileName = "seller-delivery-notes.txt";
+const phaseFourDisputeEvidenceBytes = Buffer.from(
+  "Seller delivery notes retained as a managed arbitration exhibit.\n",
+  "utf8",
+);
+const phaseFourDisputeEvidenceSha256 = createHash("sha256")
+  .update(phaseFourDisputeEvidenceBytes)
+  .digest("hex");
 const sentEmails: Array<{ from?: string; to?: string; subject?: string; html?: string; text?: string }> = [];
 
 beforeAll(async () => {
@@ -84,7 +93,13 @@ describe("MyEscrow API", () => {
     expect(response.json()).toEqual({
       status: "ok",
       buildSha: process.env.APP_BUILD_SHA ?? "development",
-      capabilities: ["milestone_funding", "staged_funding_amounts"],
+      capabilities: [
+        "milestone_funding",
+        "staged_funding_amounts",
+        "agreement_funding_plan",
+        "escrow_chat",
+        "arbitration_reports",
+      ],
     });
   });
 
@@ -146,6 +161,97 @@ describe("MyEscrow API", () => {
     expect(response.statusCode).toBe(200);
     counterpartyToken = response.json().token;
     expect(counterpartyToken).toBeDefined();
+  });
+
+  it("keeps an idempotent escrow conversation available to both parties in every lifecycle state", async () => {
+    const firstPayload = { body: "Can we confirm the acceptance criteria before work starts?" };
+    const firstSend = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/PO-1423/messages",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "chat-po-1423-first",
+      },
+      payload: firstPayload,
+    });
+    expect(firstSend.statusCode).toBe(201);
+    expect(firstSend.json().message).toEqual(expect.objectContaining({
+      body: firstPayload.body,
+      sender: expect.objectContaining({ name: "Scott", role: "buyer" }),
+    }));
+
+    const replay = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/PO-1423/messages",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "chat-po-1423-first",
+      },
+      payload: firstPayload,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json()).toEqual(firstSend.json());
+    expect(await server.prisma.escrowMessage.count({
+      where: { escrow: { reference: "PO-1423" } },
+    })).toBe(1);
+
+    const counterpartyView = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows/PO-1423/messages",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(counterpartyView.statusCode).toBe(200);
+    expect(counterpartyView.json()).toEqual(expect.objectContaining({
+      escrowId: "PO-1423",
+      canSend: true,
+      participants: [
+        expect.objectContaining({ name: "Scott", role: "buyer" }),
+        expect.objectContaining({ name: "Nora Studio", role: "seller" }),
+      ],
+      messages: [expect.objectContaining({ body: firstPayload.body })],
+    }));
+
+    await server.prisma.escrow.update({
+      where: { reference: "PO-1423" },
+      data: { lifecycleStatus: "completed" },
+    });
+    try {
+      const terminalStateSend = await server.inject({
+        method: "POST",
+        url: "/api/dashboard/escrows/PO-1423/messages",
+        headers: {
+          Authorization: `Bearer ${counterpartyToken}`,
+          "Idempotency-Key": "chat-po-1423-complete",
+        },
+        payload: { body: "Thanks, I have saved the final handoff details here." },
+      });
+      expect(terminalStateSend.statusCode).toBe(201);
+    } finally {
+      await server.prisma.escrow.update({
+        where: { reference: "PO-1423" },
+        data: { lifecycleStatus: "pending_approval" },
+      });
+    }
+
+    await server.prisma.user.create({
+      data: {
+        id: "chat-outsider",
+        name: "Outside User",
+        email: "outside-chat@example.com",
+        passwordHash: "not-used",
+        emailVerified: true,
+      },
+    });
+    const outsiderToken = server.jwt.sign({
+      userId: "chat-outsider",
+      email: "outside-chat@example.com",
+    });
+    const outsiderView = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows/PO-1423/messages",
+      headers: { Authorization: `Bearer ${outsiderToken}` },
+    });
+    expect(outsiderView.statusCode).toBe(403);
   });
 
   it("changes the authenticated user's password", async () => {
@@ -270,6 +376,7 @@ describe("MyEscrow API", () => {
         },
       },
       amount: 1500,
+      fundingMode: "full",
       category: "Construction",
       signatureDataUrl: creatorSignature,
       milestones: [
@@ -309,7 +416,9 @@ describe("MyEscrow API", () => {
     expect(persistedEscrow.agreementVersions[0]).toEqual(expect.objectContaining({
       versionNumber: 1,
       status: "current",
+      fundingMode: "full",
     }));
+    expect(persistedEscrow.fundingMode).toBe("full");
     expect(persistedEscrow.agreementVersions[0]?.signatures).toHaveLength(1);
     expect(persistedEscrow.invitationDeliveries).toHaveLength(1);
     expect(persistedEscrow.invitationDeliveries[0]?.status).toBe("delivered");
@@ -322,6 +431,7 @@ describe("MyEscrow API", () => {
       url: "/api/dashboard/escrows",
       headers: { Authorization: `Bearer ${token}` },
     });
+    expect(escrowsResponse.json().fundingPlanSelectionSupported).toBe(true);
     const createdEscrow = escrowsResponse.json().escrows.find((item: any) => item.id === createdEscrowReference);
     expect(createdEscrow.buyer).toEqual(expect.objectContaining({
       name: "Scott Holdings Inc.",
@@ -875,6 +985,29 @@ describe("MyEscrow API", () => {
     expect(invitedEscrow.lifecycleStatus).toBe("pending_counterparty_signup");
     expect(invitedEscrow.stage).toBe("Invitation pending");
     expect(invitedEscrow.counterpart).toBe("jamie.contractor@example.com");
+
+    const pendingChat = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/escrows/${invitedSignupEscrowReference}/messages`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(pendingChat.statusCode).toBe(200);
+    expect(pendingChat.json()).toEqual(expect.objectContaining({
+      canSend: false,
+      messages: [],
+      unavailableReason: expect.stringContaining("counterparty joins"),
+    }));
+
+    const prematureSend = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${invitedSignupEscrowReference}/messages`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "chat-before-counterparty",
+      },
+      payload: { body: "This should wait until the invited party has an account." },
+    });
+    expect(prematureSend.statusCode).toBe(409);
   });
 
   it("claims the pending escrow after the invited counterparty signs up and verifies", async () => {
@@ -1071,6 +1204,7 @@ describe("MyEscrow API", () => {
         creatorRole: "buyer",
         creatorParty: { type: "individual" },
         amount: 300,
+        fundingMode: "milestone",
         signatureDataUrl: creatorSignature,
         milestones: [
           { title: "Discovery", amount: 100 },
@@ -1095,6 +1229,19 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
     })).json().escrows.find((item: any) => item.id === reference);
     const [firstMilestone, secondMilestone] = beforeFunding.milestones;
+    expect(beforeFunding.fundingMode).toBe("milestone");
+    expect(beforeFunding.agreement.fundingMode).toBe("milestone");
+
+    const wrongAgreedFundingRoute = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-full-against-agreement-${reference}`,
+      },
+    });
+    expect(wrongAgreedFundingRoute.statusCode).toBe(409);
+    expect(wrongAgreedFundingRoute.json().error).toContain("agreement uses staged funding");
 
     const skippedMilestoneFunding = await server.inject({
       method: "POST",
@@ -1929,17 +2076,110 @@ describe("MyEscrow API", () => {
     }));
   });
 
-  it("stores evidence and requires a complete mutual resolution allocation", async () => {
+  it("stores managed evidence and requires a complete mutual resolution allocation", async () => {
+    const buildEvidenceRequest = () => {
+      const evidenceForm = new FormData();
+      evidenceForm.append(
+        "note",
+        "Attached delivery notes explain the seller's interpretation of the criteria.",
+      );
+      evidenceForm.append(
+        "evidence",
+        new Blob([phaseFourDisputeEvidenceBytes], { type: "text/plain" }),
+        phaseFourDisputeEvidenceFileName,
+      );
+      return new Request("http://localhost/upload", {
+        method: "POST",
+        body: evidenceForm,
+      });
+    };
+    const evidenceRequest = buildEvidenceRequest();
+    const evidenceIdempotencyKey = `evidence-${phaseFourDisputeReference}`;
     const evidenceResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/disputes/${phaseFourDisputeReference}/evidence`,
       headers: {
         Authorization: `Bearer ${counterpartyToken}`,
-        "Idempotency-Key": `evidence-${phaseFourDisputeReference}`,
+        "Idempotency-Key": evidenceIdempotencyKey,
+        "Content-Type": evidenceRequest.headers.get("Content-Type") ?? "",
       },
-      payload: { note: "Attached delivery notes explain the seller's interpretation of the criteria." },
+      payload: Buffer.from(await evidenceRequest.arrayBuffer()),
     });
     expect(evidenceResponse.statusCode).toBe(200);
+    expect(evidenceResponse.json()).toEqual(expect.objectContaining({
+      success: true,
+      disputeId: phaseFourDisputeReference,
+      evidenceSubmissionId: expect.any(Number),
+      replayed: false,
+    }));
+    const replayRequest = buildEvidenceRequest();
+    const replayResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/evidence`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": evidenceIdempotencyKey,
+        "Content-Type": replayRequest.headers.get("Content-Type") ?? "",
+      },
+      payload: Buffer.from(await replayRequest.arrayBuffer()),
+    });
+    expect(replayResponse.statusCode).toBe(200);
+    expect(replayResponse.json()).toEqual({
+      ...evidenceResponse.json(),
+      replayed: true,
+    });
+
+    const storedEvidence = await server.prisma.disputeEvidenceReference.findFirstOrThrow({
+      where: {
+        submission: {
+          dispute: { reference: phaseFourDisputeReference },
+        },
+      },
+      orderBy: { id: "desc" },
+    });
+    expect(await server.prisma.disputeEvidenceReference.count({
+      where: {
+        submission: {
+          dispute: { reference: phaseFourDisputeReference },
+        },
+      },
+    })).toBe(1);
+    phaseFourDisputeExhibitId = `dispute-${storedEvidence.id}`;
+    expect(storedEvidence).toEqual(expect.objectContaining({
+      fileName: phaseFourDisputeEvidenceFileName,
+      contentType: "text/plain",
+      sizeBytes: phaseFourDisputeEvidenceBytes.byteLength,
+      sha256: phaseFourDisputeEvidenceSha256,
+    }));
+
+    const untrustedObjectKey = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/evidence`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `untrusted-evidence-${phaseFourDisputeReference}`,
+      },
+      payload: {
+        evidence: [{
+          objectKey: storedEvidence.objectKey,
+          fileName: "forged-reference.txt",
+          contentType: "text/plain",
+          sizeBytes: storedEvidence.sizeBytes,
+          sha256: storedEvidence.sha256,
+        }],
+      },
+    });
+    expect(untrustedObjectKey.statusCode).toBe(400);
+
+    const exhibitBeforeArbitration = await server.inject({
+      method: "GET",
+      url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(exhibitBeforeArbitration.statusCode).toBe(409);
+    expect(exhibitBeforeArbitration.json().error).toBe(
+      "Arbitration exhibits are available only after arbitration is requested.",
+    );
 
     const invalidProposal = await server.inject({
       method: "POST",
@@ -2146,6 +2386,18 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(denied.statusCode).toBe(403);
+    const arbitrationRecordDenied = await server.inject({
+      method: "GET",
+      url: `/api/operations/disputes/${phaseFourDisputeReference}/evidence`,
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(arbitrationRecordDenied.statusCode).toBe(403);
+    const reportBeforeArbitration = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/arbitration-report`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(reportBeforeArbitration.statusCode).toBe(409);
 
     const operator = await server.prisma.user.update({
       where: { email: "scott@example.com" },
@@ -2272,13 +2524,188 @@ describe("MyEscrow API", () => {
     expect(retried.statusCode).toBe(200);
     expect((await server.prisma.operationalJob.findUniqueOrThrow({ where: { id: failedJob.id } })).status).toBe("pending");
 
+    await server.prisma.dispute.update({
+      where: { reference: phaseFourDisputeReference },
+      data: {
+        status: "arbitration_requested",
+        arbitrationRequestedAt: recoveryNow,
+        arbitrationRequestedById: operator.id,
+      },
+    });
+    const arbitrationChatMessage = "Please include the delivery discussion in the arbitration record.";
+    const chat = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/messages`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "arbitration-record-message",
+      },
+      payload: { body: arbitrationChatMessage },
+    });
+    expect(chat.statusCode).toBe(201);
+
+    const unrelatedPartyReport = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/arbitration-report`,
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(unrelatedPartyReport.statusCode).toBe(403);
+    const unrelatedPartyExhibit = await server.inject({
+      method: "GET",
+      url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    expect(unrelatedPartyExhibit.statusCode).toBe(403);
+    expect(unrelatedPartyExhibit.json().error).toBe(
+      "Only the affected parties or an authorized operator can access arbitration exhibits.",
+    );
+
+    const partyReport = await server.inject({
+      method: "GET",
+      url: `/api/dashboard/disputes/${phaseFourDisputeReference}/arbitration-report`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(partyReport.statusCode).toBe(200);
+    expect(partyReport.headers["cache-control"]).toBe("private, no-store");
+
     const evidence = await server.inject({
       method: "GET",
-      url: `/api/operations/disputes/${phaseFourDisputeReference}/evidence`,
+      url: `/api/operations/disputes/${phaseFourDisputeReference}/arbitration-report`,
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(evidence.statusCode).toBe(200);
-    expect(evidence.json().evidence.length).toBeGreaterThan(0);
+    expect(evidence.headers["cache-control"]).toBe("private, no-store");
+    const partyReportBody = partyReport.json();
+    const operationsReportBody = evidence.json();
+    expect(operationsReportBody.evidence.length).toBeGreaterThan(0);
+    expect(operationsReportBody).toEqual(expect.objectContaining({
+      reportVersion: 2,
+      reportId: `MYE-ARB-${phaseFourDisputeReference}`,
+      generatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      integritySha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      case: expect.objectContaining({
+        reference: phaseFourDisputeReference,
+        arbitrationRequestedAt: recoveryNow.toISOString(),
+      }),
+      escrow: expect.objectContaining({ reference: secondMilestoneEscrowReference }),
+      parties: expect.arrayContaining([
+        expect.objectContaining({ name: "Scott", role: "buyer" }),
+        expect.objectContaining({ name: "Nora Studio", role: "seller" }),
+      ]),
+      agreement: expect.objectContaining({
+        status: "locked",
+        termsHash: expect.any(String),
+        signatures: expect.arrayContaining([
+          expect.objectContaining({
+            signerRole: "buyer",
+            evidenceHash: expect.any(String),
+          }),
+          expect.objectContaining({
+            signerRole: "seller",
+            evidenceHash: expect.any(String),
+          }),
+        ]),
+      }),
+      chatLog: [
+        expect.objectContaining({
+          body: arbitrationChatMessage,
+          sentAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+          sender: expect.objectContaining({ name: "Scott", role: "buyer" }),
+        }),
+      ],
+      financialLedger: expect.any(Array),
+      exhibits: expect.arrayContaining([
+        expect.objectContaining({
+          id: phaseFourDisputeExhibitId,
+          source: "dispute_evidence",
+          fileName: phaseFourDisputeEvidenceFileName,
+          contentType: "text/plain",
+          sizeBytes: phaseFourDisputeEvidenceBytes.byteLength,
+          sha256: phaseFourDisputeEvidenceSha256,
+        }),
+      ]),
+      timeline: expect.arrayContaining([
+        expect.objectContaining({ type: "arbitration", action: "requested" }),
+      ]),
+    }));
+    expect(operationsReportBody.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        references: expect.arrayContaining([
+          expect.objectContaining({
+            exhibitId: phaseFourDisputeExhibitId,
+            fileName: phaseFourDisputeEvidenceFileName,
+            sha256: phaseFourDisputeEvidenceSha256,
+            storageStatus: "managed",
+          }),
+        ]),
+      }),
+    ]));
+    expect(JSON.stringify(operationsReportBody)).not.toContain("\"objectKey\"");
+    expect(partyReportBody).toEqual(expect.objectContaining({
+      reportVersion: operationsReportBody.reportVersion,
+      reportId: operationsReportBody.reportId,
+      integritySha256: operationsReportBody.integritySha256,
+      exhibits: operationsReportBody.exhibits,
+      chatLog: operationsReportBody.chatLog,
+    }));
+    expect({
+      ...partyReportBody,
+      generatedAt: operationsReportBody.generatedAt,
+    }).toEqual(operationsReportBody);
+
+    const affectedPartyExhibit = await server.inject({
+      method: "GET",
+      url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+
+    await server.prisma.user.update({
+      where: { email: "jamie.contractor@example.com" },
+      data: { role: "support" },
+    });
+    const operatorExhibit = await server.inject({
+      method: "GET",
+      url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+    });
+    await server.prisma.user.update({
+      where: { email: "jamie.contractor@example.com" },
+      data: { role: "customer" },
+    });
+
+    const expectedContentDisposition =
+      `attachment; filename="${phaseFourDisputeEvidenceFileName}"; `
+      + `filename*=UTF-8''${phaseFourDisputeEvidenceFileName}`;
+    for (const exhibitResponse of [affectedPartyExhibit, operatorExhibit]) {
+      expect(exhibitResponse.statusCode).toBe(200);
+      expect(exhibitResponse.rawPayload).toEqual(phaseFourDisputeEvidenceBytes);
+      expect(exhibitResponse.headers).toEqual(expect.objectContaining({
+        "cache-control": "private, no-store",
+        "content-disposition": expectedContentDisposition,
+        "content-length": String(phaseFourDisputeEvidenceBytes.byteLength),
+        "content-type": "text/plain",
+        "x-content-sha256": phaseFourDisputeEvidenceSha256,
+        "x-content-type-options": "nosniff",
+      }));
+    }
+
+    const otherEscrowEvidence = await server.prisma.milestoneEvidenceReference.findFirstOrThrow({
+      where: {
+        submission: {
+          milestone: {
+            escrow: { reference: createdEscrowReference },
+          },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
+    const crossEscrowExhibit = await server.inject({
+      method: "GET",
+      url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/milestone-${otherEscrowEvidence.id}`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(crossEscrowExhibit.statusCode).toBe(404);
+    expect(crossEscrowExhibit.json().error).toBe("Arbitration exhibit not found.");
 
     const audit = await server.inject({
       method: "GET",
@@ -2308,14 +2735,6 @@ describe("MyEscrow API", () => {
     }));
     expect(health.json().details.duplicateCommands.length).toBeGreaterThan(0);
 
-    await server.prisma.dispute.update({
-      where: { reference: phaseFourDisputeReference },
-      data: {
-        status: "arbitration_requested",
-        arbitrationRequestedAt: recoveryNow,
-        arbitrationRequestedById: operator.id,
-      },
-    });
     const arbitrationHealth = await server.inject({
       method: "GET",
       url: "/api/operations/health",
