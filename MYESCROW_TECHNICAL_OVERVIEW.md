@@ -48,8 +48,8 @@ The frontend repository advanced to `d839e77` after the API release at root `0f9
 5. An existing counterparty receives the escrow immediately. A new or unverified counterparty claims pending escrows after signup/verification.
 6. The counterparty can sign/approve, reject, or request agreement/milestone changes. Material changes create a new agreement version and invalidate earlier consent.
 7. Both buyer and seller must sign the current locked agreement before funding.
-8. The buyer chooses either full funding or sequential milestone funding. Full funding deposits the entire agreement amount; milestone funding deposits only the next eligible milestone and locks the escrow to that funding mode.
-9. Funding creates a ledger entry and debits the buyer’s internal MyEscrow wallet. Later milestones remain unfunded until their turn unless the full escrow was funded.
+8. The buyer chooses either full funding or staged funding. Full funding deposits the entire agreement amount; staged funding accepts any positive deposit up to the remaining agreement total.
+9. Each staged deposit creates one ledger and wallet transaction. Cumulative staged funds are allocated across milestones in agreement order, so one deposit may fully secure several milestones and partially secure the next.
 10. The seller submits milestone work with a note and optional evidence metadata. Earlier milestones must be completed first, and the API rejects both work submissions and proof uploads unless that milestone is funded or the escrow uses full funding.
 11. The buyer can approve and release the milestone, request a revision with a reason, or open a dispute.
 12. A dispute freezes only the affected held amount. Parties can add evidence metadata, propose a full seller/buyer allocation, accept the other party’s proposal, or request arbitration after submitting evidence.
@@ -210,7 +210,7 @@ rejected
 
 Milestone values include `not_started`, `submitted`, `revision_requested`, `released`, `disputed`, `settled`, and `cancelled`. Dispute values include `open`, `resolution_proposed`, `arbitration_requested`, `resolving`, and `resolved`.
 
-`Escrow.fundingMode` is `full`, `milestone`, or null before the buyer chooses. Milestone funding is derived from `fund` ledger entries linked to each milestone; it does not mark later milestones funded merely because the escrow has received some funds.
+`Escrow.fundingMode` is `full`, `milestone`, or null before the buyer chooses. The legacy database value `milestone` represents staged funding in the product UI. Coverage is derived by allocating cumulative `fund` ledger amounts across ordered milestone amounts; individual staged deposits do not need to equal or belong to one milestone.
 
 Because these are strings spread across services, search all transitions before changing a status name.
 
@@ -236,7 +236,7 @@ released + refunded <= funded
 
 Active disputes are subtracted from available held funds. `applyEscrowTransfer` performs the process update, internal wallet movement, ledger record, and invariant check inside a Prisma transaction. Reconciliation compares ledger totals, milestones, and linked wallet transactions.
 
-Full funding transfers the entire agreement amount once. Milestone funding transfers only the next unreleased milestone amount and requires milestones to be funded in sequence. Submission and proof-storage services independently enforce the same funding prerequisite on the backend; the disabled frontend action is usability feedback, not the security boundary.
+Full funding transfers the entire agreement amount once. Staged funding accepts an arbitrary amount up to the remaining agreement balance and allocates it FIFO across milestone amounts. A milestone may be not secured, partially secured, or fully secured. Submission and proof-storage services independently require full coverage on the backend; workflow ordering still prevents work on a later secured milestone until earlier work is resolved.
 
 The legacy full-escrow release endpoint remains registered for compatibility but deliberately throws an error. Milestone approval is the supported release path.
 
@@ -267,7 +267,7 @@ Main route groups:
 | Auth | signup, login, verify/resend email, forgot/reset/change password |
 | Dashboard reads | overview, escrows, business profile, disputes, notifications, wallet history |
 | Agreement | create/update escrow, approve/reject, sign, request/apply changes, invitation resend/extend |
-| Money | fund entire escrow, fund next milestone, milestone approve, ledger history, top-up, withdraw |
+| Money | fund entire escrow, add staged funding, milestone approve, ledger history, top-up, withdraw |
 | Work review | submit/resubmit milestone, request revision, apply milestone changes |
 | Dispute/cancellation | open dispute, evidence, proposal, arbitration, resolve, request/accept cancellation |
 | Operations | health, jobs, retry, audit, evidence, invitation recovery, operator roles |
@@ -314,7 +314,7 @@ The same codebase contains three meaningful combinations:
 - Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
 - Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
 
-The immersive transaction screen treats the presence of `fundingMode` in live escrow responses as the milestone-funding compatibility signal. During a frontend/backend rollout gap, it disables the milestone-funding action and shows `Backend update pending` instead of calling a route that an older API does not have. This guard complements—but does not replace—the deployment verification described below.
+The immersive transaction screen uses `stagedFundingSupported` in live escrow responses as the arbitrary-amount compatibility signal. During a frontend/backend rollout gap, it disables staged funding and shows `Backend update pending`; this prevents a newer UI from confirming one deposit amount while an older API applies another. This guard complements—but does not replace—the deployment verification described below.
 
 `NEXT_PUBLIC_API_BASE_URL` is read by server route code but is named as a public browser variable, so its value is part of public build-time configuration.
 
@@ -436,14 +436,14 @@ Do not use `NEXT_PUBLIC_API_TOKEN` in a shared or deployed environment. It is a 
 
 ## Quality gates
 
-Verified on the exact commits in this document:
+Latest local verification:
 
 | Project | Command | Result |
 | --- | --- | --- |
-| API | `npm test` | 1 file, 38 tests passed |
+| API | `npm test` | 2 files, 41 tests passed |
 | API | `npm run build` | passed |
 | API | `npm run lint` | TypeScript no-emit check passed |
-| Frontend | `npm test` | 13 files, 42 tests passed |
+| Frontend | `npm test` | 15 files, 45 tests passed |
 | Frontend | `npm run build` | passed; 32 pages/routes generated |
 | Frontend | `npm run lint` | passed |
 
@@ -513,7 +513,7 @@ The deployment flow is:
 6. The script verifies container health, image identity, `/version`, milestone-funding route registration, and the worker process. Failed verification restores the previous containers; database backups are retained and migrations are never automatically reversed.
 7. Backend CI waits for the public API to report the expected SHA and runs `npm run smoke:deployment`.
 
-`GET /version` returns the deployed source SHA and advertised API capabilities. The immersive frontend uses the funding capability present in current escrow responses to keep milestone funding disabled during a backend/frontend rollout gap.
+`GET /version` returns the deployed source SHA and advertised API capabilities, including `staged_funding_amounts` on compatible releases. The immersive frontend uses the corresponding capability present in current escrow responses to keep staged funding disabled during a backend/frontend rollout gap.
 
 Useful live checks:
 
@@ -540,7 +540,7 @@ Do not return to a bare `docker compose pull && up` deployment; that bypasses th
 
 The buyer-facing milestone-funding dialog originally appeared to do nothing because the Vercel frontend called `POST /api/dashboard/escrows/:id/milestones/:milestoneId/fund`, while the live Oracle API was still an older image and returned `Route ... not found`. Backend CI had successfully built and published the corrected image, but image publication did not deploy it to the VM.
 
-Root commit `3c71555` added and tested server-side funding enforcement for both milestone submissions and proof uploads. It permits seller work only when the full escrow was funded or the specific milestone has a linked funding entry. Frontend commit `310cbbd` added a rollout compatibility guard. Root commit `0f95234` then added immutable build metadata, `GET /version`, deployment smoke tests, guarded backup/migration/deploy/rollback scripts, and the Oracle auto-deploy timer.
+Root commit `3c71555` added and tested server-side funding enforcement for both milestone submissions and proof uploads. That release used milestone-linked deposits; the current staged model instead requires cumulative FIFO allocation to fully cover the milestone. Frontend commit `310cbbd` added the first rollout compatibility guard. Root commit `0f95234` then added immutable build metadata, `GET /version`, deployment smoke tests, guarded backup/migration/deploy/rollback scripts, and the Oracle auto-deploy timer.
 
 The first automated run deployed `0f95234`; CI did not turn green until the public version and protected route checks passed. Future diagnosis should begin with `/version`, the Backend CI “Wait for staging deployment” step, `.deployed-image`, and the timer status rather than assuming that a successful image build reached the VM.
 

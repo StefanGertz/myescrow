@@ -7,6 +7,10 @@ import { pipeline } from "node:stream/promises";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyRequest } from "fastify";
 import { AppError } from "../utils/errors";
+import {
+  milestoneIsFullyFunded,
+  totalFundedFromLedger,
+} from "../utils/stagedFunding";
 import type { MilestoneEvidenceInput, MilestoneSubmissionInput } from "./milestoneReviewService";
 
 export const MAX_MILESTONE_PROOF_FILES = 10;
@@ -50,8 +54,18 @@ export async function authorizeMilestoneProofUpload(
       lifecycleStatus: true,
       fundingMode: true,
       milestones: {
-        where: { id: milestoneId },
-        select: { id: true, amountCents: true },
+        orderBy: { orderIndex: "asc" },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          amountCents: true,
+          orderIndex: true,
+        },
+      },
+      ledgerEntries: {
+        where: { movementType: "fund" },
+        select: { movementType: true, amountCents: true },
       },
     },
   });
@@ -62,20 +76,31 @@ export async function authorizeMilestoneProofUpload(
   if (escrow.lifecycleStatus !== "funded") {
     throw new AppError("Milestone proof can only be uploaded after funding.", 400);
   }
-  const milestone = escrow.milestones[0];
+  const milestone = escrow.milestones.find((item) => item.id === milestoneId);
   if (!milestone) throw new AppError("Milestone not found.", 404);
-  if (escrow.fundingMode !== "full") {
-    const funding = await prisma.escrowLedgerEntry.aggregate({
-      where: {
-        escrowId: escrow.id,
-        milestoneId: milestone.id,
-        movementType: "fund",
-      },
-      _sum: { amountCents: true },
-    });
-    if ((funding._sum.amountCents ?? 0) < milestone.amountCents) {
-      throw new AppError("The buyer must fund this milestone before proof can be uploaded.", 409);
-    }
+  if (
+    escrow.fundingMode !== "full"
+    && !milestoneIsFullyFunded(
+      escrow.milestones,
+      totalFundedFromLedger(escrow.ledgerEntries),
+      milestone.id,
+    )
+  ) {
+    throw new AppError(
+      "The buyer must fully fund this milestone before proof can be uploaded.",
+      409,
+    );
+  }
+  const blockedBy = escrow.milestones.find(
+    (item) =>
+      item.orderIndex < milestone.orderIndex
+      && !["released", "refunded", "settled", "cancelled"].includes(item.status),
+  );
+  if (blockedBy) {
+    throw new AppError(
+      `Complete the earlier milestone "${blockedBy.title}" before proof can be uploaded.`,
+      409,
+    );
   }
 }
 

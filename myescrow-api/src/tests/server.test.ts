@@ -84,7 +84,7 @@ describe("MyEscrow API", () => {
     expect(response.json()).toEqual({
       status: "ok",
       buildSha: process.env.APP_BUILD_SHA ?? "development",
-      capabilities: ["milestone_funding"],
+      capabilities: ["milestone_funding", "staged_funding_amounts"],
     });
   });
 
@@ -1057,7 +1057,7 @@ describe("MyEscrow API", () => {
     expect(fundedView.fundingMode).toBe("full");
   });
 
-  it("funds only the first milestone when milestone funding is selected", async () => {
+  it("allocates staged deposits across milestones and keeps partial milestones locked", async () => {
     const createResponse = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
@@ -1096,20 +1096,69 @@ describe("MyEscrow API", () => {
     })).json().escrows.find((item: any) => item.id === reference);
     const [firstMilestone, secondMilestone] = beforeFunding.milestones;
 
+    const skippedMilestoneFunding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-tier-skip-${reference}-${secondMilestone.id}`,
+      },
+      payload: { amount: 250 },
+    });
+    expect(skippedMilestoneFunding.statusCode).toBe(409);
+    expect(skippedMilestoneFunding.json().error).toContain(`starting with "${firstMilestone.title}"`);
+
+    const fundingIdempotencyKey = `fund-tier-${reference}-${firstMilestone.id}`;
     const funding = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${reference}/milestones/${firstMilestone.id}/fund`,
       headers: {
         Authorization: `Bearer ${token}`,
-        "Idempotency-Key": `fund-tier-${reference}-${firstMilestone.id}`,
+        "Idempotency-Key": fundingIdempotencyKey,
       },
+      payload: { amount: 250 },
     });
     expect(funding.statusCode).toBe(200);
     expect(funding.json()).toEqual(expect.objectContaining({
       milestoneId: firstMilestone.id,
       fundingStatus: "partially_funded",
-      fundedCents: 10_000,
+      depositedCents: 25_000,
+      fundedCents: 25_000,
+      remainingCents: 5_000,
+      allocations: [
+        expect.objectContaining({
+          milestoneId: firstMilestone.id,
+          fundedCents: 10_000,
+          addedCents: 10_000,
+          fundingStatus: "funded",
+        }),
+        expect.objectContaining({
+          milestoneId: secondMilestone.id,
+          fundedCents: 15_000,
+          addedCents: 15_000,
+          fundingStatus: "partially_funded",
+        }),
+      ],
     }));
+    const replayedFunding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${firstMilestone.id}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": fundingIdempotencyKey,
+      },
+      payload: { amount: 250 },
+    });
+    expect(replayedFunding.statusCode).toBe(200);
+    expect(replayedFunding.json()).toEqual(funding.json());
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: {
+        escrowId: beforeFunding.escrowId,
+        movementType: "fund",
+        amountCents: 25_000,
+        milestoneId: null,
+      },
+    })).toBe(1);
 
     const fundedView = (await server.inject({
       method: "GET",
@@ -1121,26 +1170,15 @@ describe("MyEscrow API", () => {
       fundingStatus: "partially_funded",
       fundingMode: "milestone",
     }));
-    expect(fundedView.balances.fundedCents).toBe(10_000);
+    expect(fundedView.balances.fundedCents).toBe(25_000);
     expect(fundedView.milestones[0]).toEqual(expect.objectContaining({
       fundingStatus: "funded",
       fundedCents: 10_000,
     }));
     expect(fundedView.milestones[1]).toEqual(expect.objectContaining({
-      fundingStatus: "not_funded",
-      fundedCents: 0,
+      fundingStatus: "partially_funded",
+      fundedCents: 15_000,
     }));
-
-    const earlySecondFunding = await server.inject({
-      method: "POST",
-      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/fund`,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Idempotency-Key": `fund-tier-early-${reference}-${secondMilestone.id}`,
-      },
-    });
-    expect(earlySecondFunding.statusCode).toBe(409);
-    expect(earlySecondFunding.json().error).toContain("Complete the earlier milestone");
 
     const unfundedSubmission = await server.inject({
       method: "POST",
@@ -1152,7 +1190,7 @@ describe("MyEscrow API", () => {
       payload: { note: "Trying to submit before this tier is funded." },
     });
     expect(unfundedSubmission.statusCode).toBe(409);
-    expect(unfundedSubmission.json().error).toContain("must fund this milestone");
+    expect(unfundedSubmission.json().error).toContain("must fully fund this milestone");
 
     const unfundedProofForm = new FormData();
     unfundedProofForm.append("note", "Trying to upload proof before this tier is funded.");
@@ -1177,8 +1215,70 @@ describe("MyEscrow API", () => {
     });
     expect(unfundedProofSubmission.statusCode).toBe(409);
     expect(unfundedProofSubmission.json().error).toContain(
-      "must fund this milestone before proof can be uploaded",
+      "must fully fund this milestone before proof can be uploaded",
     );
+
+    const remainingFunding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": `fund-tier-remaining-${reference}-${secondMilestone.id}`,
+      },
+    });
+    expect(remainingFunding.statusCode).toBe(200);
+    expect(remainingFunding.json()).toEqual(expect.objectContaining({
+      depositedCents: 5_000,
+      fundedCents: 30_000,
+      remainingCents: 0,
+      fundingStatus: "funded",
+    }));
+
+    const fullyFundedView = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === reference);
+    expect(fullyFundedView.milestones[1]).toEqual(expect.objectContaining({
+      fundingStatus: "funded",
+      fundedCents: 20_000,
+    }));
+
+    const outOfOrderProofForm = new FormData();
+    outOfOrderProofForm.append("note", "Funded, but still waiting for the earlier milestone.");
+    outOfOrderProofForm.append(
+      "proofs",
+      new Blob(["out-of-order proof"], { type: "text/plain" }),
+      "out-of-order-proof.txt",
+    );
+    const outOfOrderProofRequest = new Request("http://localhost/upload", {
+      method: "POST",
+      body: outOfOrderProofForm,
+    });
+    const outOfOrderProofSubmission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-funded-proof-out-of-order-${reference}-${secondMilestone.id}`,
+        "Content-Type": outOfOrderProofRequest.headers.get("Content-Type") ?? "",
+      },
+      payload: Buffer.from(await outOfOrderProofRequest.arrayBuffer()),
+    });
+    expect(outOfOrderProofSubmission.statusCode).toBe(409);
+    expect(outOfOrderProofSubmission.json().error).toContain("Complete the earlier milestone");
+
+    const outOfOrderSubmission = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/milestones/${secondMilestone.id}/submit`,
+      headers: {
+        Authorization: `Bearer ${counterpartyToken}`,
+        "Idempotency-Key": `submit-funded-out-of-order-${reference}-${secondMilestone.id}`,
+      },
+      payload: { note: "The milestone is funded, but the earlier workflow is incomplete." },
+    });
+    expect(outOfOrderSubmission.statusCode).toBe(409);
+    expect(outOfOrderSubmission.json().error).toContain("Complete the earlier milestone");
 
     const fullFunding = await server.inject({
       method: "POST",
@@ -1189,7 +1289,77 @@ describe("MyEscrow API", () => {
       },
     });
     expect(fullFunding.statusCode).toBe(409);
-    expect(fullFunding.json().error).toContain("uses milestone funding");
+    expect(fullFunding.json().error).toContain("uses staged funding");
+  });
+
+  it("serializes competing staged deposits so they cannot overfund the escrow", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-concurrent-staged-escrow",
+      },
+      payload: {
+        title: "Concurrent staged funding",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        creatorParty: { type: "individual" },
+        amount: 100,
+        signatureDataUrl: creatorSignature,
+        milestones: [
+          { title: "First half", amount: 50 },
+          { title: "Second half", amount: 50 },
+        ],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+    expect((await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    })).statusCode).toBe(200);
+
+    const escrow = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === reference);
+    const firstMilestone = escrow.milestones[0];
+    const responses = await Promise.all([
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/milestones/${firstMilestone.id}/fund`,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `concurrent-stage-a-${reference}`,
+        },
+        payload: { amount: 75 },
+      }),
+      server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${reference}/milestones/${firstMilestone.id}/fund`,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `concurrent-stage-b-${reference}`,
+        },
+        payload: { amount: 75 },
+      }),
+    ]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+
+    const fundedEscrow = (await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    })).json().escrows.find((item: any) => item.id === reference);
+    expect(fundedEscrow.balances.fundedCents).toBe(7_500);
+    expect(fundedEscrow.milestones).toEqual([
+      expect.objectContaining({ fundingStatus: "funded", fundedCents: 5_000 }),
+      expect.objectContaining({ fundingStatus: "partially_funded", fundedCents: 2_500 }),
+    ]);
   });
 
   it("blocks legacy full release and cancellation after funding", async () => {

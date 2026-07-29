@@ -18,6 +18,9 @@ if (expectedSha && version.buildSha !== expectedSha) {
 if (!version.capabilities?.includes("milestone_funding")) {
   throw new Error("Deployed API does not advertise milestone funding.");
 }
+if (!version.capabilities?.includes("staged_funding_amounts")) {
+  throw new Error("Deployed API does not advertise flexible staged funding amounts.");
+}
 
 const routeProbe = await fetch(
   `${apiBase}/api/dashboard/escrows/DEPLOYMENT-PROBE/milestones/1/fund`,

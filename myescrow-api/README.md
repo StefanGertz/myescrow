@@ -104,7 +104,7 @@ Escrow creation, funding, milestone submission, milestone approval, dispute open
 | POST | `/api/dashboard/escrows/:id/reject` | Reject an escrow. |
 | POST | `/api/dashboard/escrows/:id/cancel` | Cancel an escrow before funding. |
 | POST | `/api/dashboard/escrows/:id/fund` | Fund the complete escrow amount up front. |
-| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/fund` | Choose milestone funding and fund the next eligible milestone only. |
+| POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/fund` | Add a staged deposit (`{ "amount": 1000 }`) starting at the next unsecured milestone; funds allocate across milestones in order. Omitting the amount funds that milestone's remaining shortfall for older-client compatibility. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/submit` | Submit or resubmit completed work with a note and optional private evidence metadata. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/approve` | Approve the latest seller submission and release that milestone's remaining held balance. |
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/reject` | Request a revision with a required reason saved to the review history. |

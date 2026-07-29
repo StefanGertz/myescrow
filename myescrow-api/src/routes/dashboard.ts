@@ -142,6 +142,10 @@ const walletSchema = z.object({
   amount: z.number().positive(),
 });
 
+const stagedFundingSchema = z.object({
+  amount: z.number().positive().optional(),
+});
+
 const idParamsSchema = z.object({ id: z.string().min(1) });
 const notificationQuerySchema = z.object({ history: z.coerce.boolean().optional().default(false) });
 const milestoneParamsSchema = z.object({
@@ -394,12 +398,14 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/escrows/:id/milestones/:milestoneId/fund", async (request) => {
       const user = await requireUser(request);
       const { id, milestoneId } = milestoneParamsSchema.parse(request.params);
+      const { amount } = stagedFundingSchema.parse(request.body ?? {});
       return fundMilestone(
         secured.prisma,
         user.id,
         id,
         milestoneId,
         requireIdempotencyKey(request),
+        amount === undefined ? undefined : dollarsToCents(amount),
       );
     });
 

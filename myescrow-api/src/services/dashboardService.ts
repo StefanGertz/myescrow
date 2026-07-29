@@ -1,7 +1,11 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { buildEscrowReference, buildNotificationId, buildTimelineId } from "../utils/id";
 import { formatAmountWithSuffix, formatCurrencyFromCents, dollarsToCents } from "../utils/currency";
 import { AppError } from "../utils/errors";
+import {
+  allocateStagedFunding,
+  totalFundedFromLedger,
+} from "../utils/stagedFunding";
 import { getNextSequenceValue } from "./sequenceService";
 import { normalizeEmail } from "./userService";
 import {
@@ -42,7 +46,7 @@ export type EscrowMilestoneResponse = {
   title: string;
   amount: string;
   status: string;
-  fundingStatus: "not_funded" | "funded";
+  fundingStatus: "not_funded" | "partially_funded" | "funded";
   fundedCents: number;
   description?: string;
   deadline?: string;
@@ -95,6 +99,7 @@ export type EscrowResponse = {
   lifecycleStatus: string;
   fundingStatus: string;
   fundingMode: "full" | "milestone" | null;
+  stagedFundingSupported: true;
   creatorRole: "buyer" | "seller";
   createdAt: string;
   approvedAt?: string;
@@ -566,6 +571,13 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     && invitation.expiresAt.getTime() <= Date.now()
     ? "expired"
     : invitation?.status;
+  const totalFundedCents = record.fundingMode === "full"
+    ? record.amountCents
+    : totalFundedFromLedger(record.ledgerEntries);
+  const milestoneFunding = new Map(
+    allocateStagedFunding(record.milestones, totalFundedCents)
+      .map((allocation) => [allocation.milestoneId, allocation] as const),
+  );
 
   return {
     escrowId: record.id,
@@ -581,6 +593,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     lifecycleStatus: record.lifecycleStatus,
     fundingStatus: record.fundingStatus,
     fundingMode: record.fundingMode as "full" | "milestone" | null,
+    stagedFundingSupported: true,
     creatorRole: record.creatorRole as "buyer" | "seller",
     createdAt: record.createdAt.toISOString(),
     ...(record.approvedAt ? { approvedAt: record.approvedAt.toISOString() } : {}),
@@ -644,17 +657,14 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
         }
       : null,
     milestones: record.milestones.map((milestone) => {
-      const fundedCents = record.fundingMode === "full"
-        ? milestone.amountCents
-        : record.ledgerEntries
-            .filter((entry) => entry.movementType === "fund" && entry.milestoneId === milestone.id)
-            .reduce((total, entry) => total + entry.amountCents, 0);
+      const allocation = milestoneFunding.get(milestone.id);
+      const fundedCents = allocation?.fundedCents ?? 0;
       return {
         id: milestone.id,
         title: isProposedNewMilestone(milestone) ? milestone.requestedTitle ?? "New milestone" : milestone.title,
         amount: formatCurrencyFromCents(milestone.amountCents),
         status: milestone.status,
-        fundingStatus: fundedCents >= milestone.amountCents ? "funded" : "not_funded",
+        fundingStatus: allocation?.fundingStatus ?? "not_funded",
         fundedCents,
         ...(milestone.description ? { description: milestone.description } : {}),
         ...(milestone.deadline ? { deadline: milestone.deadline.toISOString() } : {}),
@@ -2087,8 +2097,16 @@ export async function fundEscrow(
       payload: { reference },
     },
     async (tx) => {
-      const escrow = await tx.escrow.findFirst({
+      let escrow = await tx.escrow.findFirst({
         where: { reference, ...visibleEscrowWhere(userId) },
+        include: includeEscrowRelations,
+      });
+      if (!escrow) throw new AppError("Escrow not found.", 404);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Escrow" WHERE "id" = ${escrow.id} FOR UPDATE`,
+      );
+      escrow = await tx.escrow.findUnique({
+        where: { id: escrow.id },
         include: includeEscrowRelations,
       });
       if (!escrow) throw new AppError("Escrow not found.", 404);
@@ -2098,7 +2116,7 @@ export async function fundEscrow(
       }
       if (escrow.lifecycleStatus !== "funding_pending") {
         if (escrow.fundingMode === "milestone") {
-          throw new AppError("This escrow uses milestone funding. Fund the next milestone instead.", 409);
+          throw new AppError("This escrow uses staged funding. Add staged funds instead.", 409);
         }
         if (escrow.fundingStatus === "funded") {
           throw new AppError("This escrow has already been funded.", 409);
@@ -2182,6 +2200,7 @@ export async function fundMilestone(
   reference: string,
   milestoneId: number,
   idempotencyKey: string,
+  requestedAmountCents?: number,
 ) {
   return executeIdempotentCommand(
     prisma,
@@ -2189,11 +2208,19 @@ export async function fundMilestone(
       userId,
       key: idempotencyKey,
       command: "fund_milestone",
-      payload: { reference, milestoneId },
+      payload: { reference, milestoneId, requestedAmountCents: requestedAmountCents ?? null },
     },
     async (tx) => {
-      const escrow = await tx.escrow.findFirst({
+      let escrow = await tx.escrow.findFirst({
         where: { reference, ...visibleEscrowWhere(userId) },
+        include: includeEscrowRelations,
+      });
+      if (!escrow) throw new AppError("Escrow not found.", 404);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Escrow" WHERE "id" = ${escrow.id} FOR UPDATE`,
+      );
+      escrow = await tx.escrow.findUnique({
+        where: { id: escrow.id },
         include: includeEscrowRelations,
       });
       if (!escrow) throw new AppError("Escrow not found.", 404);
@@ -2202,7 +2229,7 @@ export async function fundMilestone(
         throw new AppError("Only the buyer can fund this milestone.", 403);
       }
       if (!["funding_pending", "funded"].includes(escrow.lifecycleStatus)) {
-        throw new AppError("This escrow is not ready for milestone funding.", 400);
+        throw new AppError("This escrow is not ready for staged funding.", 400);
       }
       if (escrow.fundingMode === "full") {
         throw new AppError("This escrow was funded in full.", 409);
@@ -2217,37 +2244,67 @@ export async function fundMilestone(
       });
 
       const milestone = getMilestoneById(escrow, milestoneId);
-      if (["released", "refunded", "settled", "cancelled", "disputed"].includes(milestone.status)) {
-        throw new AppError("This milestone can no longer be funded.", 409);
+      const fundedBeforeCents = totalFundedFromLedger(escrow.ledgerEntries);
+      const allocationsBefore = allocateStagedFunding(escrow.milestones, fundedBeforeCents);
+      const nextAllocation = allocationsBefore.find((allocation) => allocation.remainingCents > 0);
+      if (!nextAllocation) {
+        throw new AppError("This escrow has already been fully funded.", 409);
       }
-      const fundedForMilestone = escrow.ledgerEntries
-        .filter((entry) => entry.movementType === "fund" && entry.milestoneId === milestone.id)
-        .reduce((total, entry) => total + entry.amountCents, 0);
-      if (fundedForMilestone >= milestone.amountCents) {
-        throw new AppError("This milestone has already been funded.", 409);
+      if (nextAllocation.milestoneId !== milestone.id) {
+        const nextMilestone = getMilestoneById(escrow, nextAllocation.milestoneId);
+        throw new AppError(`Add funds starting with "${nextMilestone.title}".`, 409);
       }
-      const blockedBy = escrow.milestones.find(
-        (item) => item.orderIndex < milestone.orderIndex
-          && !["released", "refunded", "settled", "cancelled"].includes(item.status),
-      );
-      if (blockedBy) {
-        throw new AppError(`Complete the earlier milestone "${blockedBy.title}" before funding this one.`, 409);
+      const amountCents = requestedAmountCents ?? nextAllocation.remainingCents;
+      if (!Number.isInteger(amountCents) || amountCents <= 0) {
+        throw new AppError("Funding amount must be a positive number of cents.", 400);
+      }
+      const remainingEscrowCents = escrow.amountCents - fundedBeforeCents;
+      if (amountCents > remainingEscrowCents) {
+        throw new AppError(
+          `You can add at most ${formatCurrencyFromCents(remainingEscrowCents)} to this escrow.`,
+          409,
+        );
       }
 
+      const allocationsAfter = allocateStagedFunding(
+        escrow.milestones,
+        fundedBeforeCents + amountCents,
+      );
+      const allocationChanges = allocationsAfter.map((allocation) => {
+        const before = allocationsBefore.find(
+          (candidate) => candidate.milestoneId === allocation.milestoneId,
+        );
+        const allocationMilestone = getMilestoneById(escrow, allocation.milestoneId);
+        return {
+          milestoneId: allocation.milestoneId,
+          title: allocationMilestone.title,
+          amountCents: allocation.amountCents,
+          fundedCents: allocation.fundedCents,
+          addedCents: allocation.fundedCents - (before?.fundedCents ?? 0),
+          fundingStatus: allocation.fundingStatus,
+        };
+      });
+      const newlyFundedMilestones = allocationChanges.filter((allocation) =>
+        allocation.fundingStatus === "funded"
+        && (allocationsBefore.find(
+          (candidate) => candidate.milestoneId === allocation.milestoneId,
+        )?.fundingStatus !== "funded"));
       const fundedAt = new Date();
-      const amountCents = milestone.amountCents - fundedForMilestone;
       const transfer = await applyEscrowTransfer(tx, {
         escrowId: escrow.id,
-        milestoneId: milestone.id,
         movementType: "fund",
         amountCents,
         idempotencyKey,
-        businessReference: `escrow:${escrow.reference}:milestone:${milestone.id}:fund`,
+        businessReference: `escrow:${escrow.reference}:staged-fund:${idempotencyKey}`,
         actorId: userId,
-        sourceCommand: "fund_milestone",
+        sourceCommand: "fund_staged",
         walletUserId: userId,
       });
       const isFullyFunded = transfer.balances.fundedCents === escrow.amountCents;
+      const nextAfterFunding = allocationsAfter.find((allocation) => allocation.remainingCents > 0);
+      const nextAfterFundingMilestone = nextAfterFunding
+        ? getMilestoneById(escrow, nextAfterFunding.milestoneId)
+        : null;
       const transition = await tx.escrow.updateMany({
         where: {
           id: escrow.id,
@@ -2261,7 +2318,9 @@ export async function fundMilestone(
           stage: "Milestones active",
           dueDescription: isFullyFunded
             ? "All milestones funded"
-            : `${milestone.title} funded; future milestones fund separately`,
+            : nextAfterFunding && nextAfterFundingMilestone
+              ? `${formatCurrencyFromCents(transfer.balances.fundedCents)} secured; ${nextAfterFundingMilestone.title} needs ${formatCurrencyFromCents(nextAfterFunding.remainingCents)}`
+              : "Staged funding active",
           status: "success",
           fundedAt: escrow.fundedAt ?? fundedAt,
         },
@@ -2274,22 +2333,26 @@ export async function fundMilestone(
       await createTimeline(
         tx,
         userId,
-        `${milestone.title} funded`,
+        "Staged funding added",
         `${formatCurrencyFromCents(amountCents)} secured for ${escrow.reference}`,
         "funding",
       );
       await createTimeline(
         tx,
         sellerId,
-        `${milestone.title} funded`,
-        "Work can begin on this milestone",
+        "Staged funding added",
+        newlyFundedMilestones.length > 0
+          ? `${newlyFundedMilestones.map((allocation) => allocation.title).join(", ")} fully secured`
+          : "The next milestone is partially secured",
         "funding",
       );
       await createNotification(
         tx,
         sellerId,
-        "Milestone funded",
-        `${milestone.title} is funded and ready for work.`,
+        newlyFundedMilestones.length > 0 ? "Milestone funding secured" : "Funding added",
+        newlyFundedMilestones.length > 0
+          ? `${newlyFundedMilestones.map((allocation) => allocation.title).join(", ")} fully secured. Sequential work rules still apply.`
+          : `${formatCurrencyFromCents(amountCents)} was added, but the next milestone is not fully secured yet.`,
         "Just now",
         escrow.id,
       );
@@ -2301,6 +2364,9 @@ export async function fundMilestone(
         milestoneId: milestone.id,
         fundingStatus: isFullyFunded ? "funded" : "partially_funded",
         fundedCents: transfer.balances.fundedCents,
+        depositedCents: amountCents,
+        remainingCents: escrow.amountCents - transfer.balances.fundedCents,
+        allocations: allocationChanges,
         fundedAt: fundedAt.toISOString(),
       };
     },
