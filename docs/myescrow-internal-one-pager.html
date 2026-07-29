@@ -210,7 +210,7 @@
           align-items: stretch;
         }
         .card {
-          grid-column: span 3;
+          grid-column: span 4;
           border-radius: 3.5mm;
           padding: 3mm;
         }
@@ -241,91 +241,54 @@
     <div class="page">
       <header class="hero">
         <div>
-          <div class="badge">Internal opportunity brief · July 2026</div>
-          <h1>MyEscrow addresses a broad transaction problem: how independent parties manage staged payments in project-based work.</h1>
-          <p class="lead">The opportunity spans freelance, agency, professional-service, marketplace, and construction transactions where scope, delivery, and payment occur over time. The market question is whether enough higher-value projects need added controls—and whether users will pay for them.</p>
+          <div class="badge">Internal use-case overview · July 2026</div>
+          <h1>MyEscrow supports transactions where payment and delivery do not happen at the same time.</h1>
+          <p class="lead">The common need is straightforward: two parties agree on what must happen, funds are held while the obligation is completed, and payment is released only when both parties agree.</p>
         </div>
         <div class="panel">
-          <div class="eyebrow">Interpretation</div>
-          <h2>Adjacent indicators, not a TAM</h2>
-          <p>No authoritative dataset directly measures U.S. demand for milestone escrow across project-based services. These figures establish participant scale, financial friction, and vertical context—not addressable revenue.</p>
+          <div class="eyebrow">Shared pattern</div>
+          <h2>Agree → fund → deliver → release</h2>
+          <p>Use cases vary by transaction size and industry, but each requires clear terms, confirmation from both sides, and a reliable record of what occurred.</p>
         </div>
       </header>
 
       <section class="grid">
         <article class="card">
-          <div class="kicker">U.S. labour signal</div>
-          <div class="metric">11.9 million</div>
-          <h3>Independent contractors</h3>
-          <p>In July 2023, independent contractors—including consultants and freelance workers—represented 7.4% of U.S. employment on a sole or main job. This is a participant pool, not a count of escrow-ready users.<sup>1</sup></p>
+          <div class="kicker">Peer-to-peer purchases</div>
+          <h3>Used goods bought from an unfamiliar seller</h3>
+          <p>A buyer funds the transaction before an item ships, then confirms receipt and condition before both parties release payment. Persona examples include used cameras, computers, and other online marketplace purchases.</p>
         </article>
 
         <article class="card">
-          <div class="kicker">Small-business signal</div>
-          <div class="metric">51%</div>
-          <h3>Reported uneven cash flow</h3>
-          <p>In the Federal Reserve Banks’ 2024 survey, 51% of employer firms cited uneven cash flow—including collecting receivables—as a challenge. Escrow can clarify payment conditions, but prefunding may create a different liquidity burden.<sup>2</sup></p>
+          <div class="kicker">Contracted services</div>
+          <h3>Freelancers, agencies, and event vendors</h3>
+          <p>Clients fund an agreed project or deposit, while providers gain evidence that payment is available. Milestones can cover design, development, consulting, photography, entertainment, or other defined deliverables.</p>
         </article>
 
         <article class="card">
-          <div class="kicker">Risk context</div>
-          <div class="metric">$16 billion</div>
-          <h3>Reported U.S. fraud losses in 2025</h3>
-          <p>FTC data show reported losses across all fraud categories reached about $16 billion. Most falls outside MyEscrow’s proposed use cases; only a subset of transaction losses may be preventable by escrow.<sup>3</sup></p>
+          <div class="kicker">Merchants and custom goods</div>
+          <h3>Direct sales with delivery or production risk</h3>
+          <p>Independent merchants use escrow for social-media sales, custom orders, or high-value goods. Releases can follow shipment, inspection, design approval, production, and final delivery.</p>
         </article>
 
         <article class="card">
-          <div class="kicker">Construction context</div>
-          <div class="metric">$2.21 trillion</div>
-          <h3>Annualized U.S. construction activity</h3>
-          <p>Construction put in place reached a $2.21 trillion annual rate in May 2026; 18.5% of construction-industry workers were independent contractors in July 2023. Neither figure measures escrow demand.<sup>1,4</sup></p>
+          <div class="kicker">Embedded marketplaces</div>
+          <h3>Platforms that need transaction protection</h3>
+          <p>A marketplace integrates escrow into its own checkout and policy process. Buyers fund before fulfillment; the platform and its users receive transaction records while funds remain neutral until release conditions are met.</p>
         </article>
 
         <article class="card">
-          <div class="kicker">Use case · Contracted services</div>
-          <h3>Freelance, agency, and professional work</h3>
-          <ul>
-            <li>Website, software, creative, or marketing work delivered by milestone</li>
-            <li>Consulting engagements with defined outputs and acceptance criteria</li>
-            <li>Agency projects involving independent specialists or subcontractors</li>
-          </ul>
+          <div class="kicker">Construction projects</div>
+          <h3>General contractors and subcontractors</h3>
+          <p>A general contractor can tie deposits and progress payments to material receipts, delivery, installation, or other project phases. The same structure can support change records and multiple projects.</p>
         </article>
 
         <article class="card">
-          <div class="kicker">Use case · Construction</div>
-          <h3>General contractors and project draws</h3>
-          <ul>
-            <li>Owner-to-GC progress payments tied to documented stages</li>
-            <li>GC-to-subcontractor releases following work approval</li>
-            <li>Change-order, retainage, and lien-waiver records around payment events</li>
-          </ul>
-        </article>
-
-        <article class="card">
-          <div class="kicker">Use case · Platforms and commerce</div>
-          <h3>Transactions lacking native protection</h3>
-          <ul>
-            <li>Service marketplaces without milestone or dispute infrastructure</li>
-            <li>Custom goods using deposit, inspection, and delivery stages</li>
-            <li>Higher-value private transactions requiring verification before release</li>
-          </ul>
-        </article>
-
-        <article class="card">
-          <div class="kicker">Common workflow and boundary</div>
-          <h3>What the use cases share</h3>
-          <p>Parties agree scope, fund the transaction, submit delivery evidence, approve or request revision, and release, refund, or dispute funds. The best fit has identifiable parties and objective stages; immediate, low-value, anonymous, or highly regulated transactions are weaker candidates.</p>
+          <div class="kicker">Operating boundary</div>
+          <h3>Funds are held; disputes are not adjudicated</h3>
+          <p>Both parties must agree to a release. If they disagree, funds remain locked until they reach an agreement or obtain a legal resolution. MyEscrow supplies the agreement, notifications, and audit records but does not decide the outcome.</p>
         </article>
       </section>
-
-      <footer class="sources">
-        <strong>Sources:</strong>
-        <sup>1</sup> U.S. Bureau of Labor Statistics, <a href="https://www.bls.gov/news.release/conemp.nr0.htm">Contingent and Alternative Employment Arrangements, July 2023</a>.
-        <sup>2</sup> Federal Reserve Banks, <a href="https://www.fedsmallbusiness.org/-/media/project/clevelandfedtenant/fsbsite/reports/2025/2025-report-on-employer-firms.pdf">2025 Report on Employer Firms</a>.
-        <sup>3</sup> Federal Trade Commission, <a href="https://www.ftc.gov/news-events/news/press-releases/2026/06/ftc-data-show-people-reported-losing-3-point-5-billion-imposter-scams-2025">2025 fraud-loss data</a>.
-        <sup>4</sup> U.S. Census Bureau, <a href="https://www.census.gov/construction/c30/pdf/totsa.pdf">Value of Construction Put in Place, May 2026</a>.
-        Figures are contextual indicators, use different populations and periods, and should not be added together.
-      </footer>
     </div>
   </body>
 </html>
