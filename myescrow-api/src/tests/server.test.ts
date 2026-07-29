@@ -3,9 +3,10 @@ import path from "path";
 import type { FastifyInstance } from "fastify";
 import { execSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { PrismaClient } from "@prisma/client";
+import { reconcileEvidenceProvenance } from "../services/evidenceProvenanceService";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
 
@@ -26,7 +27,11 @@ let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
 let proofStorageDir: string;
 let phaseFourDisputeExhibitId: string;
+let phaseFourLegacyDisputeExhibitId: string;
+let phaseFourLegacyMilestoneExhibitId: string;
 const phaseFourDisputeEvidenceFileName = "seller-delivery-notes.txt";
+const phaseFourLegacyDisputeFileName = "historic-dispute-reference.txt";
+const phaseFourLegacyMilestoneFileName = "historic-milestone-reference.txt";
 const phaseFourDisputeEvidenceBytes = Buffer.from(
   "Seller delivery notes retained as a managed arbitration exhibit.\n",
   "utf8",
@@ -2171,6 +2176,58 @@ describe("MyEscrow API", () => {
     });
     expect(untrustedObjectKey.statusCode).toBe(400);
 
+    const [dispute, seller, latestMilestoneSubmission] = await Promise.all([
+      server.prisma.dispute.findUniqueOrThrow({
+        where: { reference: phaseFourDisputeReference },
+        select: { id: true },
+      }),
+      server.prisma.user.findUniqueOrThrow({
+        where: { email: "nora@example.com" },
+        select: { id: true },
+      }),
+      server.prisma.milestoneSubmission.findFirstOrThrow({
+        where: { milestoneId: rejectedMilestoneId },
+        orderBy: { submissionNumber: "desc" },
+        select: { id: true },
+      }),
+    ]);
+    const legacyDisputeSubmission = await server.prisma.disputeEvidenceSubmission.create({
+      data: {
+        disputeId: dispute.id,
+        submitterId: seller.id,
+        note: "Historic metadata imported before MyEscrow managed evidence files.",
+        files: {
+          create: {
+            objectKey: storedEvidence.objectKey,
+            fileName: phaseFourLegacyDisputeFileName,
+            contentType: storedEvidence.contentType,
+            sizeBytes: storedEvidence.sizeBytes,
+            sha256: storedEvidence.sha256,
+            storageStatus: "legacy_metadata",
+          },
+        },
+      },
+      include: { files: true },
+    });
+    const legacyDisputeEvidence = legacyDisputeSubmission.files[0];
+    if (!legacyDisputeEvidence) throw new Error("Expected a legacy dispute evidence reference.");
+    phaseFourLegacyDisputeExhibitId = `dispute-${legacyDisputeEvidence.id}`;
+    expect(legacyDisputeEvidence.storageStatus).toBe("legacy_metadata");
+
+    const legacyMilestoneEvidence = await server.prisma.milestoneEvidenceReference.create({
+      data: {
+        submissionId: latestMilestoneSubmission.id,
+        objectKey: storedEvidence.objectKey,
+        fileName: phaseFourLegacyMilestoneFileName,
+        contentType: storedEvidence.contentType,
+        sizeBytes: storedEvidence.sizeBytes,
+        sha256: storedEvidence.sha256,
+        storageStatus: "legacy_metadata",
+      },
+    });
+    phaseFourLegacyMilestoneExhibitId = `milestone-${legacyMilestoneEvidence.id}`;
+    expect(legacyMilestoneEvidence.storageStatus).toBe("legacy_metadata");
+
     const exhibitBeforeArbitration = await server.inject({
       method: "GET",
       url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
@@ -2640,6 +2697,41 @@ describe("MyEscrow API", () => {
         ]),
       }),
     ]));
+    const reportDisputeEvidenceReferences = operationsReportBody.evidence.flatMap(
+      (submission: { references: Array<Record<string, unknown>> }) => submission.references,
+    );
+    expect(reportDisputeEvidenceReferences.find(
+      (reference: { fileName?: string }) =>
+        reference.fileName === phaseFourDisputeEvidenceFileName,
+    )).toEqual(expect.objectContaining({
+      exhibitId: phaseFourDisputeExhibitId,
+      storageStatus: "managed",
+    }));
+    expect(reportDisputeEvidenceReferences.find(
+      (reference: { fileName?: string }) =>
+        reference.fileName === phaseFourLegacyDisputeFileName,
+    )).toEqual(expect.objectContaining({
+      exhibitId: null,
+      fileName: phaseFourLegacyDisputeFileName,
+      storageStatus: "metadata_only",
+    }));
+    const reportMilestoneEvidence = operationsReportBody.disputedMilestone.submissions.flatMap(
+      (submission: { evidence: Array<Record<string, unknown>> }) => submission.evidence,
+    );
+    expect(reportMilestoneEvidence.find(
+      (reference: { fileName?: string }) =>
+        reference.fileName === phaseFourLegacyMilestoneFileName,
+    )).toEqual(expect.objectContaining({
+      exhibitId: null,
+      fileName: phaseFourLegacyMilestoneFileName,
+      storageStatus: "metadata_only",
+    }));
+    const reportExhibitIds = operationsReportBody.exhibits.map(
+      (exhibit: { id: string }) => exhibit.id,
+    );
+    expect(reportExhibitIds).toContain(phaseFourDisputeExhibitId);
+    expect(reportExhibitIds).not.toContain(phaseFourLegacyDisputeExhibitId);
+    expect(reportExhibitIds).not.toContain(phaseFourLegacyMilestoneExhibitId);
     expect(JSON.stringify(operationsReportBody)).not.toContain("\"objectKey\"");
     expect(partyReportBody).toEqual(expect.objectContaining({
       reportVersion: operationsReportBody.reportVersion,
@@ -2687,6 +2779,52 @@ describe("MyEscrow API", () => {
         "x-content-sha256": phaseFourDisputeEvidenceSha256,
         "x-content-type-options": "nosniff",
       }));
+    }
+
+    const managedEvidence = await server.prisma.disputeEvidenceReference.findFirstOrThrow({
+      where: {
+        storageStatus: "managed",
+        submission: {
+          dispute: { reference: phaseFourDisputeReference },
+        },
+      },
+    });
+    const managedEvidencePath = path.join(
+      proofStorageDir,
+      managedEvidence.objectKey.replace(/^milestone-proofs\//, ""),
+    );
+    const tamperedEvidenceBytes = Buffer.from(phaseFourDisputeEvidenceBytes);
+    tamperedEvidenceBytes[0] = tamperedEvidenceBytes[0]! ^ 0xff;
+    await writeFile(managedEvidencePath, tamperedEvidenceBytes);
+    try {
+      const tamperedExhibit = await server.inject({
+        method: "GET",
+        url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      });
+      expect(tamperedExhibit.statusCode).toBe(409);
+      expect(tamperedExhibit.json().error).toBe(
+        "Evidence file failed its stored size or SHA-256 integrity check.",
+      );
+    } finally {
+      await writeFile(managedEvidencePath, phaseFourDisputeEvidenceBytes);
+    }
+
+    const [legacyDisputeExhibit, legacyMilestoneExhibit] = await Promise.all([
+      server.inject({
+        method: "GET",
+        url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourLegacyDisputeExhibitId}`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      }),
+      server.inject({
+        method: "GET",
+        url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourLegacyMilestoneExhibitId}`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      }),
+    ]);
+    for (const legacyExhibitResponse of [legacyDisputeExhibit, legacyMilestoneExhibit]) {
+      expect(legacyExhibitResponse.statusCode).toBe(404);
+      expect(legacyExhibitResponse.json().error).toBe("Arbitration exhibit not found.");
     }
 
     const otherEscrowEvidence = await server.prisma.milestoneEvidenceReference.findFirstOrThrow({
@@ -2763,5 +2901,52 @@ describe("MyEscrow API", () => {
     const report = await reconcileEscrowLedger(server.prisma);
     expect(report.checkedEscrows).toBeGreaterThan(0);
     expect(report.exceptions).toEqual([]);
+  });
+
+  it("promotes only a uniquely stored, size-and-hash verified legacy evidence file", async () => {
+    const submission = await server.prisma.milestoneSubmission.findFirstOrThrow({
+      where: {
+        milestone: {
+          escrow: { reference: createdEscrowReference },
+        },
+      },
+      orderBy: { id: "asc" },
+      select: { id: true },
+    });
+    const bytes = Buffer.from("Verified pre-provenance milestone evidence.\n", "utf8");
+    const objectId = randomUUID();
+    const evidence = await server.prisma.milestoneEvidenceReference.create({
+      data: {
+        submissionId: submission.id,
+        objectKey: `milestone-proofs/${objectId}`,
+        fileName: "pre-provenance-proof.txt",
+        contentType: "text/plain",
+        sizeBytes: bytes.byteLength,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+    });
+    await writeFile(path.join(proofStorageDir, objectId), bytes);
+
+    const dryRun = await reconcileEvidenceProvenance(server.prisma, { apply: false });
+    expect(dryRun.mode).toBe("dry-run");
+    expect(dryRun.candidates).toContainEqual(expect.objectContaining({
+      kind: "milestone",
+      id: evidence.id,
+      fileName: evidence.fileName,
+    }));
+    expect((await server.prisma.milestoneEvidenceReference.findUniqueOrThrow({
+      where: { id: evidence.id },
+    })).storageStatus).toBe("legacy_metadata");
+
+    const applied = await reconcileEvidenceProvenance(server.prisma, { apply: true });
+    expect(applied.mode).toBe("apply");
+    expect(applied.promoted).toBe(1);
+    expect(applied.candidates).toContainEqual(expect.objectContaining({
+      kind: "milestone",
+      id: evidence.id,
+    }));
+    expect((await server.prisma.milestoneEvidenceReference.findUniqueOrThrow({
+      where: { id: evidence.id },
+    })).storageStatus).toBe("managed");
   });
 });

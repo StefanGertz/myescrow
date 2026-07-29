@@ -72,7 +72,7 @@ A separate worker:
 
 Support/admin APIs expose worker health, failed jobs, outbox failures, aged escrows, duplicate command replays, reconciliation exceptions, dispute deadlines, arbitration requests, arbitration reports containing the signed agreement, parties, evidence manifests, complete chat transcripts, ledger and chronology, audit history, and safe retry/extension commands.
 
-The web operations console implements health/alert views, printable/downloadable arbitration reports, failed operational-job retry, operator management, and escrow detail drill-down. The affected buyer and seller can access the same arbitration report from their dispute workspace. Its PDF embeds managed evidence as original-file attachments and adds visible preview pages for valid, safety-limited PDF, JPEG, and PNG exhibits; other formats are not converted. Exhibit retrieval is arbitration-only and limited to those parties or support/admin operators. The API and browser both verify each managed file’s stored byte count and SHA-256, and generation stops when managed exhibits exceed 100 MB in aggregate or any exhibit fails verification. Some support APIs do not yet have corresponding web controls; see “Known limitations and incomplete areas.”
+The web operations console implements health/alert views, printable/downloadable arbitration reports, failed operational-job retry, operator management, and escrow detail drill-down. The affected buyer and seller can access the same arbitration report from their dispute workspace. Its PDF embeds every managed exhibit unchanged as an original-file attachment, adds a metadata-only cover page for each exhibit, and attaches an exact-Unicode machine-readable `Arbitration-Report-Data.json`. Exhibit content is not parsed, rendered, converted, or imported into report pages. Exhibit retrieval is arbitration-only and limited to those parties or support/admin operators. The API and browser both verify each managed file’s stored byte count and SHA-256, while the browser also verifies the canonical report-data hash. Generation stops above 100 managed files or `100,000,000` managed-evidence bytes, or when any integrity check fails. The final PDF is not digitally signed. Some support APIs do not yet have corresponding web controls; see “Known limitations and incomplete areas.”
 
 ## System architecture
 
@@ -555,7 +555,7 @@ The first automated run deployed `0f95234`; CI did not turn green until the publ
 
 - Wallet top-up and withdrawal update database balances only. No payment provider, bank, custody account, webhook flow, settlement state, reversal, or chargeback integration exists.
 - KYC/KYB, AML/sanctions screening, transaction monitoring, regulated custody, and jurisdiction-specific compliance are outside the current system.
-- Managed milestone and dispute evidence uses filesystem storage with generated object keys, file metadata, and SHA-256 values. Arbitration downloads authorize the linked parties or support/admin operators, verify size and hash on the API and in the browser, and embed managed originals as PDF attachments. Valid PDF, JPEG, and PNG exhibits can also appear as visible preview pages; other formats are not converted. Legacy JSON references remain metadata-only unless they match a managed file in the same arbitration. The packet has a 100 MB managed-exhibit limit. There is still no production private object-store policy, malware scanning, retention workflow, or encryption/key policy.
+- Managed milestone and dispute evidence uses filesystem storage with generated object keys, file metadata, and SHA-256 values. Arbitration downloads authorize the linked parties or support/admin operators, verify file size and hash on the API and in the browser, verify the canonical report-data hash in the browser, and embed managed originals unchanged as PDF attachments behind metadata-only cover pages. The packet also carries exact-Unicode machine-readable report data. Exhibit content is never imported into report pages. Legacy JSON references remain metadata-only unless they match a managed file in the same arbitration. The packet is limited to 100 managed files and `100,000,000` managed-evidence bytes, and the final PDF is not digitally signed. Evidence is not malware-scanned and must be treated as untrusted when extracted or opened. There is still no production private object-store policy, retention workflow, or encryption/key policy.
 - Arbitration creates an `arbitration_requested` state and operations alert. It does not implement a staff adjudication or staff-authorized payout command.
 - Currency is effectively fixed to USD even though currency appears on ledger and agreement records.
 
@@ -623,9 +623,12 @@ npm run db:migrate
 npm run db:migrate:deploy
 npm run db:seed
 npm run reconcile:ledger
+npm run evidence:reconcile-provenance
 npm run operations:dev
 npm run operations:run
 ```
+
+`myescrow-api/scripts/reconcile-evidence-provenance.ts` is exposed as `npm run evidence:reconcile-provenance`. It performs a read-only dry run for legacy evidence created by older milestone upload paths and audits both milestone and dispute evidence rows. After an operator reviews the output, `npm run evidence:reconcile-provenance -- --apply` persists only verified classifications; missing, ambiguous, size-mismatched, or hash-mismatched rows remain metadata-only.
 
 Frontend:
 

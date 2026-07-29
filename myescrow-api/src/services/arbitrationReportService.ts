@@ -134,6 +134,9 @@ export async function getArbitrationReport(
   ) {
     throw new AppError("Only the affected buyer or seller can access this arbitration report.", 403);
   }
+  if (dispute.milestone && dispute.milestone.escrowId !== escrow.id) {
+    throw new AppError("The disputed milestone is not linked to this arbitration escrow.", 409);
+  }
   if (!dispute.arbitrationRequestedAt) {
     throw new AppError("An arbitration report is available only after arbitration is requested.", 409);
   }
@@ -173,7 +176,7 @@ export async function getArbitrationReport(
   }));
 
   const milestoneExhibits = (dispute.milestone?.submissions ?? []).flatMap((submission) =>
-    submission.evidence.map((item) => ({
+    submission.evidence.filter((item) => item.storageStatus === "managed").map((item) => ({
       id: `milestone-${item.id}`,
       source: "milestone_submission" as const,
       sourceSubmissionId: submission.id,
@@ -190,7 +193,7 @@ export async function getArbitrationReport(
     })));
 
   const disputeExhibits = dispute.evidenceSubmissions.flatMap((submission) =>
-    submission.files.map((item) => ({
+    submission.files.filter((item) => item.storageStatus === "managed").map((item) => ({
       id: `dispute-${item.id}`,
       source: "dispute_evidence" as const,
       sourceSubmissionId: submission.id,
@@ -220,12 +223,14 @@ export async function getArbitrationReport(
     note: submission.note,
     references: [
       ...submission.files.map((item) => ({
-        exhibitId: `dispute-${item.id}`,
+        exhibitId: item.storageStatus === "managed" ? `dispute-${item.id}` : null,
         fileName: item.fileName,
         contentType: item.contentType,
         sizeBytes: item.sizeBytes,
         sha256: item.sha256.toLowerCase(),
-        storageStatus: "managed" as const,
+        storageStatus: item.storageStatus === "managed"
+          ? "managed" as const
+          : "metadata_only" as const,
       })),
       ...evidenceReferences(submission.evidence).map((reference) => {
         const exhibit = findManagedExhibit(reference);
@@ -251,12 +256,14 @@ export async function getArbitrationReport(
     submitter: submission.submitter,
     evidence: submission.evidence.map((item) => ({
       id: item.id,
-      exhibitId: `milestone-${item.id}`,
+      exhibitId: item.storageStatus === "managed" ? `milestone-${item.id}` : null,
       fileName: item.fileName,
       contentType: item.contentType,
       sizeBytes: item.sizeBytes,
       sha256: item.sha256.toLowerCase(),
-      storageStatus: "managed" as const,
+      storageStatus: item.storageStatus === "managed"
+        ? "managed" as const
+        : "metadata_only" as const,
       createdAt: item.createdAt.toISOString(),
     })),
     review: submission.review
@@ -464,8 +471,10 @@ export async function getArbitrationReport(
       "The requested relief is a system summary; the arbitration request does not yet capture a separate party-authored claim and remedy.",
       "The agreement schema does not separately identify an arbitration provider, rules, seat, or arbitration clause.",
       "The downloadable PDF embeds every managed exhibit as an original-file attachment with a visible metadata cover; untrusted exhibit content is not parsed or imported into report pages.",
+      "Managed exhibit attachments are not malware-scanned and must be treated as untrusted when extracted or opened.",
       "Legacy metadata-only evidence references cannot be embedded unless they match a managed file belonging to this arbitration; they remain identified in the manifest.",
       "The integrity SHA-256 identifies the report data returned by MyEscrow, excluding the generation time.",
+      "The final downloadable PDF is not digitally signed; the displayed report hash is not a signature of the final PDF bytes.",
     ],
   };
 
@@ -515,11 +524,15 @@ export async function openArbitrationExhibit(
   const match = /^(milestone|dispute)-([1-9]\d*)$/.exec(exhibitId);
   if (!match) throw new AppError("Arbitration exhibit not found.", 404);
   const evidenceId = Number(match[2]);
+  if (!Number.isSafeInteger(evidenceId) || evidenceId > 2_147_483_647) {
+    throw new AppError("Arbitration exhibit not found.", 404);
+  }
   const evidence = match[1] === "milestone"
     ? dispute.milestoneId
       ? await prisma.milestoneEvidenceReference.findFirst({
           where: {
             id: evidenceId,
+            storageStatus: "managed",
             submission: {
               milestone: {
                 id: dispute.milestoneId,
@@ -532,16 +545,17 @@ export async function openArbitrationExhibit(
     : await prisma.disputeEvidenceReference.findFirst({
         where: {
           id: evidenceId,
+          storageStatus: "managed",
           submission: { disputeId: dispute.id },
         },
       });
   if (!evidence) throw new AppError("Arbitration exhibit not found.", 404);
   const [milestoneKeyCount, disputeKeyCount] = await Promise.all([
     prisma.milestoneEvidenceReference.count({
-      where: { objectKey: evidence.objectKey },
+      where: { objectKey: evidence.objectKey, storageStatus: "managed" },
     }),
     prisma.disputeEvidenceReference.count({
-      where: { objectKey: evidence.objectKey },
+      where: { objectKey: evidence.objectKey, storageStatus: "managed" },
     }),
   ]);
   if (milestoneKeyCount + disputeKeyCount !== 1) {

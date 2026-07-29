@@ -74,6 +74,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 - `npm run db:generate` - regenerate the Prisma client.
 - `npm run smoke` - end-to-end smoke test (signup -> overview -> milestone releases -> wallet/disputes).
 - `npm run reconcile:ledger` - compare escrow ledger balances, milestone releases, and linked wallet transactions.
+- `npm run evidence:reconcile-provenance` - dry-run `scripts/reconcile-evidence-provenance.ts` against legacy evidence provenance; after reviewing its output, use `npm run evidence:reconcile-provenance -- --apply` to persist only verified classifications.
 - `npm run operations:run` - start the compiled recovery worker; it runs immediately and every minute until stopped.
 - `npm run operations:once` - process one compiled recovery cycle and exit, for external cron platforms.
 - `npm run operations:dev` - process one recovery cycle directly from TypeScript during development.
@@ -137,11 +138,15 @@ Escrow creation, chat messages, funding, milestone submission, milestone approva
 
 ### Managed evidence and arbitration exhibits
 
-Multipart milestone proofs use the `proofs` field; multipart dispute evidence uses the `evidence` field. Each request accepts up to 10 files, 25 MB per file, and 100 MB total. Files are stored with a generated object key plus the original filename, media type, byte count, and SHA-256.
+Multipart milestone proofs use the `proofs` field; multipart dispute evidence uses the `evidence` field. Each request accepts up to 10 files, 25 MB per file, and 100 MB total. One arbitration packet may include no more than 100 managed files totaling no more than `100,000,000` bytes across its disputed milestone and formal dispute evidence. Files are stored with a generated object key plus the original filename, media type, byte count, and SHA-256.
 
-Arbitration exhibit downloads are available only after `arbitrationRequestedAt` is set. The API authorizes the affected buyer or seller, or a support/administrator account, confirms that the exhibit belongs to that dispute, and verifies the stored byte count and SHA-256 before returning private, non-cacheable bytes. The web client verifies the same values again before building the PDF.
+Arbitration exhibit downloads are available only after `arbitrationRequestedAt` is set. The API authorizes the affected buyer or seller, or a support/administrator account, confirms that the exhibit belongs to that dispute, and verifies the stored byte count and SHA-256 before returning private, non-cacheable bytes. The web client verifies the same values and the canonical report-data SHA-256 before building the PDF.
 
-The arbitration PDF embeds every managed exhibit as an original-file attachment. Valid, safety-limited PDF, JPEG, and PNG files also receive visible preview pages. Other formats remain original attachments and are not converted. Packet generation stops if the managed exhibits exceed 100 MB in aggregate or if a file is missing or fails integrity verification. Legacy JSON evidence references remain metadata-only unless they exactly match a managed file in the same arbitration.
+The arbitration PDF embeds every managed exhibit unchanged as an original-file attachment. Report pages contain an exhibit metadata cover only; file content is never parsed, rendered, converted, or imported into those pages. The PDF also attaches `Arbitration-Report-Data.json`, an exact-Unicode machine-readable copy of the report data. Packet generation stops if the managed evidence exceeds either cumulative limit or if the report or a file fails integrity verification. The final PDF is not digitally signed.
+
+Managed evidence is not malware-scanned and must be treated as untrusted when extracted or opened. Use patched, isolated applications and do not enable active content merely because a file came from a packet.
+
+Legacy evidence created by older milestone upload paths is metadata-only unless its managed-storage provenance can be verified. `scripts/reconcile-evidence-provenance.ts`, exposed as `npm run evidence:reconcile-provenance`, performs a read-only audit of legacy milestone and dispute evidence rows. After operator review, `npm run evidence:reconcile-provenance -- --apply` persists verified classifications; missing, ambiguous, size-mismatched, or hash-mismatched rows remain metadata-only. Legacy JSON evidence references likewise remain metadata-only unless they exactly match a managed file in the same arbitration.
 
 ## Testing
 

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import { access, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { access, mkdir, open, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -223,6 +223,7 @@ async function parseStoredEvidenceSubmission(
         contentType,
         sizeBytes,
         sha256: hash.digest("hex"),
+        storageStatus: "managed",
       });
     }
   } catch (error) {
@@ -274,10 +275,19 @@ export async function readVerifiedEvidenceFile(evidence: {
   sha256: string;
 }) {
   let bytes: Buffer;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    bytes = await readFile(resolveObjectPath(evidence.objectKey));
+    handle = await open(
+      resolveObjectPath(evidence.objectKey),
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+    const fileStats = await handle.stat();
+    if (!fileStats.isFile()) throw new Error("Not a regular file");
+    bytes = await handle.readFile();
   } catch {
     throw new AppError("Evidence file is unavailable.", 404);
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
   const actualHash = createHash("sha256").update(bytes).digest("hex");
   if (
@@ -300,6 +310,7 @@ export async function openMilestoneProof(
   const evidence = await prisma.milestoneEvidenceReference.findFirst({
     where: {
       id: evidenceId,
+      storageStatus: "managed",
       submissionId,
       submission: {
         milestoneId,

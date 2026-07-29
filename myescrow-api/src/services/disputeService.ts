@@ -98,21 +98,33 @@ async function managedArbitrationEvidence(
   ] = await Promise.all([
     milestoneId
       ? tx.milestoneEvidenceReference.aggregate({
-          where: { submission: { milestoneId } },
+          where: {
+            storageStatus: "managed",
+            submission: { milestoneId },
+          },
           _sum: { sizeBytes: true },
         })
       : Promise.resolve({ _sum: { sizeBytes: null } }),
     milestoneId
       ? tx.milestoneEvidenceReference.count({
-          where: { submission: { milestoneId } },
+          where: {
+            storageStatus: "managed",
+            submission: { milestoneId },
+          },
         })
       : Promise.resolve(0),
     tx.disputeEvidenceReference.aggregate({
-      where: { submission: { disputeId } },
+      where: {
+        storageStatus: "managed",
+        submission: { disputeId },
+      },
       _sum: { sizeBytes: true },
     }),
     tx.disputeEvidenceReference.count({
-      where: { submission: { disputeId } },
+      where: {
+        storageStatus: "managed",
+        submission: { disputeId },
+      },
     }),
   ]);
   return {

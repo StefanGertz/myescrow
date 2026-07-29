@@ -175,17 +175,19 @@ model MilestoneSubmission {
 }
 
 model MilestoneEvidenceReference {
-  id           Int                 @id @default(autoincrement())
-  submissionId Int
-  submission   MilestoneSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  objectKey    String
-  fileName     String
-  contentType  String
-  sizeBytes    Int
-  sha256       String
-  createdAt    DateTime            @default(now())
+  id            Int                 @id @default(autoincrement())
+  submissionId  Int
+  submission    MilestoneSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  objectKey     String
+  fileName      String
+  contentType   String
+  sizeBytes     Int
+  sha256        String
+  storageStatus String              @default("legacy_metadata")
+  createdAt     DateTime            @default(now())
 
   @@index([submissionId])
+  @@index([objectKey])
 }
 
 model MilestoneReview {
@@ -202,42 +204,42 @@ model MilestoneReview {
 }
 
 model Dispute {
-  id                     Int                           @id @default(autoincrement())
-  reference              String                        @unique
-  ownerId                String
-  owner                  User                          @relation("DisputeLegacyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  escrowId               Int?
-  escrow                 Escrow?                       @relation(fields: [escrowId], references: [id], onDelete: Restrict)
-  milestoneId            Int?
-  milestone              EscrowMilestone?              @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
-  openedById             String?
-  openedBy               User?                         @relation("DisputeOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
-  title                  String
-  ownerTeam              String
-  amountCents            Int
-  amountFrozenCents      Int                           @default(0)
-  reason                 String?
-  evidenceWindowEndsAt   DateTime?
-  evidenceReminderSentAt DateTime?
-  evidenceEscalatedAt    DateTime?
-  resolutionAuthority    String                        @default("mutual_party_agreement")
-  arbitrationRequestedAt DateTime?
+  id                       Int                           @id @default(autoincrement())
+  reference                String                        @unique
+  ownerId                  String
+  owner                    User                          @relation("DisputeLegacyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  escrowId                 Int?
+  escrow                   Escrow?                       @relation(fields: [escrowId], references: [id], onDelete: Restrict)
+  milestoneId              Int?
+  milestone                EscrowMilestone?              @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
+  openedById               String?
+  openedBy                 User?                         @relation("DisputeOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  title                    String
+  ownerTeam                String
+  amountCents              Int
+  amountFrozenCents        Int                           @default(0)
+  reason                   String?
+  evidenceWindowEndsAt     DateTime?
+  evidenceReminderSentAt   DateTime?
+  evidenceEscalatedAt      DateTime?
+  resolutionAuthority      String                        @default("mutual_party_agreement")
+  arbitrationRequestedAt   DateTime?
   arbitrationRequestedById String?
-  arbitrationRequestedBy User?                         @relation("DisputeArbitrationRequester", fields: [arbitrationRequestedById], references: [id], onDelete: Restrict)
-  resolutionProposedById String?
-  resolutionProposedBy   User?                         @relation("DisputeResolutionProposer", fields: [resolutionProposedById], references: [id], onDelete: Restrict)
-  proposedSellerCents    Int?
-  proposedBuyerCents     Int?
-  resolutionNote         String?
-  resolvedAt             DateTime?
-  updatedLabel           String
-  priority               String
-  status                 String
-  workspaceLaunched      Boolean                       @default(false)
-  createdAt              DateTime                      @default(now())
-  updatedAt              DateTime                      @updatedAt
-  evidenceSubmissions    DisputeEvidenceSubmission[]
-  allocations            DisputeResolutionAllocation[]
+  arbitrationRequestedBy   User?                         @relation("DisputeArbitrationRequester", fields: [arbitrationRequestedById], references: [id], onDelete: Restrict)
+  resolutionProposedById   String?
+  resolutionProposedBy     User?                         @relation("DisputeResolutionProposer", fields: [resolutionProposedById], references: [id], onDelete: Restrict)
+  proposedSellerCents      Int?
+  proposedBuyerCents       Int?
+  resolutionNote           String?
+  resolvedAt               DateTime?
+  updatedLabel             String
+  priority                 String
+  status                   String
+  workspaceLaunched        Boolean                       @default(false)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  evidenceSubmissions      DisputeEvidenceSubmission[]
+  allocations              DisputeResolutionAllocation[]
 
   @@index([escrowId, status])
   @@index([milestoneId, status])
@@ -245,32 +247,34 @@ model Dispute {
 }
 
 model DisputeEvidenceSubmission {
-  id          Int                       @id @default(autoincrement())
+  id          Int                        @id @default(autoincrement())
   disputeId   Int
-  dispute     Dispute                   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  dispute     Dispute                    @relation(fields: [disputeId], references: [id], onDelete: Restrict)
   submitterId String
-  submitter   User                      @relation(fields: [submitterId], references: [id], onDelete: Restrict)
+  submitter   User                       @relation(fields: [submitterId], references: [id], onDelete: Restrict)
   note        String?
-  evidence    Json                      @default("[]")
+  evidence    Json                       @default("[]")
   files       DisputeEvidenceReference[]
-  submittedAt DateTime                  @default(now())
+  submittedAt DateTime                   @default(now())
 
   @@index([disputeId, submittedAt])
   @@index([submitterId])
 }
 
 model DisputeEvidenceReference {
-  id           Int                       @id @default(autoincrement())
-  submissionId Int
-  submission   DisputeEvidenceSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  objectKey    String
-  fileName     String
-  contentType  String
-  sizeBytes    Int
-  sha256       String
-  createdAt    DateTime                  @default(now())
+  id            Int                       @id @default(autoincrement())
+  submissionId  Int
+  submission    DisputeEvidenceSubmission @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  objectKey     String
+  fileName      String
+  contentType   String
+  sizeBytes     Int
+  sha256        String
+  storageStatus String                    @default("legacy_metadata")
+  createdAt     DateTime                  @default(now())
 
   @@index([submissionId])
+  @@index([objectKey])
 }
 
 model DisputeResolutionAllocation {

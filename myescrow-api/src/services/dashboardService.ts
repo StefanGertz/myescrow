@@ -70,11 +70,11 @@ export type EscrowMilestoneResponse = {
     submitter: { id: string; name: string };
     evidence: Array<{
       id: number;
-      objectKey: string;
       fileName: string;
       contentType: string;
       sizeBytes: number;
       sha256: string;
+      storageStatus: "managed" | "metadata_only";
     }>;
     review?: {
       decision: string;
@@ -697,11 +697,13 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
           submitter: { id: submission.submitter.id, name: submission.submitter.name },
           evidence: submission.evidence.map((evidence) => ({
             id: evidence.id,
-            objectKey: evidence.objectKey,
             fileName: evidence.fileName,
             contentType: evidence.contentType,
             sizeBytes: evidence.sizeBytes,
             sha256: evidence.sha256,
+            storageStatus: evidence.storageStatus === "managed"
+              ? "managed" as const
+              : "metadata_only" as const,
           })),
           ...(submission.review
             ? {

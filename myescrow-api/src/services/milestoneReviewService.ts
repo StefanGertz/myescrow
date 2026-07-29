@@ -24,6 +24,7 @@ export type MilestoneEvidenceInput = {
   contentType: string;
   sizeBytes: number;
   sha256: string;
+  storageStatus?: "managed";
 };
 
 export type MilestoneSubmissionInput = {
@@ -39,6 +40,7 @@ function evidenceFingerprint(evidence: MilestoneEvidenceInput[]) {
       contentType: item.contentType,
       sizeBytes: item.sizeBytes,
       sha256: item.sha256,
+      storageStatus: item.storageStatus,
     })).sort((left, right) => left.objectKey.localeCompare(right.objectKey))))
     .digest("hex");
 }
@@ -83,6 +85,7 @@ export async function submitMilestoneWork(
           contentType: item.contentType,
           sizeBytes: item.sizeBytes,
           sha256: item.sha256,
+          storageStatus: item.storageStatus,
         }
       : item
   ));
@@ -149,11 +152,17 @@ export async function submitMilestoneWork(
       }
       const [existingEvidence, existingEvidenceCount] = await Promise.all([
         tx.milestoneEvidenceReference.aggregate({
-          where: { submission: { milestoneId: milestone.id } },
+          where: {
+            storageStatus: "managed",
+            submission: { milestoneId: milestone.id },
+          },
           _sum: { sizeBytes: true },
         }),
         tx.milestoneEvidenceReference.count({
-          where: { submission: { milestoneId: milestone.id } },
+          where: {
+            storageStatus: "managed",
+            submission: { milestoneId: milestone.id },
+          },
         }),
       ]);
       const cumulativeEvidenceBytes =
@@ -180,6 +189,7 @@ export async function submitMilestoneWork(
           contentType: item.contentType,
           sizeBytes: item.sizeBytes,
           sha256: item.sha256,
+          ...(item.storageStatus === "managed" ? { storageStatus: "managed" as const } : {}),
         }));
         if (
           (previous.note?.trim() || null) === note

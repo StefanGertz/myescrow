@@ -41,9 +41,9 @@ Managed exhibit bytes use the same arbitration-only boundary. The linked buyer, 
    - Signer identity, role, signing time, and signature evidence hash
 5. **Disputed milestone and work record**
    - Affected milestone
-   - Work submissions, notes, reviews, and managed milestone evidence files
+   - Work submissions, notes, reviews, and managed milestone evidence manifest
 6. **Formal dispute evidence**
-   - Submitter, submission time, note, managed evidence files, and file hashes
+   - Submitter, submission time, note, managed attachment index, and file hashes
    - Metadata-only legacy references, clearly distinguished from managed files
 7. **Complete escrow chat**
    - Every stored message in chronological order
@@ -57,9 +57,11 @@ Managed exhibit bytes use the same arbitration-only boundary. The linked buyer, 
 
 ## Download and embedded exhibits
 
-The portal generates one PDF containing the report, signature images, and every managed exhibit as an embedded original-file attachment. Each exhibit receives a cover page containing its source context, original filename, media type, byte count, SHA-256, and attachment name. Valid PDF, JPEG, and PNG exhibits also receive visible preview pages after their cover so the most common exhibits can be reviewed in the report itself.
+The portal generates one PDF containing the report, signature images, and every managed exhibit as an embedded original-file attachment. Each exhibit receives a report page containing only its source context, original filename, media type, byte count, SHA-256, and attachment name.
 
-Other managed formats remain available as their original embedded attachments. They are not converted into PDF pages. This includes formats such as Word documents, spreadsheets, text files, HEIC/HEIF, and WebP. A PDF reader with an Attachments panel may be required to extract or open embedded originals.
+Exhibit content is not parsed, rendered, converted, or imported into report pages, regardless of file type. The attachment contains the unchanged original bytes. A PDF reader with an Attachments panel may be required to extract or open an exhibit.
+
+The PDF also contains `Arbitration-Report-Data.json`, an exact-Unicode, machine-readable copy of the report data used to build the packet. This preserves names, messages, and other non-ASCII text without relying on the display-font coverage of the human-readable PDF pages.
 
 The filename is based on the dispute reference. Page footers contain the report ID and a shortened integrity hash so printed or separated report pages can be associated with the packet.
 
@@ -67,13 +69,34 @@ The complete integrity SHA-256 appears on the cover and in the web view.
 
 ## Exhibit integrity and limits
 
-Managed evidence is stored with its original filename, media type, byte count, and SHA-256. Before returning an arbitration exhibit, the API reads the stored file and verifies its byte count and SHA-256 against the database. The browser verifies both values again before embedding it. If a managed exhibit is unavailable or fails either check, PDF generation stops instead of silently producing an incomplete packet.
+Managed evidence is stored with its original filename, media type, byte count, and SHA-256. Before returning an arbitration exhibit, the API reads the stored file and verifies its byte count and SHA-256 against the database. The browser verifies both values again before embedding it. The browser also recomputes the canonical report-data hash and compares it with `integritySha256` before building the packet. If the report or a managed exhibit is unavailable or fails a check, PDF generation stops instead of silently producing an incomplete packet.
 
-The combined managed exhibits may total no more than 100 MB (`100,000,000` bytes) for one downloadable packet. PDF and image previews also have page and pixel safety limits. Reaching a preview limit does not convert or omit the original attachment; the original managed file remains embedded.
+One arbitration packet may contain no more than 100 managed evidence files totaling no more than `100,000,000` bytes. These cumulative limits cover managed files from the disputed milestone and the formal dispute evidence flow.
 
 Evidence submitted through the older metadata-only JSON flow has no file managed by MyEscrow. Those references remain in the report manifest and cannot be embedded unless their complete metadata matches a managed file belonging to the same arbitration. A filename, object key, or hash by itself is not treated as proof that file bytes are available.
 
-The report integrity SHA-256 identifies the canonical report data, excluding generation time. Original exhibits are represented in that data by their metadata and SHA-256 values; the final PDF itself is not separately signed.
+The report integrity SHA-256 identifies the canonical report data, excluding generation time. Original exhibits are represented in that data by their metadata and SHA-256 values. The final PDF is not digitally signed, and the report hash is not a signature or a hash of the final PDF bytes.
+
+## Untrusted exhibit handling
+
+Managed evidence is not malware-scanned. Treat every embedded exhibit as untrusted even when its filename, media type, size, and SHA-256 have been verified. Extract and open attachments only with appropriate endpoint protection and a patched, isolated application; do not enable macros, scripts, external links, or active content merely because the file came from an arbitration packet.
+
+## Legacy milestone provenance reconciliation
+
+Evidence records created by older milestone upload paths remain metadata-only until their managed-storage provenance is established. The implementation is in `myescrow-api/scripts/reconcile-evidence-provenance.ts`. An operator can audit legacy milestone and dispute evidence rows against stored files with a read-only dry run:
+
+```bash
+cd myescrow-api
+npm run evidence:reconcile-provenance
+```
+
+After reviewing the dry-run output, apply only the verified provenance updates with:
+
+```bash
+npm run evidence:reconcile-provenance -- --apply
+```
+
+The reconciliation must not classify a legacy row as managed unless its storage ownership, byte count, and SHA-256 can be verified. Missing, ambiguous, or mismatched records remain metadata-only and are not embedded.
 
 ## Current claim and agreement limitations
 
