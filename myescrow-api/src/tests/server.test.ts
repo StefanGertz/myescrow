@@ -9,6 +9,7 @@ import { PrismaClient } from "@prisma/client";
 import { reconcileEvidenceProvenance } from "../services/evidenceProvenanceService";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
+import { getOperationsHealth } from "../services/operationsService";
 
 let server: FastifyInstance;
 let token: string;
@@ -2434,6 +2435,22 @@ describe("MyEscrow API", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(ledger.json().balances.heldCents).toBe(10_000);
+
+    const operationsHealth = await getOperationsHealth(server.prisma);
+    expect(operationsHealth.counts.cancellationReviews).toBeGreaterThanOrEqual(1);
+    expect(
+      operationsHealth.alerts.some((alert) =>
+        alert.includes("request(s) awaiting governed review"),
+      ),
+    ).toBe(true);
+    expect(operationsHealth.details.cancellationReviews).toContainEqual(
+      expect.objectContaining({
+        mode: "unilateral",
+        status: "escalated",
+        escalatedAt: expect.any(Date),
+        escrow: expect.objectContaining({ reference }),
+      }),
+    );
   });
 
   it("runs durable recovery jobs and exposes permissioned support tools and audit history", async () => {
@@ -2870,6 +2887,7 @@ describe("MyEscrow API", () => {
       duplicateCommands: expect.any(Array),
       disputesApproaching: expect.any(Array),
       arbitrationRequested: expect.any(Array),
+      cancellationReviews: expect.any(Array),
     }));
     expect(health.json().details.duplicateCommands.length).toBeGreaterThan(0);
 

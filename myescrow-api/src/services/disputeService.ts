@@ -732,6 +732,7 @@ export async function requestFundedCancellation(
           mode: input.mode,
           reason,
           status: input.mode === "mutual" ? "pending" : "escalated",
+          ...(input.mode === "unilateral" ? { escalatedAt: new Date() } : {}),
         },
       });
       await notify(

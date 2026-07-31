@@ -471,6 +471,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     duplicateCommands,
     disputesApproaching,
     arbitrationRequested,
+    cancellationReviews,
     latestReconciliation,
     worker,
     failedOutboxDetails,
@@ -479,6 +480,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     duplicateCommandDetails,
     disputeDetails,
     arbitrationDetails,
+    cancellationReviewDetails,
   ] = await Promise.all([
     prisma.outboxEvent.count({ where: { status: "failed" } }),
     prisma.operationalJob.count({ where: { status: "failed" } }),
@@ -491,6 +493,14 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       },
     }),
     prisma.dispute.count({ where: { status: "arbitration_requested" } }),
+    prisma.cancellationRequest.count({
+      where: {
+        OR: [
+          { mode: "unilateral", status: "escalated" },
+          { status: "pending", escalatedAt: { not: null } },
+        ],
+      },
+    }),
     prisma.reconciliationRun.findFirst({ orderBy: { startedAt: "desc" } }),
     prisma.operationalWorkerState.findUnique({ where: { id: "primary" } }),
     prisma.outboxEvent.findMany({
@@ -587,6 +597,34 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       orderBy: { arbitrationRequestedAt: "asc" },
       take: 100,
     }),
+    prisma.cancellationRequest.findMany({
+      where: {
+        OR: [
+          { mode: "unilateral", status: "escalated" },
+          { status: "pending", escalatedAt: { not: null } },
+        ],
+      },
+      select: {
+        reference: true,
+        mode: true,
+        status: true,
+        reason: true,
+        requestedAt: true,
+        escalatedAt: true,
+        requestedBy: { select: { name: true, email: true } },
+        escrow: {
+          select: {
+            reference: true,
+            title: true,
+            amountCents: true,
+            lifecycleStatus: true,
+            fundingStatus: true,
+          },
+        },
+      },
+      orderBy: { requestedAt: "asc" },
+      take: 100,
+    }),
   ]);
   const workerStale = !worker?.lastSuccessAt || now.getTime() - worker.lastSuccessAt.getTime() > 120_000;
   const alerts = [
@@ -596,6 +634,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     ...(agedEscrows ? [`${agedEscrows} active escrow(s) older than seven days`] : []),
     ...(disputesApproaching ? [`${disputesApproaching} dispute evidence deadline(s) within two days`] : []),
     ...(arbitrationRequested ? [`Arbitration: ${arbitrationRequested} dispute(s) awaiting review`] : []),
+    ...(cancellationReviews ? [`Cancellation: ${cancellationReviews} request(s) awaiting governed review`] : []),
     ...(latestReconciliation?.status === "exception" ? [`${latestReconciliation.exceptionCount} reconciliation exception(s)`] : []),
   ];
   return {
@@ -607,6 +646,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       duplicateCommandAttempts: duplicateCommands._sum.replayCount ?? 0,
       disputesApproaching,
       arbitrationRequested,
+      cancellationReviews,
     },
     latestReconciliation,
     worker: {
@@ -623,6 +663,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
       duplicateCommands: duplicateCommandDetails,
       disputesApproaching: disputeDetails,
       arbitrationRequested: arbitrationDetails,
+      cancellationReviews: cancellationReviewDetails,
     },
     alerts,
   };
