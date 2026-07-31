@@ -9,7 +9,6 @@ import { PrismaClient } from "@prisma/client";
 import { reconcileEvidenceProvenance } from "../services/evidenceProvenanceService";
 import { reconcileEscrowLedger } from "../services/moneyIntegrityService";
 import { processMilestoneReviewDeadlines } from "../services/milestoneReviewService";
-import { getOperationsHealth } from "../services/operationsService";
 
 let server: FastifyInstance;
 let token: string;
@@ -2436,6 +2435,7 @@ describe("MyEscrow API", () => {
     });
     expect(ledger.json().balances.heldCents).toBe(10_000);
 
+    const { getOperationsHealth } = await import("../services/operationsService");
     const operationsHealth = await getOperationsHealth(server.prisma);
     expect(operationsHealth.counts.cancellationReviews).toBeGreaterThanOrEqual(1);
     expect(
