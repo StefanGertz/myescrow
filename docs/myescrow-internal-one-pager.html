@@ -111,8 +111,28 @@
 
       .grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 16px;
+      }
+
+      .row-label {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--brand-dark);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .row-label::after {
+        content: "";
+        height: 1px;
+        flex: 1;
+        background: var(--border);
       }
 
       .card {
@@ -135,6 +155,20 @@
 
       .card ul { padding-left: 18px; }
       .card li + li { margin-top: 6px; }
+
+      .examples-label {
+        margin-top: 10px;
+        margin-bottom: 3px;
+        color: var(--brand-dark);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .card .examples {
+        padding-left: 17px;
+      }
 
       .metric {
         margin: 0 0 5px;
@@ -164,6 +198,10 @@
 
       .sources strong { color: var(--brand-dark); }
       .sources a { color: var(--brand); }
+
+      @media screen and (max-width: 800px) {
+        .grid { grid-template-columns: 1fr; }
+      }
 
       @media print {
         body { background: #ffffff; }
@@ -206,8 +244,14 @@
         }
         .grid {
           grid-template-columns: repeat(12, minmax(0, 1fr));
-          gap: 3.5mm;
+          column-gap: 3.5mm;
+          row-gap: 2.2mm;
           align-items: stretch;
+        }
+        .row-label {
+          grid-column: 1 / -1;
+          gap: 2.5mm;
+          font-size: 7.4pt;
         }
         .card {
           grid-column: span 4;
@@ -224,6 +268,11 @@
         }
         .card li + li {
           margin-top: 1mm;
+        }
+        .examples-label {
+          margin-top: 1.8mm;
+          margin-bottom: 0.6mm;
+          font-size: 6.8pt;
         }
         .sources {
           margin-top: 2.5mm;
@@ -253,40 +302,80 @@
       </header>
 
       <section class="grid">
+        <div class="row-label">High value</div>
+
+        <article class="card">
+          <div class="kicker">Construction projects</div>
+          <h3>Milestone-based project payments</h3>
+          <p>Owners and general contractors can tie deposits and progress payments to agreed project phases, giving each party visibility before funds are released.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Home-renovation progress draws</li>
+            <li>Material delivery and inspection</li>
+            <li>Subcontractor milestone payments</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Complex freelance services</div>
+          <h3>Major projects with defined deliverables</h3>
+          <p>Clients fund substantial engagements in stages, while freelancers and agencies gain confidence that payment is available as major deliverables are accepted.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Website or application development</li>
+            <li>Brand strategy and design systems</li>
+            <li>Commercial photo or video production</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker">Direct sales and custom goods</div>
+          <h3>Goods with delivery or production risk</h3>
+          <p>Independent sellers can use escrow for made-to-order or substantial purchases, with releases following approval, production, shipment, or inspection.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Custom furniture or jewelry</li>
+            <li>Vehicles and specialty equipment</li>
+            <li>Specialty goods sold through social media</li>
+          </ul>
+        </article>
+
+        <div class="row-label">High volume</div>
+
         <article class="card">
           <div class="kicker">Peer-to-peer purchases</div>
           <h3>Used goods bought from an unfamiliar seller</h3>
-          <p>A buyer funds the transaction before an item ships, then confirms receipt and condition before both parties release payment. Persona examples include used cameras, computers, and other online marketplace purchases.</p>
+          <p>A buyer funds the transaction before an item ships or changes hands, then confirms receipt and condition before payment is released.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Facebook Marketplace purchases</li>
+            <li>Used cameras or electronics</li>
+            <li>Collectibles and resale items</li>
+          </ul>
         </article>
 
         <article class="card">
-          <div class="kicker">Contracted services</div>
-          <h3>Freelancers, agencies, and event vendors</h3>
-          <p>Clients fund an agreed project or deposit, while providers gain evidence that payment is available. Milestones can cover design, development, consulting, photography, entertainment, or other defined deliverables.</p>
-        </article>
-
-        <article class="card">
-          <div class="kicker">Merchants and custom goods</div>
-          <h3>Direct sales with delivery or production risk</h3>
-          <p>Independent merchants use escrow for social-media sales, custom orders, or high-value goods. Releases can follow shipment, inspection, design approval, production, and final delivery.</p>
+          <div class="kicker">Everyday freelance services</div>
+          <h3>Smaller jobs with fast, clear acceptance</h3>
+          <p>Clients fund lower-cost assignments up front, giving freelancers payment assurance while buyers retain control until the agreed work is delivered.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Logo or digital-asset edits</li>
+            <li>Copywriting or résumé reviews</li>
+            <li>Tutoring or virtual-assistant tasks</li>
+          </ul>
         </article>
 
         <article class="card">
           <div class="kicker">Embedded marketplaces</div>
           <h3>Platforms that need transaction protection</h3>
-          <p>A marketplace integrates escrow into its own checkout and policy process. Buyers fund before fulfillment; the platform and its users receive transaction records while funds remain neutral until release conditions are met.</p>
-        </article>
-
-        <article class="card">
-          <div class="kicker">Construction projects</div>
-          <h3>General contractors and subcontractors</h3>
-          <p>A general contractor can tie deposits and progress payments to material receipts, delivery, installation, or other project phases. The same structure can support change records and multiple projects.</p>
-        </article>
-
-        <article class="card">
-          <div class="kicker">Operating boundary</div>
-          <h3>Funds are held; disputes are not adjudicated</h3>
-          <p>Both parties must agree to a release. If they disagree, funds remain locked until they reach an agreement or obtain a legal resolution. MyEscrow supplies the agreement, notifications, and audit records but does not decide the outcome.</p>
+          <p>A marketplace can add escrow to its checkout and policy process, keeping funds neutral until buyers and sellers meet the agreed release conditions.</p>
+          <div class="examples-label">Examples</div>
+          <ul class="examples">
+            <li>Classifieds and resale marketplaces</li>
+            <li>Service-booking platforms</li>
+            <li>B2B procurement exchanges</li>
+          </ul>
         </article>
       </section>
     </div>
