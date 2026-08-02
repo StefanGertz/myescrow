@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/auth";
 import { dashboardRoutes } from "./routes/dashboard";
 import { operationsRoutes } from "./routes/operations";
 import { AppError } from "./utils/errors";
+import { jsonSafe } from "./utils/json";
 
 export async function buildServer() {
   const fastify = Fastify({
@@ -21,6 +22,8 @@ export async function buildServer() {
   await fastify.register(multipart);
   await fastify.register(prismaPlugin);
   await fastify.register(authPlugin);
+
+  fastify.addHook("preSerialization", async (_request, _reply, payload) => jsonSafe(payload));
 
   fastify.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {

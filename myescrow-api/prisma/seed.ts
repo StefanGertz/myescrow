@@ -120,7 +120,7 @@ async function main() {
           milestoneId: milestone.id,
           title: milestone.title,
           description: milestone.description,
-          amountCents: milestone.amountCents,
+          amountCents: Number(milestone.amountCents),
           deadline: milestone.deadline?.toISOString() ?? null,
           orderIndex: milestone.orderIndex,
         })),

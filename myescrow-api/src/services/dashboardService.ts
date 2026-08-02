@@ -1,6 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { buildEscrowReference, buildNotificationId, buildTimelineId } from "../utils/id";
-import { formatAmountWithSuffix, formatCurrencyFromCents, dollarsToCents } from "../utils/currency";
+import {
+  centsToBigInt,
+  centsToNumber,
+  formatAmountWithSuffix,
+  formatCurrencyFromCents,
+  dollarsToCents,
+} from "../utils/currency";
 import { AppError } from "../utils/errors";
 import {
   allocateStagedFunding,
@@ -388,7 +394,7 @@ const includeEscrowRelations = {
 const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
 
 const isProposedNewMilestone = (milestone: EscrowWithRelations["milestones"][number]) =>
-  milestone.title === PROPOSED_NEW_MILESTONE_TITLE && milestone.amountCents === 0;
+  milestone.title === PROPOSED_NEW_MILESTONE_TITLE && milestone.amountCents === 0n;
 
 const hasPendingAgreementChanges = (escrow: Pick<EscrowWithRelations, "milestones">) =>
   escrow.milestones.some((milestone) => milestone.changeRequestedAt !== null);
@@ -397,7 +403,7 @@ function agreementTermsFromEscrow(escrow: EscrowWithRelations) {
   return {
     title: escrow.title,
     description: escrow.description,
-    amountCents: escrow.amountCents,
+    amountCents: centsToNumber(escrow.amountCents),
     fundingMode: escrow.fundingMode,
     creatorRole: escrow.creatorRole,
     creatorParty: escrow.creatorPartySnapshot as Prisma.InputJsonValue,
@@ -408,7 +414,7 @@ function agreementTermsFromEscrow(escrow: EscrowWithRelations) {
         milestoneId: milestone.id,
         title: milestone.title,
         description: milestone.description,
-        amountCents: milestone.amountCents,
+        amountCents: centsToNumber(milestone.amountCents),
         deadline: milestone.deadline?.toISOString() ?? null,
         orderIndex: milestone.orderIndex,
       })),
@@ -666,7 +672,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
     seller: sellerResponse,
     balances: deriveLedgerBalances(
       record.ledgerEntries,
-      record.disputes.reduce((total, dispute) => total + dispute.amountFrozenCents, 0),
+      record.disputes.reduce((total, dispute) => total + centsToNumber(dispute.amountFrozenCents), 0),
     ),
     agreement: record.currentAgreementVersion
       ? {
@@ -722,7 +728,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
             ? { authorityVerifiedAt: cancellation.authorityVerifiedAt.toISOString() }
             : {}),
           ...(cancellation.authorizedRefundCents !== null
-            ? { authorizedRefundCents: cancellation.authorizedRefundCents }
+            ? { authorizedRefundCents: centsToNumber(cancellation.authorizedRefundCents) }
             : {}),
           ...(cancellation.lastReviewedAt
             ? { lastReviewedAt: cancellation.lastReviewedAt.toISOString() }
@@ -734,7 +740,7 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
           requestedAt: cancellation.requestedAt.toISOString(),
           ...(cancellation.respondedById ? { respondedById: cancellation.respondedById } : {}),
           ...(cancellation.respondedAt ? { respondedAt: cancellation.respondedAt.toISOString() } : {}),
-          refundAmountCents: cancellation.refundAmountCents,
+          refundAmountCents: centsToNumber(cancellation.refundAmountCents),
           reviewMessages: cancellation.reviewMessages.map((message) => ({
             id: message.id,
             kind: message.kind,
@@ -954,10 +960,10 @@ export async function getOverview(prisma: PrismaClient, userId: string) {
   ]);
 
   const activeEscrows = escrows.filter((escrow) => !["cancelled", "completed", "rejected"].includes(escrow.lifecycleStatus));
-  const heldTotal = activeEscrows.reduce((sum, escrow) => sum + escrow.amountCents, 0);
+  const heldTotal = activeEscrows.reduce((sum, escrow) => sum + centsToNumber(escrow.amountCents), 0);
   const releasesScheduled = escrows
     .filter((escrow) => escrow.lifecycleStatus === "funded")
-    .reduce((sum, escrow) => sum + escrow.amountCents, 0);
+    .reduce((sum, escrow) => sum + centsToNumber(escrow.amountCents), 0);
   const warningCount = escrows.filter((escrow) => escrow.status === "warning").length;
   const uniqueCounterparts = new Set(escrows.map((escrow) => getCounterpartName(escrow, userId))).size;
 
@@ -1122,7 +1128,7 @@ export async function createEscrow(
         counterpartyEmail: normalizedCounterpartyEmail,
         title: data.title,
         counterpart: counterpartName,
-        amountCents: amountInCents,
+        amountCents: centsToBigInt(amountInCents),
         stage: counterpartyReady ? "Approval pending" : "Invitation pending",
         dueDescription: counterpartyReady
           ? `Waiting for ${counterpartName} to approve`
@@ -1140,7 +1146,7 @@ export async function createEscrow(
           create: milestoneInputs.map((milestone, index) => ({
             title: milestone.title.trim(),
             description: milestone.description?.trim() || null,
-            amountCents: dollarsToCents(milestone.amount),
+            amountCents: centsToBigInt(dollarsToCents(milestone.amount)),
             deadline: milestone.deadline ? new Date(milestone.deadline) : null,
             orderIndex: index,
           })),
@@ -1756,9 +1762,9 @@ export async function requestMilestoneChanges(
   });
 }
 
-function assertAgreementMilestoneTotal(amountCents: number, milestones: AgreementMilestoneChangeInput[]) {
+function assertAgreementMilestoneTotal(amountCents: number | bigint, milestones: AgreementMilestoneChangeInput[]) {
   const proposedTotalCents = milestones.reduce((total, milestone) => total + dollarsToCents(milestone.amount), 0);
-  if (proposedTotalCents !== amountCents) {
+  if (proposedTotalCents !== centsToNumber(amountCents)) {
     throw new AppError("Milestone amounts must add up to the escrow amount.", 400);
   }
 }
@@ -1893,7 +1899,7 @@ export async function applyAgreementChanges(
     milestoneId: milestone.id,
     title: milestone.requestedTitle ?? milestone.title,
     description: milestone.requestedDescription ?? milestone.description ?? undefined,
-    amount: (milestone.requestedAmountCents ?? milestone.amountCents) / 100,
+    amount: centsToNumber(milestone.requestedAmountCents ?? milestone.amountCents) / 100,
     ...(milestone.requestedDeadline ? { deadline: milestone.requestedDeadline.toISOString() } : {}),
   }));
 
@@ -2010,7 +2016,9 @@ export async function applyMilestoneChanges(
   const acceptedTitle = data.title?.trim() || milestone.requestedTitle;
   const acceptedDescription =
     data.description === undefined ? milestone.requestedDescription?.trim() || null : data.description.trim() || null;
-  const acceptedAmountCents = data.amount === undefined ? milestone.requestedAmountCents : dollarsToCents(data.amount);
+  const acceptedAmountCents = data.amount === undefined
+    ? centsToNumber(milestone.requestedAmountCents)
+    : dollarsToCents(data.amount);
   const acceptedDeadline =
     data.deadline === undefined
       ? milestone.requestedDeadline
@@ -2026,7 +2034,7 @@ export async function applyMilestoneChanges(
           ? {
               title: acceptedTitle,
               description: acceptedDescription,
-              amountCents: acceptedAmountCents,
+              amountCents: centsToBigInt(acceptedAmountCents),
               deadline: acceptedDeadline,
             }
           : {}),
@@ -2043,11 +2051,14 @@ export async function applyMilestoneChanges(
       orderBy: { orderIndex: "asc" },
     });
     const remainingRequests = milestones.filter((item) => item.changeRequestedAt !== null).length;
-    const amountCents = milestones.reduce((total, item) => total + item.amountCents, 0);
+    const amountCents = milestones.reduce(
+      (total, item) => total + centsToNumber(item.amountCents),
+      0,
+    );
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
-        amountCents,
+        amountCents: centsToBigInt(amountCents),
         lifecycleStatus: remainingRequests
           ? "changes_requested"
           : acceptsChanges
@@ -2249,7 +2260,7 @@ export async function fundEscrow(
       await applyEscrowTransfer(tx, {
         escrowId: escrow.id,
         movementType: "fund",
-        amountCents: escrow.amountCents,
+        amountCents: centsToNumber(escrow.amountCents),
         idempotencyKey,
         businessReference: `escrow:${escrow.reference}:fund`,
         actorId: userId,
@@ -2350,7 +2361,8 @@ export async function fundMilestone(
       if (!Number.isInteger(amountCents) || amountCents <= 0) {
         throw new AppError("Funding amount must be a positive number of cents.", 400);
       }
-      const remainingEscrowCents = escrow.amountCents - fundedBeforeCents;
+      const escrowAmountCents = centsToNumber(escrow.amountCents);
+      const remainingEscrowCents = escrowAmountCents - fundedBeforeCents;
       if (amountCents > remainingEscrowCents) {
         throw new AppError(
           `You can add at most ${formatCurrencyFromCents(remainingEscrowCents)} to this escrow.`,
@@ -2392,7 +2404,7 @@ export async function fundMilestone(
         sourceCommand: "fund_staged",
         walletUserId: userId,
       });
-      const isFullyFunded = transfer.balances.fundedCents === escrow.amountCents;
+      const isFullyFunded = transfer.balances.fundedCents === escrowAmountCents;
       const nextAfterFunding = allocationsAfter.find((allocation) => allocation.remainingCents > 0);
       const nextAfterFundingMilestone = nextAfterFunding
         ? getMilestoneById(escrow, nextAfterFunding.milestoneId)
@@ -2457,7 +2469,7 @@ export async function fundMilestone(
         fundingStatus: isFullyFunded ? "funded" : "partially_funded",
         fundedCents: transfer.balances.fundedCents,
         depositedCents: amountCents,
-        remainingCents: escrow.amountCents - transfer.balances.fundedCents,
+        remainingCents: escrowAmountCents - transfer.balances.fundedCents,
         allocations: allocationChanges,
         fundedAt: fundedAt.toISOString(),
       };
@@ -2559,7 +2571,7 @@ export async function approveMilestone(
         escrowId: escrow.id,
         milestoneId,
         movementType: "release",
-        amountCents: targetMilestone.amountCents,
+        amountCents: centsToNumber(targetMilestone.amountCents),
         idempotencyKey,
         businessReference: `escrow:${escrow.reference}:milestone:${milestoneId}:release`,
         actorId: userId,
@@ -2792,7 +2804,7 @@ export async function listDisputes(prisma: PrismaClient, userId: string): Promis
     ...(dispute.reason ? { reason: dispute.reason } : {}),
     ...(dispute.escrow ? { escrowId: dispute.escrow.reference } : {}),
     ...(dispute.milestoneId ? { milestoneId: dispute.milestoneId } : {}),
-    amountFrozenCents: dispute.amountFrozenCents,
+    amountFrozenCents: centsToNumber(dispute.amountFrozenCents),
     ...(dispute.evidenceWindowEndsAt
       ? { evidenceWindowEndsAt: dispute.evidenceWindowEndsAt.toISOString() }
       : {}),
@@ -2811,8 +2823,8 @@ export async function listDisputes(prisma: PrismaClient, userId: string): Promis
       ? {
           resolution: {
             proposedById: dispute.resolutionProposedById,
-            sellerCents: dispute.proposedSellerCents,
-            buyerCents: dispute.proposedBuyerCents,
+            sellerCents: centsToNumber(dispute.proposedSellerCents),
+            buyerCents: centsToNumber(dispute.proposedBuyerCents),
             ...(dispute.resolutionNote ? { note: dispute.resolutionNote } : {}),
           },
         }
@@ -2967,9 +2979,9 @@ export async function listWalletTransactions(prisma: PrismaClient, userId: strin
   });
   return transactions.map((tx) => ({
     id: tx.id,
-    amount: formatCurrencyFromCents(Math.abs(tx.amountCents)),
+    amount: formatCurrencyFromCents(Math.abs(centsToNumber(tx.amountCents))),
     type: tx.type,
-    direction: tx.amountCents >= 0 ? "credit" : "debit",
+    direction: tx.amountCents >= 0n ? "credit" : "debit",
     createdAt: tx.createdAt.toISOString(),
   }));
 }

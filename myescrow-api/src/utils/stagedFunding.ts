@@ -1,7 +1,9 @@
+import { centsToNumber } from "./currency";
+
 export type FundingMilestone = {
   id: number;
   title?: string;
-  amountCents: number;
+  amountCents: number | bigint;
   orderIndex: number;
 };
 
@@ -15,14 +17,14 @@ export type MilestoneFundingAllocation = {
 
 export function allocateStagedFunding(
   milestones: FundingMilestone[],
-  totalFundedCents: number,
+  totalFundedCents: number | bigint,
 ): MilestoneFundingAllocation[] {
-  let availableCents = Math.max(0, totalFundedCents);
+  let availableCents = Math.max(0, centsToNumber(totalFundedCents));
 
   return [...milestones]
     .sort((left, right) => left.orderIndex - right.orderIndex)
     .map((milestone) => {
-      const amountCents = Math.max(0, milestone.amountCents);
+      const amountCents = Math.max(0, centsToNumber(milestone.amountCents));
       const fundedCents = Math.min(amountCents, availableCents);
       availableCents = Math.max(0, availableCents - fundedCents);
       const remainingCents = amountCents - fundedCents;
@@ -43,16 +45,16 @@ export function allocateStagedFunding(
 }
 
 export function totalFundedFromLedger(
-  entries: Array<{ movementType: string; amountCents: number }>,
+  entries: Array<{ movementType: string; amountCents: number | bigint }>,
 ) {
   return entries
     .filter((entry) => entry.movementType === "fund")
-    .reduce((total, entry) => total + entry.amountCents, 0);
+    .reduce((total, entry) => total + centsToNumber(entry.amountCents), 0);
 }
 
 export function milestoneIsFullyFunded(
   milestones: FundingMilestone[],
-  totalFundedCents: number,
+  totalFundedCents: number | bigint,
   milestoneId: number,
 ) {
   return allocateStagedFunding(milestones, totalFundedCents)

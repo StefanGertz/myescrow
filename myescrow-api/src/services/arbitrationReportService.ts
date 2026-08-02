@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
+import { centsToNumber } from "../utils/currency";
 import { readVerifiedEvidenceFile } from "./milestoneProofService";
 
 function canonicalize(value: unknown): unknown {
@@ -305,7 +306,7 @@ export async function getArbitrationReport(
     id: entry.id,
     businessReference: entry.businessReference,
     movementType: entry.movementType,
-    amountCents: entry.amountCents,
+    amountCents: centsToNumber(entry.amountCents),
     currency: entry.currency,
     sourceCommand: entry.sourceCommand,
     createdAt: entry.createdAt.toISOString(),
@@ -408,7 +409,7 @@ export async function getArbitrationReport(
       status: dispute.status,
       priority: dispute.priority,
       reason: dispute.reason,
-      amountFrozenCents: dispute.amountFrozenCents,
+      amountFrozenCents: centsToNumber(dispute.amountFrozenCents),
       currency: agreement.currency,
       openedAt: dispute.createdAt.toISOString(),
       evidenceWindowEndsAt: dispute.evidenceWindowEndsAt?.toISOString() ?? null,
@@ -417,7 +418,7 @@ export async function getArbitrationReport(
       openedBy: dispute.openedBy,
       arbitrationRequestedBy: dispute.arbitrationRequestedBy,
       requestedRelief: `A determination allocating the disputed ${(
-        dispute.amountFrozenCents / 100
+        centsToNumber(dispute.amountFrozenCents) / 100
       ).toFixed(2)} ${agreement.currency} between the buyer and seller.`,
     },
     escrow: {
@@ -427,7 +428,7 @@ export async function getArbitrationReport(
       lifecycleStatus: escrow.lifecycleStatus,
       fundingStatus: escrow.fundingStatus,
       fundingMode: escrow.fundingMode,
-      amountCents: escrow.amountCents,
+      amountCents: centsToNumber(escrow.amountCents),
       createdAt: escrow.createdAt.toISOString(),
       fundedAt: escrow.fundedAt?.toISOString() ?? null,
     },
@@ -439,7 +440,7 @@ export async function getArbitrationReport(
       termsHash: agreement.termsHash,
       title: agreement.title,
       description: agreement.description,
-      amountCents: agreement.amountCents,
+      amountCents: centsToNumber(agreement.amountCents),
       currency: agreement.currency,
       creatorRole: agreement.creatorRole,
       creatorParty: agreement.creatorParty,
@@ -455,7 +456,7 @@ export async function getArbitrationReport(
           id: dispute.milestone.id,
           title: dispute.milestone.title,
           description: dispute.milestone.description,
-          amountCents: dispute.milestone.amountCents,
+          amountCents: centsToNumber(dispute.milestone.amountCents),
           deadline: dispute.milestone.deadline?.toISOString() ?? null,
           status: dispute.milestone.status,
           submissions: milestoneSubmissions,

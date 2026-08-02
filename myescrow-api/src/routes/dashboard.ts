@@ -62,6 +62,16 @@ const signatureDataUrlSchema = z
   .max(500_000)
   .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/, "Signature must be a PNG data URL.");
 
+const maximumExactDollarAmount = Number.MAX_SAFE_INTEGER / 100;
+const positiveMoneySchema = z.number().positive().max(
+  maximumExactDollarAmount,
+  "Amount exceeds the supported exact-cent range.",
+);
+const nonnegativeMoneySchema = z.number().nonnegative().max(
+  maximumExactDollarAmount,
+  "Amount exceeds the supported exact-cent range.",
+);
+
 const partyIdentitySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("individual") }),
   z.object({
@@ -79,7 +89,7 @@ const partyIdentitySchema = z.discriminatedUnion("type", [
 const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpartyEmail: z.string().email(),
-  amount: z.number().positive(),
+  amount: positiveMoneySchema,
   fundingMode: z.enum(["full", "milestone"]).optional(),
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
   creatorParty: partyIdentitySchema.default({ type: "individual" }),
@@ -89,7 +99,7 @@ const createEscrowSchema = z.object({
   milestones: z.array(
     z.object({
       title: z.string().min(1),
-      amount: z.number().positive(),
+      amount: positiveMoneySchema,
       description: z.string().optional(),
       deadline: z.string().datetime().optional(),
     }),
@@ -99,12 +109,12 @@ const createEscrowSchema = z.object({
 const updateDraftEscrowSchema = z.object({
   title: z.string().min(2),
   counterpartyEmail: z.string().email(),
-  amount: z.number().positive(),
+  amount: positiveMoneySchema,
   description: z.string().optional(),
   milestones: z.array(
     z.object({
       title: z.string().min(1),
-      amount: z.number().positive(),
+      amount: positiveMoneySchema,
       description: z.string().optional(),
       deadline: z.string().datetime().optional(),
     }),
@@ -120,8 +130,8 @@ const disputeEvidenceSchema = z.object({
 }).strict();
 
 const disputeResolutionSchema = z.object({
-  sellerAmount: z.number().nonnegative(),
-  buyerAmount: z.number().nonnegative(),
+  sellerAmount: nonnegativeMoneySchema,
+  buyerAmount: nonnegativeMoneySchema,
   note: z.string().trim().max(5_000).optional(),
 });
 
@@ -134,11 +144,11 @@ const cancellationInformationSchema = z.object({
 });
 
 const walletSchema = z.object({
-  amount: z.number().positive(),
+  amount: positiveMoneySchema,
 });
 
 const stagedFundingSchema = z.object({
-  amount: z.number().positive().optional(),
+  amount: positiveMoneySchema.optional(),
 });
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
@@ -161,7 +171,7 @@ const milestoneEvidenceParamsSchema = milestoneParamsSchema.extend({
 const milestoneChangeRequestSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
-  amount: z.number().positive(),
+  amount: positiveMoneySchema,
   deadline: z.string().datetime().optional(),
   note: z.string().max(1000).optional(),
 });
@@ -170,7 +180,7 @@ const milestoneChangeReviewSchema = z.object({
   decision: z.enum(["accept", "reject"]).default("accept"),
   title: z.string().min(1).optional(),
   description: z.string().optional(),
-  amount: z.number().positive().optional(),
+  amount: positiveMoneySchema.optional(),
   deadline: z.string().datetime().nullable().optional(),
 });
 
@@ -178,7 +188,7 @@ const agreementMilestoneChangeSchema = z.object({
   milestoneId: z.coerce.number().int().positive().optional(),
   title: z.string().min(1),
   description: z.string().optional(),
-  amount: z.number().positive(),
+  amount: positiveMoneySchema,
   deadline: z.string().datetime().optional(),
 });
 

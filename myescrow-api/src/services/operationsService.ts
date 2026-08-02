@@ -12,6 +12,7 @@ import {
 } from "./moneyIntegrityService";
 import { getNextSequenceValue } from "./sequenceService";
 import { allocateStagedFunding, totalFundedFromLedger } from "../utils/stagedFunding";
+import { centsToNumber } from "../utils/currency";
 
 const DAY_MS = 86_400_000;
 const ACTIVE_ESCROW_STATES = [
@@ -967,8 +968,8 @@ export async function administerCancellationReview(
         throw new AppError(`This milestone is already reserved in ${activeDispute.reference}.`, 409);
       }
       const alreadyAllocatedCents = milestone.ledgerEntries
-        .filter((entry) => entry.amountCents < 0)
-        .reduce((total, entry) => total + Math.abs(entry.amountCents), 0);
+        .filter((entry) => entry.amountCents < 0n)
+        .reduce((total, entry) => total + Math.abs(centsToNumber(entry.amountCents)), 0);
       const fundingAllocation = allocateStagedFunding(
         cancellation.escrow.milestones,
         totalFundedFromLedger(cancellation.escrow.ledgerEntries),

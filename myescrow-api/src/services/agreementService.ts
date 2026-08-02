@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { AppError } from "../utils/errors";
+import { centsToBigInt } from "../utils/currency";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -56,7 +57,7 @@ export async function createAgreementVersion(
       termsHash: hash(input.terms),
       title: input.terms.title,
       description: input.terms.description,
-      amountCents: input.terms.amountCents,
+      amountCents: centsToBigInt(input.terms.amountCents),
       fundingMode: input.terms.fundingMode,
       creatorRole: input.terms.creatorRole,
       creatorParty: input.terms.creatorParty,

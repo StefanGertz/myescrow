@@ -191,7 +191,7 @@ The authoritative schema is `myescrow-api/prisma/schema.prisma`. Main groups:
 - Operations: `OperationalJob`, `OperationalWorkerState`, `ReconciliationRun`, `AuditEvent`
 - Read-model support: `Notification`, `TimelineEvent`, `Sequence`
 
-Money is stored as integer cents and currently hard-coded to USD.
+Money is stored as signed 64-bit integer cents and currently hard-coded to USD. API responses convert those values to exact JavaScript integers and reject inputs beyond JavaScript's safe exact-cent range.
 
 Many state fields are unrestricted `String` columns rather than database/application enums. Current escrow lifecycle values include:
 
@@ -548,6 +548,10 @@ The buyer-facing milestone-funding dialog originally appeared to do nothing beca
 Root commit `3c71555` added and tested server-side funding enforcement for both milestone submissions and proof uploads. That release used milestone-linked deposits; the current staged model instead requires cumulative FIFO allocation to fully cover the milestone. Frontend commit `310cbbd` added the first rollout compatibility guard. Root commit `0f95234` then added immutable build metadata, `GET /version`, deployment smoke tests, guarded backup/migration/deploy/rollback scripts, and the Oracle auto-deploy timer.
 
 The first automated run deployed `0f95234`; CI did not turn green until the public version and protected route checks passed. Future diagnosis should begin with `/version`, the Backend CI “Wait for staging deployment” step, `.deployed-image`, and the timer status rather than assuming that a successful image build reached the VM.
+
+### 2026-08-02 large-transaction creation incident and resolution
+
+A `$25,000,000.00` escrow failed during creation because its `2,500,000,000`-cent total exceeded PostgreSQL's signed 32-bit `INTEGER` maximum. The API logged the Prisma persistence error but returned only the generic `Internal server error` response. Migration `20260802190000_expand_money_columns` changes every monetary cents column—not only the creation total—to `BIGINT`, and API/idempotency serialization converts those database values back to exact JSON numbers. Integration coverage creates, signs, tops up, and fully funds the `$25,000,000.00` case so later wallet, ledger, dispute, and refund operations do not reintroduce the same ceiling.
 
 ## Known limitations and incomplete areas
 

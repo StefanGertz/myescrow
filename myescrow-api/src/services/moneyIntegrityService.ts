@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
+import { centsToBigInt, centsToNumber } from "../utils/currency";
 import { executeIdempotentCommand } from "./idempotencyService";
 
 export type LedgerBalances = {
@@ -11,18 +12,18 @@ export type LedgerBalances = {
   disputedCents: number;
 };
 
-type LedgerLike = { movementType: string; amountCents: number };
+type LedgerLike = { movementType: string; amountCents: number | bigint };
 
 export function deriveLedgerBalances(entries: LedgerLike[], disputedCents = 0): LedgerBalances {
   const fundedCents = entries
     .filter((entry) => entry.movementType === "fund")
-    .reduce((total, entry) => total + entry.amountCents, 0);
+    .reduce((total, entry) => total + centsToNumber(entry.amountCents), 0);
   const releasedCents = entries
     .filter((entry) => entry.movementType === "release" || entry.movementType === "settlement_release")
-    .reduce((total, entry) => total + Math.abs(entry.amountCents), 0);
+    .reduce((total, entry) => total + Math.abs(centsToNumber(entry.amountCents)), 0);
   const refundedCents = entries
     .filter((entry) => entry.movementType === "refund" || entry.movementType === "settlement_refund")
-    .reduce((total, entry) => total + Math.abs(entry.amountCents), 0);
+    .reduce((total, entry) => total + Math.abs(centsToNumber(entry.amountCents)), 0);
   return {
     currency: "USD",
     fundedCents,
@@ -51,7 +52,7 @@ export async function getEscrowLedgerBalances(
     }),
   ]);
   const disputedCents = activeDisputes.reduce(
-    (total, dispute) => total + dispute.amountFrozenCents,
+    (total, dispute) => total + centsToNumber(dispute.amountFrozenCents),
     0,
   );
   return deriveLedgerBalances(entries, disputedCents);
@@ -68,10 +69,10 @@ export async function applyWalletTransfer(
     where: {
       id: input.userId,
       ...(input.amountCents < 0
-        ? { walletBalanceCents: { gte: Math.abs(input.amountCents) } }
+        ? { walletBalanceCents: { gte: centsToBigInt(Math.abs(input.amountCents)) } }
         : {}),
     },
-    data: { walletBalanceCents: { increment: input.amountCents } },
+    data: { walletBalanceCents: { increment: centsToBigInt(input.amountCents) } },
   });
   if (updated.count !== 1) {
     const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } });
@@ -81,7 +82,7 @@ export async function applyWalletTransfer(
   return tx.walletTransaction.create({
     data: {
       userId: input.userId,
-      amountCents: input.amountCents,
+      amountCents: centsToBigInt(input.amountCents),
       type: input.type,
     },
   });
@@ -107,7 +108,7 @@ export async function recordStandaloneWalletTransfer(
       return {
         success: true,
         amountCents: Math.abs(input.amountCents),
-        balanceCents: user.walletBalanceCents,
+        balanceCents: centsToNumber(user.walletBalanceCents),
       };
     },
   );
@@ -140,7 +141,7 @@ export async function applyEscrowTransfer(
       select: { amountCents: true },
     });
     if (!escrow) throw new AppError("Escrow not found.", 404);
-    if (before.fundedCents + input.amountCents > escrow.amountCents) {
+    if (before.fundedCents + input.amountCents > centsToNumber(escrow.amountCents)) {
       throw new AppError("This deposit would fund more than the escrow agreement amount.", 409);
     }
   }
@@ -165,7 +166,7 @@ export async function applyEscrowTransfer(
       escrowId: input.escrowId,
       ...(input.milestoneId ? { milestoneId: input.milestoneId } : {}),
       movementType: input.movementType,
-      amountCents: ledgerAmount,
+      amountCents: centsToBigInt(ledgerAmount),
       currency: input.currency ?? "USD",
       idempotencyKey: input.idempotencyKey,
       businessReference: input.businessReference,
@@ -206,16 +207,16 @@ export async function reconcileEscrowLedger(prisma: PrismaClient) {
     const balances = deriveLedgerBalances(escrow.ledgerEntries);
     const issues: string[] = [];
     const expectedFunded = escrow.fundingStatus === "funded"
-      ? escrow.amountCents
+      ? centsToNumber(escrow.amountCents)
       : balances.fundedCents;
     const expectedReleased = escrow.milestones.reduce((total, milestone) => {
-      if (milestone.status === "released") return total + milestone.amountCents;
+      if (milestone.status === "released") return total + centsToNumber(milestone.amountCents);
       if (milestone.status !== "settled") return total;
       return total + escrow.ledgerEntries
         .filter((entry) =>
           entry.milestoneId === milestone.id
           && entry.movementType === "settlement_release")
-        .reduce((sum, entry) => sum + Math.abs(entry.amountCents), 0);
+        .reduce((sum, entry) => sum + Math.abs(centsToNumber(entry.amountCents)), 0);
     }, 0);
     if (balances.fundedCents !== expectedFunded) {
       issues.push(`funded ledger ${balances.fundedCents} != escrow ${expectedFunded}`);
@@ -233,9 +234,9 @@ export async function reconcileEscrowLedger(prisma: PrismaClient) {
         continue;
       }
       const expectedWalletAmount = entry.movementType === "fund"
-        ? -Math.abs(entry.amountCents)
-        : Math.abs(entry.amountCents);
-      if (entry.walletTransaction.amountCents !== expectedWalletAmount) {
+        ? -Math.abs(centsToNumber(entry.amountCents))
+        : Math.abs(centsToNumber(entry.amountCents));
+      if (centsToNumber(entry.walletTransaction.amountCents) !== expectedWalletAmount) {
         issues.push(`ledger entry ${entry.id} does not match wallet transaction ${entry.walletTransaction.id}`);
       }
     }

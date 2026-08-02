@@ -459,6 +459,98 @@ describe("MyEscrow API", () => {
     });
   });
 
+  it("creates and funds a $25 million escrow without overflowing integer cents", async () => {
+    const payload = {
+      title: "Large trade escrow",
+      counterpartyEmail: "nora@example.com",
+      creatorRole: "buyer",
+      creatorParty: { type: "individual" },
+      amount: 25_000_000,
+      fundingMode: "full",
+      signatureDataUrl: creatorSignature,
+      milestones: [
+        { title: "Initial delivery", amount: 5_000_000 },
+        { title: "Negotiation", amount: 10_000_000 },
+        { title: "Trade completion", amount: 10_000_000 },
+      ],
+    };
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-large-trade-escrow",
+      },
+      payload,
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual(expect.objectContaining({
+      success: true,
+      reference: expect.stringMatching(/^PO-/),
+    }));
+
+    const persisted = await server.prisma.escrow.findUniqueOrThrow({
+      where: { reference: response.json().reference },
+      include: { currentAgreementVersion: true, milestones: true },
+    });
+    expect(persisted.amountCents).toBe(2_500_000_000n);
+    expect(persisted.currentAgreementVersion?.amountCents).toBe(2_500_000_000n);
+    expect(persisted.milestones.map((milestone) => milestone.amountCents)).toEqual([
+      500_000_000n,
+      1_000_000_000n,
+      1_000_000_000n,
+    ]);
+
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const listed = listResponse.json().escrows.find(
+      (escrow: { id: string }) => escrow.id === response.json().reference,
+    );
+    expect(listed.amount).toBe("$25,000,000.00");
+
+    const approval = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${response.json().reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    });
+    expect(approval.statusCode).toBe(200);
+
+    const topup = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/wallet/topup",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "topup-large-trade-escrow",
+      },
+      payload: { amount: 25_000_000 },
+    });
+    expect(topup.statusCode).toBe(200);
+
+    const funding = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${response.json().reference}/fund`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "fund-large-trade-escrow",
+      },
+    });
+    expect(funding.statusCode).toBe(200);
+    expect(funding.json()).toEqual(expect.objectContaining({ success: true }));
+
+    const largeLedgerEntry = await server.prisma.escrowLedgerEntry.findFirstOrThrow({
+      where: {
+        escrowId: persisted.id,
+        movementType: "fund",
+      },
+    });
+    expect(largeLedgerEntry.amountCents).toBe(2_500_000_000n);
+  });
+
   it("keeps a failed invitation visible and lets the creator recover it", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("provider unavailable", { status: 503 }));
     const createResponse = await server.inject({
@@ -1189,8 +1281,8 @@ describe("MyEscrow API", () => {
     })).json().escrows.find((item: any) => item.id === createdEscrowReference);
     expect(fundedView.balances).toEqual({
       currency: "USD",
-      fundedCents: escrowBefore.amountCents,
-      heldCents: escrowBefore.amountCents,
+      fundedCents: Number(escrowBefore.amountCents),
+      heldCents: Number(escrowBefore.amountCents),
       releasedCents: 0,
       refundedCents: 0,
       disputedCents: 0,
@@ -1702,7 +1794,7 @@ describe("MyEscrow API", () => {
       + releasedView.balances.releasedCents
       + releasedView.balances.refundedCents,
     );
-    expect(releasedView.balances.releasedCents).toBe(milestoneBefore.amountCents);
+    expect(releasedView.balances.releasedCents).toBe(Number(milestoneBefore.amountCents));
 
     const reusedKeyResponse = await server.inject({
       method: "POST",
@@ -1725,7 +1817,7 @@ describe("MyEscrow API", () => {
       expect.objectContaining({ movementType: "fund", amountCents: releasedView.balances.fundedCents }),
       expect.objectContaining({
         movementType: "release",
-        amountCents: -milestoneBefore.amountCents,
+        amountCents: -Number(milestoneBefore.amountCents),
         milestone: expect.objectContaining({ id: createdMilestoneId }),
       }),
     ]);
@@ -2324,7 +2416,7 @@ describe("MyEscrow API", () => {
     expect(replay.json()).toEqual(acceptance.json());
 
     const buyerAfter = await server.prisma.user.findUniqueOrThrow({ where: { id: buyerBefore.id } });
-    expect(buyerAfter.walletBalanceCents).toBe(buyerBefore.walletBalanceCents + 60_000);
+    expect(Number(buyerAfter.walletBalanceCents)).toBe(Number(buyerBefore.walletBalanceCents) + 60_000);
     const cancellation = await server.prisma.cancellationRequest.findUniqueOrThrow({
       where: { reference: phaseFourCancellationReference },
       include: { escrow: { include: { milestones: { orderBy: { orderIndex: "asc" } } } } },
@@ -2370,7 +2462,7 @@ describe("MyEscrow API", () => {
       where: { dispute: { reference: phaseFourDisputeReference } },
       include: { ledgerEntry: true },
     });
-    expect(allocations.reduce((total, allocation) => total + allocation.amountCents, 0)).toBe(30_000);
+    expect(allocations.reduce((total, allocation) => total + Number(allocation.amountCents), 0)).toBe(30_000);
     expect(allocations.map((allocation) => allocation.recipient).sort()).toEqual(["buyer", "seller"]);
     expect(allocations.every((allocation) => allocation.ledgerEntry.milestoneId === rejectedMilestoneId)).toBe(true);
 
@@ -3246,7 +3338,7 @@ describe("MyEscrow API", () => {
     expect(referredRecord.referredDispute).toEqual(expect.objectContaining({
       reference: referredDisputeReference,
       status: "open",
-      amountFrozenCents: 10_000,
+      amountFrozenCents: 10_000n,
     }));
     expect(referredRecord.escrow.milestones[0]?.status).toBe("disputed");
     const formalEvidence = await server.inject({
@@ -3312,7 +3404,7 @@ describe("MyEscrow API", () => {
     const buyerAfterExecution = await server.prisma.user.findUniqueOrThrow({
       where: { email: "jamie.contractor@example.com" },
     });
-    expect(buyerAfterExecution.walletBalanceCents).toBe(buyerBeforeExecution.walletBalanceCents + 10_000);
+    expect(Number(buyerAfterExecution.walletBalanceCents)).toBe(Number(buyerBeforeExecution.walletBalanceCents) + 10_000);
     expect(await server.prisma.escrowLedgerEntry.count({
       where: { businessReference: `documented-cancellation:${execution.cancellationReference}:full-refund` },
     })).toBe(1);
@@ -3326,7 +3418,7 @@ describe("MyEscrow API", () => {
       authorityReference: "COURT-2026-1842",
       authorityDocumentSha256: "a".repeat(64),
       authorityVerifiedAt: expect.any(Date),
-      authorizedRefundCents: 10_000,
+      authorizedRefundCents: 10_000n,
     }));
     expect(executedRecord.escrow.lifecycleStatus).toBe("cancelled");
     expect(executedRecord.escrow.milestones).toEqual([

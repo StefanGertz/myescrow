@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
+import { centsToNumber } from "../utils/currency";
 import {
   buildCancellationReference,
   buildDisputeReference,
@@ -174,9 +175,9 @@ export async function openMilestoneDispute(
         throw new AppError("Only submitted or revision-requested work can be disputed.", 409);
       }
       const alreadyAllocated = milestone.ledgerEntries
-        .filter((entry) => entry.amountCents < 0)
-        .reduce((total, entry) => total + Math.abs(entry.amountCents), 0);
-      const remainingCents = milestone.amountCents - alreadyAllocated;
+        .filter((entry) => entry.amountCents < 0n)
+        .reduce((total, entry) => total + Math.abs(centsToNumber(entry.amountCents)), 0);
+      const remainingCents = centsToNumber(milestone.amountCents) - alreadyAllocated;
       if (remainingCents <= 0) {
         throw new AppError("This milestone has no remaining held balance to dispute.", 409);
       }
@@ -467,7 +468,7 @@ export async function proposeDisputeResolution(
       });
       if (!dispute?.escrow) throw new AppError("Dispute not found.", 404);
       requireEscrowParty(dispute.escrow, userId);
-      if (sellerCents + buyerCents !== dispute.amountFrozenCents) {
+      if (sellerCents + buyerCents !== centsToNumber(dispute.amountFrozenCents)) {
         throw new AppError("Seller and buyer allocations must equal the full frozen amount.", 400);
       }
       if (
@@ -535,9 +536,14 @@ export async function acceptDisputeResolution(
       if (dispute.resolutionProposedById === userId) {
         throw new AppError("The other party must accept this resolution proposal.", 403);
       }
-      const sellerCents = dispute.proposedSellerCents ?? -1;
-      const buyerCents = dispute.proposedBuyerCents ?? -1;
-      if (sellerCents < 0 || buyerCents < 0 || sellerCents + buyerCents !== dispute.amountFrozenCents) {
+      const sellerCents = dispute.proposedSellerCents === null
+        ? -1
+        : centsToNumber(dispute.proposedSellerCents);
+      const buyerCents = dispute.proposedBuyerCents === null
+        ? -1
+        : centsToNumber(dispute.proposedBuyerCents);
+      const frozenCents = centsToNumber(dispute.amountFrozenCents);
+      if (sellerCents < 0 || buyerCents < 0 || sellerCents + buyerCents !== frozenCents) {
         throw new AppError("The proposed allocations do not reconcile to the frozen amount.", 409);
       }
       const transition = await tx.dispute.updateMany({
@@ -593,9 +599,9 @@ export async function acceptDisputeResolution(
           },
         });
       }
-      const milestoneStatus = sellerCents === dispute.amountFrozenCents
+      const milestoneStatus = sellerCents === frozenCents
         ? "released"
-        : buyerCents === dispute.amountFrozenCents
+        : buyerCents === frozenCents
           ? "refunded"
           : "settled";
       await tx.escrowMilestone.update({

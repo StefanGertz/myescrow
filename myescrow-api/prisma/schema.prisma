@@ -15,7 +15,7 @@ model User {
   email                        String                      @unique
   passwordHash                 String
   emailVerified                Boolean                     @default(false)
-  walletBalanceCents           Int                         @default(0)
+  walletBalanceCents           BigInt                      @default(0)
   role                         String                      @default("customer")
   operatorRole                 String?
   createdAt                    DateTime                    @default(now())
@@ -73,7 +73,7 @@ model Escrow {
   counterpartyEmail            String
   title                        String
   counterpart                  String
-  amountCents                  Int
+  amountCents                  BigInt
   stage                        String
   dueDescription               String
   status                       String
@@ -132,13 +132,13 @@ model EscrowMilestone {
   escrow               Escrow                @relation(fields: [escrowId], references: [id], onDelete: Cascade)
   title                String
   description          String?
-  amountCents          Int
+  amountCents          BigInt
   deadline             DateTime?
   orderIndex           Int
   status               String                @default("not_started")
   requestedTitle       String?
   requestedDescription String?
-  requestedAmountCents Int?
+  requestedAmountCents BigInt?
   requestedDeadline    DateTime?
   changeRequestNote    String?
   changeRequestedAt    DateTime?
@@ -218,8 +218,8 @@ model Dispute {
   openedBy                 User?                         @relation("DisputeOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
   title                    String
   ownerTeam                String
-  amountCents              Int
-  amountFrozenCents        Int                           @default(0)
+  amountCents              BigInt
+  amountFrozenCents        BigInt                        @default(0)
   reason                   String?
   evidenceWindowEndsAt     DateTime?
   evidenceReminderSentAt   DateTime?
@@ -230,8 +230,8 @@ model Dispute {
   arbitrationRequestedBy   User?                         @relation("DisputeArbitrationRequester", fields: [arbitrationRequestedById], references: [id], onDelete: Restrict)
   resolutionProposedById   String?
   resolutionProposedBy     User?                         @relation("DisputeResolutionProposer", fields: [resolutionProposedById], references: [id], onDelete: Restrict)
-  proposedSellerCents      Int?
-  proposedBuyerCents       Int?
+  proposedSellerCents      BigInt?
+  proposedBuyerCents       BigInt?
   resolutionNote           String?
   resolvedAt               DateTime?
   updatedLabel             String
@@ -285,7 +285,7 @@ model DisputeResolutionAllocation {
   disputeId     Int
   dispute       Dispute           @relation(fields: [disputeId], references: [id], onDelete: Restrict)
   recipient     String
-  amountCents   Int
+  amountCents   BigInt
   ledgerEntryId Int               @unique
   ledgerEntry   EscrowLedgerEntry @relation(fields: [ledgerEntryId], references: [id], onDelete: Restrict)
   createdAt     DateTime          @default(now())
@@ -311,7 +311,7 @@ model CancellationRequest {
   authorityEffectiveAt     DateTime?
   authorityDocumentSha256  String?
   authorityVerifiedAt      DateTime?
-  authorizedRefundCents    Int?
+  authorizedRefundCents    BigInt?
   lastReviewedAt           DateTime?
   preReviewLifecycleStatus String?
   preReviewStage           String?
@@ -323,7 +323,7 @@ model CancellationRequest {
   mode                     String
   reason                   String
   status                   String
-  refundAmountCents        Int                         @default(0)
+  refundAmountCents        BigInt                      @default(0)
   refundLedgerEntryId      Int?                        @unique
   refundLedgerEntry        EscrowLedgerEntry?          @relation(fields: [refundLedgerEntryId], references: [id], onDelete: Restrict)
   requestedAt              DateTime                    @default(now())
@@ -378,7 +378,7 @@ model WalletTransaction {
   id          Int                @id @default(autoincrement())
   userId      String
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amountCents Int
+  amountCents BigInt
   type        String
   createdAt   DateTime           @default(now())
   ledgerEntry EscrowLedgerEntry?
@@ -391,7 +391,7 @@ model EscrowLedgerEntry {
   milestoneId         Int?
   milestone           EscrowMilestone?             @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
   movementType        String
-  amountCents         Int
+  amountCents         BigInt
   currency            String                       @default("USD")
   idempotencyKey      String
   businessReference   String                       @unique
@@ -498,7 +498,7 @@ model AgreementVersion {
   termsHash         String
   title             String
   description       String?
-  amountCents       Int
+  amountCents       BigInt
   currency          String               @default("USD")
   fundingMode       String?
   creatorRole       String

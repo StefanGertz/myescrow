@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
+import { jsonObject, jsonSafe } from "../utils/json";
 
 function canonicalize(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -34,7 +36,7 @@ function validateReplay(
   return record.responseJson;
 }
 
-export async function executeIdempotentCommand<T extends Prisma.JsonObject>(
+export async function executeIdempotentCommand<T extends object>(
   prisma: PrismaClient,
   input: {
     userId: string;
@@ -48,7 +50,7 @@ export async function executeIdempotentCommand<T extends Prisma.JsonObject>(
   return result.value;
 }
 
-export async function executeIdempotentCommandWithMetadata<T extends Prisma.JsonObject>(
+export async function executeIdempotentCommandWithMetadata<T extends object>(
   prisma: PrismaClient,
   input: {
     userId: string;
@@ -79,10 +81,10 @@ export async function executeIdempotentCommandWithMetadata<T extends Prisma.Json
           requestHash: hash,
         },
       });
-      const response = await operation(tx);
+      const response = jsonSafe(await operation(tx));
       await tx.idempotencyRecord.update({
         where: { id: record.id },
-        data: { responseJson: response as Prisma.InputJsonObject },
+        data: { responseJson: jsonObject(response) },
       });
       return response;
     });
