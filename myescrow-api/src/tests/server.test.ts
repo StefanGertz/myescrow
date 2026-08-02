@@ -2709,7 +2709,7 @@ describe("MyEscrow API", () => {
         expect.objectContaining({
           body: arbitrationChatMessage,
           sentAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-          sender: expect.objectContaining({ name: "Scott", role: "buyer" }),
+          sender: expect.objectContaining({ name: "Nora Studio", role: "seller" }),
         }),
       ],
       financialLedger: expect.any(Array),
@@ -2941,12 +2941,19 @@ describe("MyEscrow API", () => {
   });
 
   it("keeps administrative cancellation review separate from merits adjudication", async () => {
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/dashboard/wallet/topup",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": "administrative-review-wallet" },
+      payload: { amount: 1000 },
+    })).statusCode).toBe(200);
+
     const createFundedCancellation = async (suffix: string) => {
       const create = await server.inject({
         method: "POST",
         url: "/api/dashboard/escrows/create",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${invitedCounterpartyToken}`,
           "Idempotency-Key": `create-administrative-cancellation-${suffix}`,
         },
         payload: {
@@ -2969,12 +2976,12 @@ describe("MyEscrow API", () => {
       expect((await server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${escrowReference}/fund`,
-        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `fund-${suffix}` },
+        headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": `fund-${suffix}` },
       })).statusCode).toBe(200);
       const request = await server.inject({
         method: "POST",
         url: `/api/dashboard/escrows/${escrowReference}/cancellation/request`,
-        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `cancel-${suffix}` },
+        headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": `cancel-${suffix}` },
         payload: {
           mode: "unilateral",
           reason: `Administrative cancellation requested for the ${suffix} workflow.`,
@@ -3118,11 +3125,18 @@ describe("MyEscrow API", () => {
     expect(await server.prisma.escrowLedgerEntry.count({ where: { movementType: "refund" } }))
       .toBe(refundCountBefore);
 
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/dashboard/wallet/topup",
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": "partial-referral-wallet" },
+      payload: { amount: 100 },
+    })).statusCode).toBe(200);
+
     const partialCreate = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${invitedCounterpartyToken}`,
         "Idempotency-Key": "create-partial-referral-guard",
       },
       payload: {
@@ -3148,13 +3162,13 @@ describe("MyEscrow API", () => {
     expect((await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${partialReference}/milestones/${partialMilestone.id}/fund`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-funding" },
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": "partial-referral-funding" },
       payload: { amount: 50 },
     })).statusCode).toBe(200);
     const partialCancellation = await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${partialReference}/cancellation/request`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-cancellation" },
+      headers: { Authorization: `Bearer ${invitedCounterpartyToken}`, "Idempotency-Key": "partial-referral-cancellation" },
       payload: {
         mode: "unilateral",
         reason: "The party requests review before the milestone is fully funded.",
@@ -3233,7 +3247,7 @@ describe("MyEscrow API", () => {
       authorityVerified: true,
     };
     const buyerBeforeExecution = await server.prisma.user.findUniqueOrThrow({
-      where: { email: "scott@example.com" },
+      where: { email: "jamie.contractor@example.com" },
     });
     const mismatchedAuthority = await server.inject({
       method: "POST",
@@ -3267,7 +3281,7 @@ describe("MyEscrow API", () => {
     });
     expect(executionReplay.json()).toEqual(executed.json());
     const buyerAfterExecution = await server.prisma.user.findUniqueOrThrow({
-      where: { email: "scott@example.com" },
+      where: { email: "jamie.contractor@example.com" },
     });
     expect(buyerAfterExecution.walletBalanceCents).toBe(buyerBeforeExecution.walletBalanceCents + 10_000);
     expect(await server.prisma.escrowLedgerEntry.count({

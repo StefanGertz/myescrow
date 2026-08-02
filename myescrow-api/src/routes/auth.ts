@@ -28,6 +28,7 @@ type SessionUser = {
   id: string;
   name: string;
   email: string;
+  role: string;
 };
 
 const issueSession = (fastify: FastifyInstance, user: SessionUser) => {
@@ -40,7 +41,7 @@ const issueSession = (fastify: FastifyInstance, user: SessionUser) => {
   return {
     token,
     expiresAt: new Date((issuedAtSeconds + env.authSessionTtlSeconds) * 1000).toISOString(),
-    user: { id: user.id, name: user.name, email: user.email },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
   };
 };
 
@@ -127,7 +128,26 @@ export async function authRoutes(fastify: FastifyInstance) {
       throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
     }
     await verifyPassword(user, body.password);
+    if (user.role !== "customer") {
+      throw new AppError("Use the Operations sign-in for operator accounts.", 403);
+    }
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
+    return issueSession(fastify, user);
+  });
+
+  fastify.post("/api/auth/operations-login", async (request) => {
+    const body = loginSchema.parse(request.body);
+    const user = await findUserByEmail(fastify.prisma, body.email);
+    if (!user) {
+      throw new AppError("Invalid email or password.", 401);
+    }
+    if (requireVerification && !user.emailVerified) {
+      throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
+    }
+    await verifyPassword(user, body.password);
+    if (!["support", "admin"].includes(user.role)) {
+      throw new AppError("An authorized operator account is required.", 403);
+    }
     return issueSession(fastify, user);
   });
 
