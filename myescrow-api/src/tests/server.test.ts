@@ -13,10 +13,40 @@ import { processMilestoneReviewDeadlines } from "../services/milestoneReviewServ
 let server: FastifyInstance;
 let token: string;
 let counterpartyToken: string;
+let creatorUserId: string;
 let schemaName: string;
 const defaultPassword = "password123";
 const creatorSignature = "data:image/png;base64,Y3JlYXRvcg==";
 const counterpartySignature = "data:image/png;base64,Y291bnRlcnBhcnR5";
+const incompleteAgreementDraft = {
+  schemaVersion: 1,
+  screen: "create",
+  createPromptStep: 2,
+  createForm: {
+    role: "buyer",
+    counterpartyEmail: "nora@",
+    counterpartyEmailConfirmation: "",
+    title: "",
+    amount: "1250.",
+    category: "Goods",
+    description: "",
+    fundingMode: null,
+    partyType: "business",
+    business: {
+      legalName: "Scott ",
+      representativeTitle: "",
+    },
+  },
+  descriptionSkipped: false,
+  milestones: [],
+  milestoneInputs: {
+    title: "",
+    amount: "",
+    description: "",
+    deadline: "",
+  },
+  editingMilestoneId: null,
+};
 let createdEscrowReference: string;
 let createdMilestoneId: number;
 let secondMilestoneEscrowReference: string;
@@ -103,6 +133,7 @@ describe("MyEscrow API", () => {
         "milestone_funding",
         "staged_funding_amounts",
         "agreement_funding_plan",
+        "agreement_drafts",
         "escrow_chat",
         "arbitration_reports",
         "administrative_cancellation_review",
@@ -119,6 +150,7 @@ describe("MyEscrow API", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.user.email).toBe("scott@example.com");
+    creatorUserId = body.user.id;
     token = body.token;
     expect(token).toBeDefined();
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
@@ -169,6 +201,316 @@ describe("MyEscrow API", () => {
     expect(response.statusCode).toBe(200);
     counterpartyToken = response.json().token;
     expect(counterpartyToken).toBeDefined();
+  });
+
+  it("persists a private revisioned draft and rejects stale resurrection", async () => {
+    const unauthorizedResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+    });
+    expect(unauthorizedResponse.statusCode).toBe(401);
+
+    const operationsToken = server.jwt.sign({
+      userId: creatorUserId,
+      email: "scott@example.com",
+      portal: "operations",
+    });
+    const wrongPortalResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${operationsToken}` },
+    });
+    expect(wrongPortalResponse.statusCode).toBe(403);
+
+    const emptyResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(emptyResponse.statusCode).toBe(200);
+    expect(emptyResponse.headers["cache-control"]).toBe("private, no-store");
+    expect(emptyResponse.json()).toEqual({ draft: null, revision: 0 });
+
+    const sideEffectsBefore = await Promise.all([
+      server.prisma.escrow.count(),
+      server.prisma.agreementVersion.count(),
+      server.prisma.agreementSignature.count(),
+      server.prisma.invitationDelivery.count(),
+      server.prisma.outboxEvent.count(),
+      server.prisma.notification.count(),
+      server.prisma.timelineEvent.count(),
+    ]);
+    const emailsBefore = sentEmails.length;
+    const saveResponse = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { baseRevision: 0, draft: incompleteAgreementDraft },
+    });
+    expect(saveResponse.statusCode).toBe(200);
+    expect(saveResponse.json().revision).toBe(1);
+    expect(saveResponse.json().draft).toEqual(expect.objectContaining(incompleteAgreementDraft));
+    expect(new Date(saveResponse.json().draft.createdAt).toString()).not.toBe("Invalid Date");
+    expect(new Date(saveResponse.json().draft.updatedAt).toString()).not.toBe("Invalid Date");
+
+    const restoredResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(restoredResponse.statusCode).toBe(200);
+    expect(restoredResponse.json()).toEqual(saveResponse.json());
+    expect(await Promise.all([
+      server.prisma.escrow.count(),
+      server.prisma.agreementVersion.count(),
+      server.prisma.agreementSignature.count(),
+      server.prisma.invitationDelivery.count(),
+      server.prisma.outboxEvent.count(),
+      server.prisma.notification.count(),
+      server.prisma.timelineEvent.count(),
+    ])).toEqual(sideEffectsBefore);
+    expect(sentEmails).toHaveLength(emailsBefore);
+
+    const staleInitialSave = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        baseRevision: 0,
+        draft: {
+          ...incompleteAgreementDraft,
+          createForm: { ...incompleteAgreementDraft.createForm, title: "Stale overwrite" },
+        },
+      },
+    });
+    expect(staleInitialSave.statusCode).toBe(409);
+    expect(staleInitialSave.json().error).toContain("changed in another session");
+
+    const revisedDraft = {
+      ...incompleteAgreementDraft,
+      screen: "milestones",
+      createPromptStep: 6,
+      createForm: {
+        ...incompleteAgreementDraft.createForm,
+        counterpartyEmail: "nora@example.com",
+        counterpartyEmailConfirmation: "nora@example.com",
+        title: "Saved construction draft",
+        amount: "1250",
+        description: "A draft that can be resumed later.",
+        fundingMode: "milestone",
+      },
+      milestones: [{
+        id: "milestone-one",
+        title: "Initial delivery",
+        amount: 500,
+        description: "First checkpoint",
+        deadline: "2026-09-15",
+      }],
+      milestoneInputs: {
+        title: "Final delivery",
+        amount: "750.",
+        description: "Work in progress",
+        deadline: "",
+      },
+    };
+    const updateResponse = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { baseRevision: 1, draft: revisedDraft },
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json().revision).toBe(2);
+    expect(updateResponse.json().draft).toEqual(expect.objectContaining(revisedDraft));
+    expect(await server.prisma.escrowCreationDraft.count({ where: { userId: creatorUserId } })).toBe(1);
+
+    const staleCreateSideEffectsBefore = await Promise.all([
+      server.prisma.escrow.count(),
+      server.prisma.agreementVersion.count(),
+      server.prisma.agreementSignature.count(),
+      server.prisma.invitationDelivery.count(),
+      server.prisma.outboxEvent.count(),
+      server.prisma.notification.count(),
+      server.prisma.timelineEvent.count(),
+    ]);
+    const staleFinalCreate = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "stale-final-draft-create" },
+      payload: {
+        title: "Stale final submission",
+        counterpartyEmail: "nora@example.com",
+        amount: 1250,
+        draftRevision: 1,
+        fundingMode: "full",
+        creatorRole: "buyer",
+        creatorParty: { type: "individual" },
+        signatureDataUrl: creatorSignature,
+      },
+    });
+    expect(staleFinalCreate.statusCode).toBe(409);
+    expect(staleFinalCreate.json().error).toContain("changed in another session");
+    expect(await Promise.all([
+      server.prisma.escrow.count(),
+      server.prisma.agreementVersion.count(),
+      server.prisma.agreementSignature.count(),
+      server.prisma.invitationDelivery.count(),
+      server.prisma.outboxEvent.count(),
+      server.prisma.notification.count(),
+      server.prisma.timelineEvent.count(),
+    ])).toEqual(staleCreateSideEffectsBefore);
+    expect(await server.prisma.idempotencyRecord.count({
+      where: { userId: creatorUserId, key: "stale-final-draft-create" },
+    })).toBe(0);
+    const draftAfterStaleCreate = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(draftAfterStaleCreate.json().revision).toBe(2);
+    expect(draftAfterStaleCreate.json().draft).toEqual(expect.objectContaining(revisedDraft));
+
+    const invalidDraftResponse = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        baseRevision: 2,
+        draft: { ...revisedDraft, signatureDataUrl: creatorSignature },
+      },
+    });
+    expect(invalidDraftResponse.statusCode).toBe(400);
+    expect(invalidDraftResponse.json().error).toBe("Invalid request payload.");
+
+    const oversizedDraftResponse = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        baseRevision: 2,
+        draft: {
+          ...revisedDraft,
+          createForm: { ...revisedDraft.createForm, title: "x".repeat(201) },
+        },
+      },
+    });
+    expect(oversizedDraftResponse.statusCode).toBe(400);
+    expect(oversizedDraftResponse.json().issues).toContainEqual(expect.objectContaining({
+      path: "draft.createForm.title",
+    }));
+
+    const counterpartyView = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(counterpartyView.statusCode).toBe(200);
+    expect(counterpartyView.json()).toEqual({ draft: null, revision: 0 });
+
+    const counterpartySave = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        baseRevision: 0,
+        draft: {
+          ...incompleteAgreementDraft,
+          createForm: { ...incompleteAgreementDraft.createForm, role: "seller" },
+        },
+      },
+    });
+    expect(counterpartySave.statusCode).toBe(200);
+    expect(counterpartySave.json().revision).toBe(1);
+    expect(await server.prisma.escrowCreationDraft.count()).toBe(2);
+    const creatorAfterCounterpartySave = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(creatorAfterCounterpartySave.json().revision).toBe(2);
+    expect(creatorAfterCounterpartySave.json().draft).toEqual(expect.objectContaining(revisedDraft));
+
+    const concurrentDiscards = await Promise.all(
+      [0, 1].map(() => server.inject({
+        method: "DELETE",
+        url: "/api/dashboard/agreement-draft",
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+        payload: { baseRevision: 1 },
+      })),
+    );
+    for (const discardResponse of concurrentDiscards) {
+      expect(discardResponse.statusCode).toBe(200);
+      expect(discardResponse.json()).toEqual({ success: true, draft: null, revision: 2 });
+    }
+    const discardAfterRefresh = await server.inject({
+      method: "DELETE",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { baseRevision: 2 },
+    });
+    expect(discardAfterRefresh.json()).toEqual({ success: true, draft: null, revision: 2 });
+    const counterpartyTombstone = await server.prisma.escrowCreationDraft.findUniqueOrThrow({
+      where: { userId: server.jwt.decode<{ userId: string }>(counterpartyToken)!.userId },
+    });
+    expect(counterpartyTombstone).toEqual(expect.objectContaining({
+      data: null,
+      revision: 2,
+      deletedAt: expect.any(Date),
+    }));
+
+    const staleSaveAfterDiscard = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        baseRevision: 1,
+        draft: incompleteAgreementDraft,
+      },
+    });
+    expect(staleSaveAfterDiscard.statusCode).toBe(409);
+
+    const resumedAfterDiscard = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        baseRevision: 2,
+        draft: incompleteAgreementDraft,
+      },
+    });
+    expect(resumedAfterDiscard.statusCode).toBe(200);
+    expect(resumedAfterDiscard.json().revision).toBe(3);
+
+    const staleDeleteAfterResume = await server.inject({
+      method: "DELETE",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { baseRevision: 1 },
+    });
+    expect(staleDeleteAfterResume.statusCode).toBe(409);
+    const finalCounterpartyDiscard = await server.inject({
+      method: "DELETE",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { baseRevision: 3 },
+    });
+    expect(finalCounterpartyDiscard.json()).toEqual({ success: true, draft: null, revision: 4 });
+    expect(await server.prisma.escrowCreationDraft.count()).toBe(2);
+
+    const invalidCreateResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "invalid-draft-create" },
+      payload: {
+        title: "Incomplete submission",
+        counterpartyEmail: "nora@example.com",
+        amount: 1250,
+      },
+    });
+    expect(invalidCreateResponse.statusCode).toBe(400);
+    expect(await server.prisma.escrowCreationDraft.findUnique({ where: { userId: creatorUserId } })).toEqual(
+      expect.objectContaining({ revision: 2, deletedAt: null }),
+    );
   });
 
   it("keeps an idempotent escrow conversation available to both parties in every lifecycle state", async () => {
@@ -372,6 +714,10 @@ describe("MyEscrow API", () => {
 
   it("creates a new escrow", async () => {
     const emailsBefore = sentEmails.length;
+    const draftBeforeCreate = await server.prisma.escrowCreationDraft.findUniqueOrThrow({
+      where: { userId: creatorUserId },
+    });
+    expect(draftBeforeCreate.data).not.toBeNull();
     const payload = {
       title: "New project escrow",
       counterpartyEmail: "nora@example.com",
@@ -384,6 +730,7 @@ describe("MyEscrow API", () => {
         },
       },
       amount: 1500,
+      draftRevision: draftBeforeCreate.revision,
       fundingMode: "full",
       category: "Construction",
       signatureDataUrl: creatorSignature,
@@ -404,6 +751,14 @@ describe("MyEscrow API", () => {
     expect(body.success).toBe(true);
     expect(body.reference).toMatch(/^PO-/);
     createdEscrowReference = body.reference;
+    const tombstoneAfterCreate = await server.prisma.escrowCreationDraft.findUniqueOrThrow({
+      where: { userId: creatorUserId },
+    });
+    expect(tombstoneAfterCreate).toEqual(expect.objectContaining({
+      data: null,
+      revision: draftBeforeCreate.revision + 1,
+      deletedAt: expect.any(Date),
+    }));
     const replay = await server.inject({
       method: "POST",
       url: "/api/dashboard/escrows/create",
@@ -412,6 +767,29 @@ describe("MyEscrow API", () => {
     });
     expect(replay.statusCode).toBe(201);
     expect(replay.json()).toEqual(body);
+    expect(await server.prisma.escrowCreationDraft.findUniqueOrThrow({
+      where: { userId: creatorUserId },
+    })).toEqual(tombstoneAfterCreate);
+
+    const delayedSaveAfterCreate = await server.inject({
+      method: "PUT",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        baseRevision: draftBeforeCreate.revision,
+        draft: incompleteAgreementDraft,
+      },
+    });
+    expect(delayedSaveAfterCreate.statusCode).toBe(409);
+    const draftStateAfterCreate = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/agreement-draft",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(draftStateAfterCreate.json()).toEqual({
+      draft: null,
+      revision: draftBeforeCreate.revision + 1,
+    });
     expect(await server.prisma.escrow.count({ where: { reference: createdEscrowReference } })).toBe(1);
     const persistedEscrow = await server.prisma.escrow.findUniqueOrThrow({
       where: { reference: createdEscrowReference },

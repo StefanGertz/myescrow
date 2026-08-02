@@ -52,6 +52,7 @@ export async function buildServer() {
       "milestone_funding",
       "staged_funding_amounts",
       "agreement_funding_plan",
+      "agreement_drafts",
       "escrow_chat",
       "arbitration_reports",
       "administrative_cancellation_review",

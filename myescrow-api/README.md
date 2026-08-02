@@ -94,11 +94,14 @@ Escrow creation, chat messages, funding, milestone submission, milestone approva
 | POST | `/api/auth/resend-verification` | Send another verification email if the previous code expired. |
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |
 | GET | `/api/dashboard/escrows` | Escrows requiring review, including derived funded, held, released, refunded, and disputed balances. |
+| GET | `/api/dashboard/agreement-draft` | Return the authenticated customer's private in-progress creation draft and current optimistic revision. Deleted/submitted drafts return `draft: null` while retaining their tombstone revision. |
+| PUT | `/api/dashboard/agreement-draft` | Compare-and-swap one bounded, incomplete creation-flow snapshot using `{ baseRevision, draft }`, without creating an agreement, signature, or invitation. Stale revisions return `409`. |
+| DELETE | `/api/dashboard/agreement-draft` | Discard with `{ baseRevision }`, atomically advancing a tombstone that prevents delayed saves from restoring stale work. Successful signed escrow creation advances the same tombstone in its transaction. |
 | GET | `/api/dashboard/escrows/:id/ledger` | Immutable escrow balance history for either party. |
 | GET | `/api/dashboard/escrows/:id/audit` | Chronological agreement, milestone, dispute, cancellation, recovery, and money history for either party. |
 | GET | `/api/dashboard/escrows/:id/messages` | Return the newest 100 append-only buyer/seller chat messages. Chat remains readable in every escrow lifecycle state. |
 | POST | `/api/dashboard/escrows/:id/messages` | Send an idempotent message of up to 5,000 characters and notify the other attached party. |
-| POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal, persist its `full` or `milestone` funding plan as an agreement term, and atomically queue its invitation. Legacy clients may omit `fundingMode`. |
+| POST | `/api/dashboard/escrows/create` | Create a signed escrow proposal, persist its `full` or `milestone` funding plan as an agreement term, and atomically queue its invitation. Draft-aware clients pass the latest `draftRevision`; a mismatch returns `409` before side effects. Legacy clients may omit `draftRevision` only when no active draft exists, and may omit `fundingMode`. |
 | PATCH | `/api/dashboard/escrows/:id` | Revise a pre-funding proposal, create a new agreement version, and correct/resend its invitation. |
 | POST | `/api/dashboard/escrows/:id/agreement/sign` | Sign the current immutable agreement version. |
 | POST | `/api/dashboard/escrows/:id/invitation/resend` | Supersede the prior delivery and queue a fresh invitation. |

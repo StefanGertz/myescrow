@@ -20,6 +20,7 @@ import {
   lockAgreementIfFullySigned,
   signAgreementVersion,
 } from "./agreementService";
+import { consumeAgreementDraftForCreate } from "./agreementDraftService";
 import {
   extendInvitationDelivery,
   markInvitationAccepted,
@@ -286,6 +287,7 @@ type CreateEscrowInput = {
   title: string;
   counterpartyEmail: string;
   amount: number;
+  draftRevision?: number | undefined;
   fundingMode?: "full" | "milestone" | undefined;
   creatorRole: "buyer" | "seller";
   creatorParty: PartyIdentityInput;
@@ -1116,6 +1118,7 @@ export async function createEscrow(
       payload: data,
     },
     async (tx) => {
+    await consumeAgreementDraftForCreate(tx, userId, data.draftRevision);
     await saveBusinessProfile(tx, userId, data.creatorParty);
     const sequence = await getNextSequenceValue(tx, "escrow", 650);
     const reference = buildEscrowReference(sequence);

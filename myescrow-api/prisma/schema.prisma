@@ -44,6 +44,7 @@ model User {
   verificationTokens           EmailVerificationToken[]
   passwordResetTokens          PasswordResetToken[]
   businessProfile              BusinessProfile?
+  escrowCreationDraft          EscrowCreationDraft?
   auditEvents                  AuditEvent[]                @relation("AuditActor")
 }
 
@@ -58,6 +59,17 @@ model BusinessProfile {
   representativeTitle String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+model EscrowCreationDraft {
+  userId        String    @id
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schemaVersion Int       @default(1)
+  data          Json?
+  revision      Int       @default(0)
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model Escrow {

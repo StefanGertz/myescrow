@@ -24,6 +24,9 @@ if (!version.capabilities?.includes("staged_funding_amounts")) {
 if (!version.capabilities?.includes("agreement_funding_plan")) {
   throw new Error("Deployed API does not advertise agreement funding-plan selection.");
 }
+if (!version.capabilities?.includes("agreement_drafts")) {
+  throw new Error("Deployed API does not advertise resumable agreement drafts.");
+}
 if (!version.capabilities?.includes("escrow_chat")) {
   throw new Error("Deployed API does not advertise escrow chat.");
 }
@@ -55,6 +58,16 @@ if (chatRouteProbe.status !== 401) {
   const body = await chatRouteProbe.text();
   throw new Error(
     `Escrow chat route probe returned ${chatRouteProbe.status}; expected 401. ${body}`,
+  );
+}
+
+const agreementDraftRouteProbe = await fetch(
+  `${apiBase}/api/dashboard/agreement-draft`,
+);
+if (agreementDraftRouteProbe.status !== 401) {
+  const body = await agreementDraftRouteProbe.text();
+  throw new Error(
+    `Agreement draft route probe returned ${agreementDraftRouteProbe.status}; expected 401. ${body}`,
   );
 }
 

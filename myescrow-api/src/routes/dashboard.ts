@@ -40,6 +40,12 @@ import {
 } from "../services/disputeService";
 import { listEscrowMessages, sendEscrowMessage } from "../services/chatService";
 import { getArbitrationReport } from "../services/arbitrationReportService";
+import {
+  agreementDraftStateResponse,
+  getAgreementDraft,
+  saveAgreementDraft,
+  tombstoneAgreementDraft,
+} from "../services/agreementDraftService";
 import { sendMilestoneChangeRequestEmail } from "../services/emailService";
 import { processInvitationOutbox } from "../services/invitationService";
 import {
@@ -71,6 +77,7 @@ const nonnegativeMoneySchema = z.number().nonnegative().max(
   maximumExactDollarAmount,
   "Amount exceeds the supported exact-cent range.",
 );
+const draftRevisionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 const partyIdentitySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("individual") }),
@@ -90,6 +97,7 @@ const createEscrowSchema = z.object({
   title: z.string().min(2),
   counterpartyEmail: z.string().email(),
   amount: positiveMoneySchema,
+  draftRevision: draftRevisionSchema.optional(),
   fundingMode: z.enum(["full", "milestone"]).optional(),
   creatorRole: z.enum(["buyer", "seller"]).default("buyer"),
   creatorParty: partyIdentitySchema.default({ type: "individual" }),
@@ -120,6 +128,58 @@ const updateDraftEscrowSchema = z.object({
     }),
   ).optional(),
 });
+
+const draftCurrencyInputSchema = z
+  .string()
+  .max(32)
+  .regex(/^(?:\d+(?:\.\d{0,2})?)?$/, "Amount must be a decimal value with at most two decimal places.");
+const draftDateInputSchema = z
+  .string()
+  .max(10)
+  .regex(/^(?:|\d{4}-\d{2}-\d{2})$/, "Deadline must be blank or use YYYY-MM-DD.");
+const draftMilestoneIdSchema = z.string().min(1).max(100);
+const agreementDraftSchema = z.object({
+  schemaVersion: z.literal(1),
+  screen: z.enum(["create", "milestones", "agreement"]),
+  createPromptStep: z.number().int().min(0).max(6),
+  createForm: z.object({
+    role: z.enum(["buyer", "seller"]),
+    counterpartyEmail: z.string().max(320),
+    counterpartyEmailConfirmation: z.string().max(320),
+    title: z.string().max(200),
+    amount: draftCurrencyInputSchema,
+    category: z.string().max(100),
+    description: z.string().max(10_000),
+    fundingMode: z.enum(["full", "milestone"]).nullable(),
+    partyType: z.enum(["individual", "business"]),
+    business: z.object({
+      legalName: z.string().max(200),
+      representativeTitle: z.string().max(200),
+    }).strict(),
+  }).strict(),
+  descriptionSkipped: z.boolean(),
+  milestones: z.array(z.object({
+    id: draftMilestoneIdSchema,
+    title: z.string().max(200),
+    amount: nonnegativeMoneySchema,
+    description: z.string().max(5_000),
+    deadline: draftDateInputSchema,
+  }).strict()).max(100),
+  milestoneInputs: z.object({
+    title: z.string().max(200),
+    amount: draftCurrencyInputSchema,
+    description: z.string().max(5_000),
+    deadline: draftDateInputSchema,
+  }).strict(),
+  editingMilestoneId: draftMilestoneIdSchema.nullable(),
+}).strict();
+const saveAgreementDraftSchema = z.object({
+  baseRevision: draftRevisionSchema,
+  draft: agreementDraftSchema,
+}).strict();
+const deleteAgreementDraftSchema = z.object({
+  baseRevision: draftRevisionSchema,
+}).strict();
 
 const milestoneSubmissionSchema = z.object({
   note: z.string().trim().max(5_000).optional(),
@@ -284,6 +344,32 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       };
     });
 
+    secured.get("/api/dashboard/agreement-draft", async (request, reply) => {
+      const user = await requireUser(request);
+      const draft = await getAgreementDraft(secured.prisma, user.id);
+      reply.header("Cache-Control", "private, no-store");
+      return agreementDraftStateResponse(draft);
+    });
+
+    secured.put("/api/dashboard/agreement-draft", async (request) => {
+      const user = await requireUser(request);
+      const body = saveAgreementDraftSchema.parse(request.body);
+      const { schemaVersion, ...data } = body.draft;
+      const draft = await saveAgreementDraft(secured.prisma, user.id, {
+        baseRevision: body.baseRevision,
+        schemaVersion,
+        data,
+      });
+      return agreementDraftStateResponse(draft);
+    });
+
+    secured.delete("/api/dashboard/agreement-draft", async (request) => {
+      const user = await requireUser(request);
+      const body = deleteAgreementDraftSchema.parse(request.body);
+      const draft = await tombstoneAgreementDraft(secured.prisma, user.id, body.baseRevision);
+      return { success: true, ...agreementDraftStateResponse(draft) };
+    });
+
     secured.post("/api/dashboard/escrows/create", async (request, reply) => {
       const user = await requireUser(request);
       const body = createEscrowSchema.parse(request.body);
@@ -291,6 +377,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         title: body.title,
         counterpartyEmail: body.counterpartyEmail,
         amount: body.amount,
+        ...(body.draftRevision !== undefined ? { draftRevision: body.draftRevision } : {}),
         ...(body.fundingMode ? { fundingMode: body.fundingMode } : {}),
         creatorRole: body.creatorRole,
         creatorParty: body.creatorParty,
