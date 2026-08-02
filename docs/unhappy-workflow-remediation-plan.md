@@ -191,7 +191,7 @@ Evidence files should use private object storage, short-lived access links, malw
 - Support three resolution outcomes: release to seller, refund to buyer, or split settlement.
 - Require the resolution allocations to equal the frozen amount before closing the dispute.
 - Support mutual cancellation by stopping new releases and refunding the unreleased, undisputed balance.
-- Define a separate governed path for unilateral cancellation after funding.
+- Define a separate administrative gate for unilateral cancellation after funding. Operations may request information, close a procedurally ineligible request using an allowlisted reason code and policy reference, or refer one milestone to formal dispute while unselected funds resume, but may not decide the contractual merits. The exceptional `execute_documented_full_refund` command may only execute an externally validated final court order or arbitration award whose authority ID, effective date, document SHA-256, exact authorized amount, and administrator attestation are recorded.
 
 ### Exit criteria
 
@@ -203,7 +203,9 @@ Evidence files should use private object storage, short-lived access links, malw
 
 **Implementation status (2026-07-22):** Phase 4 is implemented locally. Either escrow party can open one active dispute against an eligible milestone, and the dispute freezes only that milestone's remaining held balance. Evidence notes and private file metadata are retained during a seven-day evidence window. A party may propose release, refund, or a split, but the seller and buyer allocations must add up to every frozen cent and the other party must accept before ledger-backed settlement entries move money. Concurrent dispute opening and proposal changes use conditional transitions, and all money-moving commands are idempotent.
 
-Funded mutual cancellation is now a request-and-accept workflow: new milestone activity stops, the unreleased and undisputed balance returns to the buyer, and disputed funds remain held until their linked dispute is resolved. A unilateral request moves the escrow into governed review without moving money. The dashboard shows the frozen amount, evidence deadline and history, complete resolution proposal, cancellation status, and the counterparty action required. Automated deadline escalation, staff resolution authority, and operational support tooling remain Phase 5 work.
+Funded mutual cancellation is now a request-and-accept workflow: new milestone activity stops, the unreleased and undisputed balance returns to the buyer, and disputed funds remain held until their linked dispute is resolved. A unilateral request moves the escrow into administrative review without moving money. The dashboard shows the frozen amount, evidence deadline and history, complete resolution proposal, cancellation status, and the counterparty action required.
+
+**Administrative-review update (2026-07-31):** The operations workflow is an administrative gate rather than informal arbitration. An administrator can request more information; close an ineligible request using an allowlisted reason code and policy reference, restoring its exact pre-review workflow; or create one real, milestone-linked dispute that uses the normal evidence, mutual-settlement, and arbitration process while unselected funds resume. The execution-only `execute_documented_full_refund` action requires an externally validated final court order or arbitration award, authority ID, effective date, document SHA-256, exact authorized amount matching the full refundable balance, and administrator attestation; active dispute reserves remain held. These actions are admin-only, idempotent, audited, and notify both parties. They do not give operations authority to decide entitlement on the merits.
 
 ## Phase 5 — Operationalize recovery and eliminate silent stalls
 

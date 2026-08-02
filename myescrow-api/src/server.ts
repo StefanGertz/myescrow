@@ -51,6 +51,7 @@ export async function buildServer() {
       "agreement_funding_plan",
       "escrow_chat",
       "arbitration_reports",
+      "administrative_cancellation_review",
     ] as const,
   };
 

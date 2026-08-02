@@ -1,12 +1,17 @@
 import type { FastifyBaseLogger } from "fastify";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { AppError } from "../utils/errors";
-import { buildNotificationId } from "../utils/id";
+import { buildDisputeReference, buildNotificationId } from "../utils/id";
 import { executeIdempotentCommand } from "./idempotencyService";
 import { extendInvitationDelivery, processInvitationOutbox } from "./invitationService";
 import { processMilestoneReviewDeadlines } from "./milestoneReviewService";
-import { reconcileEscrowLedger } from "./moneyIntegrityService";
+import {
+  applyEscrowTransfer,
+  getEscrowLedgerBalances,
+  reconcileEscrowLedger,
+} from "./moneyIntegrityService";
 import { getNextSequenceValue } from "./sequenceService";
+import { allocateStagedFunding, totalFundedFromLedger } from "../utils/stagedFunding";
 
 const DAY_MS = 86_400_000;
 const ACTIVE_ESCROW_STATES = [
@@ -21,6 +26,18 @@ const ACTIVE_ESCROW_STATES = [
   "dispute_resolution_pending",
 ];
 const ACTIVE_DISPUTE_STATES = ["open", "resolution_proposed", "resolving", "arbitration_requested"];
+const ADMIN_CANCELLATION_REVIEW_STATES = [
+  "escalated",
+  "information_requested",
+  "information_received",
+];
+const PROCEDURAL_CANCELLATION_REASON_CODES = [
+  "duplicate_request",
+  "request_withdrawn",
+  "wrong_workflow",
+  "notice_requirement_unmet",
+  "no_eligible_funded_scope",
+] as const;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -496,7 +513,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     prisma.cancellationRequest.count({
       where: {
         OR: [
-          { mode: "unilateral", status: "escalated" },
+          { mode: "unilateral", status: { in: ADMIN_CANCELLATION_REVIEW_STATES } },
           { status: "pending", escalatedAt: { not: null } },
         ],
       },
@@ -600,7 +617,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     prisma.cancellationRequest.findMany({
       where: {
         OR: [
-          { mode: "unilateral", status: "escalated" },
+          { mode: "unilateral", status: { in: ADMIN_CANCELLATION_REVIEW_STATES } },
           { status: "pending", escalatedAt: { not: null } },
         ],
       },
@@ -634,7 +651,7 @@ export async function getOperationsHealth(prisma: PrismaClient, now = new Date()
     ...(agedEscrows ? [`${agedEscrows} active escrow(s) older than seven days`] : []),
     ...(disputesApproaching ? [`${disputesApproaching} dispute evidence deadline(s) within two days`] : []),
     ...(arbitrationRequested ? [`Arbitration: ${arbitrationRequested} dispute(s) awaiting review`] : []),
-    ...(cancellationReviews ? [`Cancellation: ${cancellationReviews} request(s) awaiting governed review`] : []),
+    ...(cancellationReviews ? [`Cancellation: ${cancellationReviews} request(s) awaiting administrative review`] : []),
     ...(latestReconciliation?.status === "exception" ? [`${latestReconciliation.exceptionCount} reconciliation exception(s)`] : []),
   ];
   return {
@@ -765,6 +782,396 @@ export async function supportExtendInvitation(
       metadata: { days, expiresAt: delivery.expiresAt.toISOString() },
     });
     return { success: true, deliveryId: delivery.id, expiresAt: delivery.expiresAt.toISOString() };
+  });
+}
+
+export type AdministrativeCancellationReviewInput =
+  | { action: "request_information"; rationale: string }
+  | {
+      action: "reject_ineligible";
+      rationale: string;
+      reasonCode: (typeof PROCEDURAL_CANCELLATION_REASON_CODES)[number];
+      policyReference: string;
+    }
+  | {
+      action: "refer_to_dispute";
+      rationale: string;
+      scope: "milestone";
+      milestoneId: number;
+      resumeUnselectedFunds: true;
+    }
+  | {
+      action: "execute_documented_full_refund";
+      rationale: string;
+      authorityType: "arbitration_award" | "court_order";
+      authorityReference: string;
+      authorityEffectiveAt: string;
+      authorityDocumentSha256: string;
+      authorizedRefundCents: number;
+      authorityVerified: true;
+    };
+
+export async function administerCancellationReview(
+  prisma: PrismaClient,
+  adminId: string,
+  reference: string,
+  input: AdministrativeCancellationReviewInput,
+  idempotencyKey: string,
+) {
+  const rationale = input.rationale.trim();
+  if (rationale.length < 10) {
+    throw new AppError("Explain the administrative action in at least 10 characters.", 400);
+  }
+  const policyReference = input.action === "reject_ineligible"
+    ? input.policyReference.trim()
+    : null;
+  if (input.action === "reject_ineligible" && (policyReference?.length ?? 0) < 3) {
+    throw new AppError("Record the policy or procedure reference supporting this closure.", 400);
+  }
+  const authorityReference = input.action === "execute_documented_full_refund"
+    ? input.authorityReference.trim()
+    : null;
+  if (input.action === "execute_documented_full_refund" && (authorityReference?.length ?? 0) < 3) {
+    throw new AppError("Record the final order or award reference.", 400);
+  }
+  const authorityEffectiveAt = input.action === "execute_documented_full_refund"
+    ? new Date(input.authorityEffectiveAt)
+    : null;
+  if (
+    input.action === "execute_documented_full_refund"
+    && (
+      !authorityEffectiveAt
+      || Number.isNaN(authorityEffectiveAt.getTime())
+      || authorityEffectiveAt.getTime() > Date.now()
+    )
+  ) {
+    throw new AppError("The authority must have a valid effective date that is not in the future.", 400);
+  }
+  if (
+    input.action === "execute_documented_full_refund"
+    && !/^[a-f0-9]{64}$/i.test(input.authorityDocumentSha256)
+  ) {
+    throw new AppError("Record the retained authority document's SHA-256 digest.", 400);
+  }
+
+  return executeIdempotentCommand(prisma, {
+    userId: adminId,
+    key: idempotencyKey,
+    command: "admin_administer_cancellation_review",
+    payload: {
+      reference,
+      action: input.action,
+      rationale,
+      ...(input.action === "reject_ineligible"
+        ? { reasonCode: input.reasonCode, policyReference }
+        : {}),
+      ...(input.action === "refer_to_dispute"
+        ? {
+            scope: input.scope,
+            milestoneId: input.milestoneId,
+            resumeUnselectedFunds: input.resumeUnselectedFunds,
+          }
+        : {}),
+      ...(input.action === "execute_documented_full_refund"
+        ? {
+            authorityType: input.authorityType,
+            authorityReference,
+            authorityEffectiveAt: authorityEffectiveAt!.toISOString(),
+            authorityDocumentSha256: input.authorityDocumentSha256.toLowerCase(),
+            authorizedRefundCents: input.authorizedRefundCents,
+            authorityVerified: input.authorityVerified,
+          }
+        : {}),
+    },
+  }, async (tx) => {
+    const admin = await tx.user.findUnique({ where: { id: adminId }, select: { role: true } });
+    if (!admin || admin.role !== "admin") {
+      throw new AppError("Administrator access is required.", 403);
+    }
+
+    const cancellation = await tx.cancellationRequest.findUnique({
+      where: { reference },
+      include: {
+        requestedBy: { select: { name: true } },
+        escrow: {
+          include: {
+            milestones: { include: { ledgerEntries: true } },
+            ledgerEntries: { select: { movementType: true, amountCents: true } },
+          },
+        },
+      },
+    });
+    if (!cancellation) throw new AppError("Cancellation request not found.", 404);
+    if (
+      cancellation.mode !== "unilateral"
+      || !ADMIN_CANCELLATION_REVIEW_STATES.includes(cancellation.status)
+      || cancellation.escrow.lifecycleStatus !== "cancellation_review"
+    ) {
+      throw new AppError("This administrative cancellation review is no longer awaiting action.", 409);
+    }
+
+    const transition = await tx.cancellationRequest.updateMany({
+      where: { id: cancellation.id, mode: "unilateral", status: cancellation.status },
+      data: { status: "processing" },
+    });
+    if (transition.count !== 1) {
+      throw new AppError("This administrative cancellation review changed before the action was recorded.", 409);
+    }
+
+    const balances = await getEscrowLedgerBalances(tx, cancellation.escrow.id);
+    const refundableCents = balances.heldCents - balances.disputedCents;
+    if (refundableCents < 0) {
+      throw new AppError("Disputed funds exceed the held escrow balance.", 409);
+    }
+
+    const actedAt = new Date();
+    let refundLedgerEntryId: number | null = null;
+    let refundedCents = 0;
+    let referredDispute: { id: number; reference: string } | null = null;
+    let cancellationStatus: string;
+    let escrowState: Prisma.EscrowUpdateInput;
+    let notificationLabel: string;
+    let notificationDetail: string;
+
+    if (input.action === "request_information") {
+      cancellationStatus = "information_requested";
+      escrowState = {
+        lifecycleStatus: "cancellation_review",
+        stage: "Cancellation information requested",
+        dueDescription: "Parties must respond in the cancellation review",
+        status: "warning",
+      };
+      notificationLabel = "Cancellation information requested";
+      notificationDetail = `${cancellation.reference} remains in administrative review. Respond in the cancellation review: ${rationale}`;
+    } else if (input.action === "reject_ineligible") {
+      cancellationStatus = "rejected_ineligible";
+      escrowState = {
+        lifecycleStatus: cancellation.preReviewLifecycleStatus ?? "funded",
+        stage: cancellation.preReviewStage ?? "Milestones active",
+        dueDescription: cancellation.preReviewDueDescription ?? "Cancellation request was procedurally ineligible; work may continue",
+        status: cancellation.preReviewEscrowStatus ?? "success",
+      };
+      notificationLabel = "Cancellation request procedurally ineligible";
+      notificationDetail = `${cancellation.reference} was closed under ${input.reasonCode.replaceAll("_", " ")} (${policyReference}) without deciding the contractual merits. The prior escrow workflow was restored.`;
+    } else if (input.action === "refer_to_dispute") {
+      const milestone = cancellation.escrow.milestones.find((item) => item.id === input.milestoneId);
+      if (!milestone) throw new AppError("Select a milestone from this escrow for formal dispute referral.", 404);
+      if (["released", "refunded", "settled", "cancelled", "disputed"].includes(milestone.status)) {
+        throw new AppError("A completed, cancelled, or disputed milestone cannot enter a new dispute.", 409);
+      }
+      const activeDispute = await tx.dispute.findFirst({
+        where: { milestoneId: milestone.id, status: { in: ACTIVE_DISPUTE_STATES } },
+        select: { reference: true },
+      });
+      if (activeDispute) {
+        throw new AppError(`This milestone is already reserved in ${activeDispute.reference}.`, 409);
+      }
+      const alreadyAllocatedCents = milestone.ledgerEntries
+        .filter((entry) => entry.amountCents < 0)
+        .reduce((total, entry) => total + Math.abs(entry.amountCents), 0);
+      const fundingAllocation = allocateStagedFunding(
+        cancellation.escrow.milestones,
+        totalFundedFromLedger(cancellation.escrow.ledgerEntries),
+      ).find((allocation) => allocation.milestoneId === milestone.id);
+      if (!fundingAllocation || fundingAllocation.fundingStatus !== "funded") {
+        throw new AppError(
+          "Only a fully funded milestone can enter formal dispute; this prevents one milestone from reserving another milestone's funds.",
+          409,
+        );
+      }
+      const milestoneRemainingCents = fundingAllocation.fundedCents - alreadyAllocatedCents;
+      if (milestoneRemainingCents > refundableCents) {
+        throw new AppError("The selected milestone's full remaining amount is not available for referral.", 409);
+      }
+      const referralCents = milestoneRemainingCents;
+      if (referralCents <= 0) {
+        throw new AppError("The selected milestone has no funded, unallocated amount available to dispute.", 409);
+      }
+      const milestoneTransition = await tx.escrowMilestone.updateMany({
+        where: { id: milestone.id, status: milestone.status },
+        data: { status: "disputed", reviewDeadline: null, reminderAt: null },
+      });
+      if (milestoneTransition.count !== 1) {
+        throw new AppError("The selected milestone changed before the referral was recorded.", 409);
+      }
+      const disputeSequence = await getNextSequenceValue(tx, "dispute", 1);
+      referredDispute = await tx.dispute.create({
+        data: {
+          reference: buildDisputeReference(disputeSequence),
+          ownerId: cancellation.requestedById,
+          escrowId: cancellation.escrow.id,
+          milestoneId: milestone.id,
+          openedById: cancellation.requestedById,
+          title: `${cancellation.escrow.title}: ${milestone.title}`,
+          ownerTeam: cancellation.requestedBy.name || "Escrow party",
+          amountCents: referralCents,
+          amountFrozenCents: referralCents,
+          reason: `Referred from administrative cancellation review ${cancellation.reference}: ${cancellation.reason}`,
+          evidenceWindowEndsAt: new Date(actedAt.getTime() + 7 * DAY_MS),
+          resolutionAuthority: "mutual_party_agreement",
+          updatedLabel: "Formal dispute opened from cancellation review",
+          priority: referralCents >= 2_500_000 ? "high" : "medium",
+          status: "open",
+          workspaceLaunched: true,
+        },
+        select: { id: true, reference: true },
+      });
+      cancellationStatus = "referred_to_dispute";
+      escrowState = {
+        lifecycleStatus: "funded",
+        stage: "Formal dispute opened",
+        dueDescription: "Evidence and party resolution required",
+        status: "warning",
+      };
+      notificationLabel = "Cancellation request referred to formal dispute";
+      notificationDetail = `${cancellation.reference} was not adjudicated by operations. ${referredDispute.reference} reserves only ${milestone.title}; unselected funds resume under the prior agreement workflow.`;
+    } else {
+      if (!cancellation.escrow.buyerId) throw new AppError("Buyer account is not attached.", 409);
+      if (refundableCents <= 0) {
+        throw new AppError("There is no undisputed held balance available for a full refund.", 409);
+      }
+      if (input.authorizedRefundCents !== refundableCents) {
+        throw new AppError(
+          "The final authority's exact refund amount must equal the current undisputed held balance.",
+          409,
+        );
+      }
+      const transfer = await applyEscrowTransfer(tx, {
+        escrowId: cancellation.escrow.id,
+        movementType: "refund",
+        amountCents: refundableCents,
+        idempotencyKey: `${idempotencyKey}:refund`,
+        businessReference: `documented-cancellation:${cancellation.reference}:full-refund`,
+        actorId: adminId,
+        sourceCommand: "admin_administer_cancellation_review",
+        walletUserId: cancellation.escrow.buyerId,
+      });
+      refundLedgerEntryId = transfer.entry.id;
+      refundedCents = refundableCents;
+      await tx.escrowMilestone.updateMany({
+        where: {
+          escrowId: cancellation.escrow.id,
+          status: { in: ["not_started", "submitted", "revision_requested"] },
+        },
+        data: { status: "cancelled", reviewDeadline: null, reminderAt: null },
+      });
+      cancellationStatus = "executed_documented_full_refund";
+      const hasActiveDisputes = await tx.dispute.count({
+        where: {
+          escrowId: cancellation.escrow.id,
+          status: { in: ACTIVE_DISPUTE_STATES },
+        },
+      });
+      escrowState = hasActiveDisputes > 0
+        ? {
+            lifecycleStatus: "dispute_resolution_pending",
+            stage: "Documented cancellation executed; dispute pending",
+            dueDescription: "Only disputed funds remain held",
+            status: "warning",
+          }
+        : {
+            lifecycleStatus: "cancelled",
+            fundingStatus: balances.releasedCents > 0 ? "settled" : "refunded",
+            stage: balances.releasedCents > 0 ? "Cancelled and settled" : "Cancelled and refunded",
+            dueDescription: "All remaining undisputed funds returned to buyer",
+            status: "warning",
+            cancelledAt: actedAt,
+          };
+      notificationLabel = "Final cancellation authority executed";
+      notificationDetail = `${cancellation.reference} was fully refunded under final ${input.authorityType.replaceAll("_", " ")} ${authorityReference}. ${(refundableCents / 100).toFixed(2)} USD of undisputed, unreleased funds was returned to the buyer.`;
+    }
+
+    await tx.cancellationReviewMessage.create({
+      data: {
+        cancellationRequestId: cancellation.id,
+        authorId: adminId,
+        authorRole: "admin",
+        kind: input.action,
+        body: rationale,
+      },
+    });
+
+    await tx.cancellationRequest.update({
+      where: { id: cancellation.id },
+      data: {
+        status: cancellationStatus,
+        administrativeAction: input.action,
+        reviewNote: rationale,
+        proceduralReasonCode: input.action === "reject_ineligible" ? input.reasonCode : null,
+        policyReference,
+        authorityType: input.action === "execute_documented_full_refund" ? input.authorityType : null,
+        authorityReference,
+        authorityEffectiveAt,
+        authorityDocumentSha256: input.action === "execute_documented_full_refund"
+          ? input.authorityDocumentSha256.toLowerCase()
+          : null,
+        authorityVerifiedAt: input.action === "execute_documented_full_refund" ? actedAt : null,
+        authorizedRefundCents: input.action === "execute_documented_full_refund"
+          ? input.authorizedRefundCents
+          : null,
+        lastReviewedAt: actedAt,
+        referredDisputeId: referredDispute?.id ?? null,
+        ...(input.action === "request_information"
+          ? {}
+          : { respondedById: adminId, respondedAt: actedAt }),
+        refundAmountCents: refundedCents,
+        refundLedgerEntryId,
+      },
+    });
+    await tx.escrow.update({ where: { id: cancellation.escrow.id }, data: escrowState });
+
+    const partyIds = [cancellation.escrow.buyerId, cancellation.escrow.sellerId]
+      .filter((partyId): partyId is string => Boolean(partyId));
+    for (const partyId of new Set(partyIds)) {
+      await createNotification(tx, partyId, notificationLabel, notificationDetail, cancellation.escrow.id);
+    }
+
+    const finalBalances = await getEscrowLedgerBalances(tx, cancellation.escrow.id);
+    await recordAuditEvent(tx, {
+      escrowId: cancellation.escrow.id,
+      actorId: adminId,
+      actorType: "support",
+      action: "cancellation.administrative_review_action",
+      entityType: "cancellation_request",
+      entityId: cancellation.reference,
+      outcome: cancellationStatus,
+      metadata: {
+        administrativeAction: input.action,
+        rationale,
+        refundableCents,
+        disputedCents: finalBalances.disputedCents,
+        ...(input.action === "reject_ineligible"
+          ? { proceduralReasonCode: input.reasonCode, policyReference }
+          : {}),
+        ...(input.action === "refer_to_dispute"
+          ? { scope: input.scope, resumeUnselectedFunds: input.resumeUnselectedFunds }
+          : {}),
+        ...(input.action === "execute_documented_full_refund"
+          ? {
+              authorityType: input.authorityType,
+              authorityReference,
+              authorityEffectiveAt: authorityEffectiveAt!.toISOString(),
+              authorityDocumentSha256: input.authorityDocumentSha256.toLowerCase(),
+              authorizedRefundCents: input.authorizedRefundCents,
+              authorityVerified: input.authorityVerified,
+            }
+          : {}),
+        ...(referredDispute ? { referredDisputeReference: referredDispute.reference } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      cancellationId: cancellation.reference,
+      status: cancellationStatus,
+      action: input.action,
+      refundedCents,
+      disputedCents: finalBalances.disputedCents,
+      lifecycleStatus: typeof escrowState.lifecycleStatus === "string"
+        ? escrowState.lifecycleStatus
+        : cancellation.escrow.lifecycleStatus,
+      ...(referredDispute ? { disputeId: referredDispute.reference } : {}),
+    };
   });
 }
 

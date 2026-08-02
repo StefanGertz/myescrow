@@ -35,6 +35,7 @@ import {
   proposeDisputeResolution,
   requestDisputeArbitration,
   requestFundedCancellation,
+  submitCancellationInformation,
   submitDisputeEvidence,
 } from "../services/disputeService";
 import { listEscrowMessages, sendEscrowMessage } from "../services/chatService";
@@ -128,6 +129,9 @@ const fundedCancellationSchema = z.object({
   mode: z.enum(["mutual", "unilateral"]),
   reason: z.string().trim().min(10).max(5_000),
 });
+const cancellationInformationSchema = z.object({
+  note: z.string().trim().min(10).max(5_000),
+});
 
 const walletSchema = z.object({
   amount: z.number().positive(),
@@ -200,6 +204,9 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       const user = await findUserById(secured.prisma, userId);
       if (!user) {
         throw new AppError("User not found.", 401);
+      }
+      if (user.role !== "customer") {
+        throw new AppError("Customer portal access is not available to operator accounts.", 403);
       }
       return user;
     };
@@ -409,6 +416,19 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         secured.prisma,
         user.id,
         id,
+        requireIdempotencyKey(request),
+      );
+    });
+
+    secured.post("/api/dashboard/cancellations/:id/information", async (request) => {
+      const user = await requireUser(request);
+      const { id } = idParamsSchema.parse(request.params);
+      const { note } = cancellationInformationSchema.parse(request.body);
+      return submitCancellationInformation(
+        secured.prisma,
+        user.id,
+        id,
+        note,
         requireIdempotencyKey(request),
       );
     });

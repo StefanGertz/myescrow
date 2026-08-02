@@ -132,8 +132,30 @@ export type EscrowResponse = {
     mode: string;
     reason: string;
     status: string;
+    administrativeAction?: string;
+    reviewNote?: string;
+    proceduralReasonCode?: string;
+    policyReference?: string;
+    authorityType?: string;
+    authorityReference?: string;
+    authorityEffectiveAt?: string;
+    authorityDocumentSha256?: string;
+    authorityVerifiedAt?: string;
+    authorizedRefundCents?: number;
+    lastReviewedAt?: string;
+    referredDisputeReference?: string;
+    reviewMessages: Array<{
+      id: number;
+      kind: string;
+      body: string;
+      authorRole: string;
+      createdAt: string;
+      author: { id: string; name: string; email: string };
+    }>;
     requestedById: string;
     requestedAt: string;
+    respondedById?: string;
+    respondedAt?: string;
     refundAmountCents: number;
   } | null;
 };
@@ -240,7 +262,17 @@ type EscrowWithRelations = Prisma.EscrowGetPayload<{
     disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] } } };
     currentAgreementVersion: { include: { signatures: true } };
     invitationDeliveries: { orderBy: { createdAt: "desc" }; take: 1 };
-    cancellationRequests: { orderBy: { requestedAt: "desc" }; take: 1 };
+    cancellationRequests: {
+      orderBy: { requestedAt: "desc" };
+      take: 1;
+      include: {
+        referredDispute: { select: { reference: true } };
+        reviewMessages: {
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }];
+          include: { author: { select: { id: true; name: true; email: true } } };
+        };
+      };
+    };
   };
 }>;
 
@@ -340,7 +372,17 @@ const includeEscrowRelations = {
   disputes: { where: { status: { in: ["open", "resolution_proposed", "resolving", "arbitration_requested"] as string[] } } },
   currentAgreementVersion: { include: { signatures: true } },
   invitationDeliveries: { orderBy: { createdAt: "desc" as const }, take: 1 },
-  cancellationRequests: { orderBy: { requestedAt: "desc" as const }, take: 1 },
+  cancellationRequests: {
+    orderBy: { requestedAt: "desc" as const },
+    take: 1,
+    include: {
+      referredDispute: { select: { reference: true } },
+      reviewMessages: {
+        orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
+        include: { author: { select: { id: true, name: true, email: true } } },
+      },
+    },
+  },
 };
 
 const PROPOSED_NEW_MILESTONE_TITLE = "__MYESCROW_PROPOSED_NEW_MILESTONE__";
@@ -656,9 +698,51 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
           mode: cancellation.mode,
           reason: cancellation.reason,
           status: cancellation.status,
+          ...(cancellation.administrativeAction
+            ? { administrativeAction: cancellation.administrativeAction }
+            : {}),
+          ...(cancellation.reviewNote ? { reviewNote: cancellation.reviewNote } : {}),
+          ...(cancellation.proceduralReasonCode
+            ? { proceduralReasonCode: cancellation.proceduralReasonCode }
+            : {}),
+          ...(cancellation.policyReference
+            ? { policyReference: cancellation.policyReference }
+            : {}),
+          ...(cancellation.authorityType ? { authorityType: cancellation.authorityType } : {}),
+          ...(cancellation.authorityReference
+            ? { authorityReference: cancellation.authorityReference }
+            : {}),
+          ...(cancellation.authorityEffectiveAt
+            ? { authorityEffectiveAt: cancellation.authorityEffectiveAt.toISOString() }
+            : {}),
+          ...(cancellation.authorityDocumentSha256
+            ? { authorityDocumentSha256: cancellation.authorityDocumentSha256 }
+            : {}),
+          ...(cancellation.authorityVerifiedAt
+            ? { authorityVerifiedAt: cancellation.authorityVerifiedAt.toISOString() }
+            : {}),
+          ...(cancellation.authorizedRefundCents !== null
+            ? { authorizedRefundCents: cancellation.authorizedRefundCents }
+            : {}),
+          ...(cancellation.lastReviewedAt
+            ? { lastReviewedAt: cancellation.lastReviewedAt.toISOString() }
+            : {}),
+          ...(cancellation.referredDispute
+            ? { referredDisputeReference: cancellation.referredDispute.reference }
+            : {}),
           requestedById: cancellation.requestedById,
           requestedAt: cancellation.requestedAt.toISOString(),
+          ...(cancellation.respondedById ? { respondedById: cancellation.respondedById } : {}),
+          ...(cancellation.respondedAt ? { respondedAt: cancellation.respondedAt.toISOString() } : {}),
           refundAmountCents: cancellation.refundAmountCents,
+          reviewMessages: cancellation.reviewMessages.map((message) => ({
+            id: message.id,
+            kind: message.kind,
+            body: message.body,
+            authorRole: message.authorRole,
+            createdAt: message.createdAt.toISOString(),
+            author: message.author,
+          })),
         }
       : null,
     milestones: record.milestones.map((milestone) => {

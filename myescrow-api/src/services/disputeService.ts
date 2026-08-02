@@ -613,6 +613,10 @@ export async function acceptDisputeResolution(
           updatedLabel: "Resolved by mutual agreement",
         },
       });
+      await tx.cancellationRequest.updateMany({
+        where: { referredDisputeId: dispute.id, status: "referred_to_dispute" },
+        data: { status: "resolved_through_dispute" },
+      });
       const balances = await getEscrowLedgerBalances(tx, dispute.escrow.id);
       const remainingMilestones = await tx.escrowMilestone.count({
         where: {
@@ -623,11 +627,30 @@ export async function acceptDisputeResolution(
       const cancellation = await tx.cancellationRequest.findFirst({
         where: {
           escrowId: dispute.escrow.id,
-          status: { in: ["pending", "processing", "accepted"] },
+          status: { in: ["pending", "processing", "accepted", "executed_documented_full_refund"] },
         },
         orderBy: { requestedAt: "desc" },
       });
-      const escrowState = cancellation?.status === "accepted" && balances.heldCents === 0
+      const activeDisputes = await tx.dispute.count({
+        where: { escrowId: dispute.escrow.id, status: { in: ACTIVE_DISPUTE_STATUSES } },
+      });
+      const escrowState = cancellation?.status === "executed_documented_full_refund"
+        ? activeDisputes > 0
+          ? {
+              lifecycleStatus: "dispute_resolution_pending",
+              stage: "Final-authority refund executed; dispute pending",
+              dueDescription: "Only active dispute reserves remain held",
+              status: "warning",
+            }
+          : {
+              lifecycleStatus: "cancelled",
+              fundingStatus: balances.releasedCents > 0 ? "settled" : "refunded",
+              stage: "Cancelled and settled",
+              dueDescription: "Final authority and all dispute reserves were allocated",
+              status: "warning",
+              cancelledAt: new Date(),
+            }
+        : cancellation?.status === "accepted" && balances.heldCents === 0
         ? {
             lifecycleStatus: "cancelled",
             fundingStatus: sellerCents > 0 ? "settled" : "refunded",
@@ -716,7 +739,7 @@ export async function requestFundedCancellation(
           stage: input.mode === "mutual" ? "Cancellation requested" : "Cancellation under review",
           dueDescription: input.mode === "mutual"
             ? "Waiting for counterparty response"
-            : "Funds held for governed review",
+            : "Funds held for administrative cancellation review",
           status: "warning",
         },
       });
@@ -732,22 +755,130 @@ export async function requestFundedCancellation(
           mode: input.mode,
           reason,
           status: input.mode === "mutual" ? "pending" : "escalated",
-          ...(input.mode === "unilateral" ? { escalatedAt: new Date() } : {}),
+          ...(input.mode === "unilateral"
+            ? {
+                escalatedAt: new Date(),
+                preReviewLifecycleStatus: escrow.lifecycleStatus,
+                preReviewStage: escrow.stage,
+                preReviewDueDescription: escrow.dueDescription,
+                preReviewEscrowStatus: escrow.status,
+              }
+            : {}),
         },
       });
       await notify(
         tx,
         otherPartyId(escrow, userId),
-        input.mode === "mutual" ? "Mutual cancellation requested" : "Unilateral cancellation escalated",
+        input.mode === "mutual" ? "Mutual cancellation requested" : "Administrative cancellation review opened",
         input.mode === "mutual"
           ? `${cancellation.reference} needs your response before any refund occurs.`
-          : `${cancellation.reference} is in governed review. Funds remain held.`,
+          : `${cancellation.reference} is in administrative review. Operations will not decide contested contractual merits and funds remain held.`,
         escrow.id,
       );
       return {
         success: true,
         cancellationId: cancellation.reference,
         status: cancellation.status,
+      };
+    },
+  );
+}
+
+export async function submitCancellationInformation(
+  prisma: PrismaClient,
+  userId: string,
+  reference: string,
+  noteInput: string,
+  idempotencyKey: string,
+) {
+  const note = noteInput.trim();
+  if (note.length < 10) {
+    throw new AppError("Provide the requested information in at least 10 characters.", 400);
+  }
+  return executeIdempotentCommand(
+    prisma,
+    {
+      userId,
+      key: idempotencyKey,
+      command: "submit_cancellation_information",
+      payload: { reference, note },
+    },
+    async (tx) => {
+      const cancellation = await tx.cancellationRequest.findUnique({
+        where: { reference },
+        include: { escrow: true },
+      });
+      if (!cancellation) throw new AppError("Cancellation request not found.", 404);
+      requireEscrowParty(cancellation.escrow, userId);
+      if (
+        cancellation.mode !== "unilateral"
+        || !["information_requested", "information_received"].includes(cancellation.status)
+      ) {
+        throw new AppError("This cancellation review is not accepting administrative information.", 409);
+      }
+      const transition = await tx.cancellationRequest.updateMany({
+        where: { id: cancellation.id, status: cancellation.status },
+        data: { status: "information_received" },
+      });
+      if (transition.count !== 1) {
+        throw new AppError("The cancellation review changed before this information was submitted.", 409);
+      }
+      const message = await tx.cancellationReviewMessage.create({
+        data: {
+          cancellationRequestId: cancellation.id,
+          authorId: userId,
+          authorRole: "party",
+          kind: "party_response",
+          body: note,
+        },
+      });
+      await tx.escrow.update({
+        where: { id: cancellation.escrow.id },
+        data: {
+          lifecycleStatus: "cancellation_review",
+          stage: "Cancellation information received",
+          dueDescription: "Administrative review pending",
+          status: "warning",
+        },
+      });
+      const admins = await tx.user.findMany({
+        where: { role: "admin" },
+        select: { id: true },
+      });
+      for (const admin of admins) {
+        await notify(
+          tx,
+          admin.id,
+          "Cancellation information received",
+          `${cancellation.reference} has a new party response ready for administrative review.`,
+          cancellation.escrow.id,
+        );
+      }
+      const counterpartyId = otherPartyId(cancellation.escrow, userId);
+      await notify(
+        tx,
+        counterpartyId,
+        "Cancellation review response added",
+        `${cancellation.reference} has new administrative information from the other party.`,
+        cancellation.escrow.id,
+      );
+      await tx.auditEvent.create({
+        data: {
+          escrowId: cancellation.escrow.id,
+          actorId: userId,
+          actorType: "user",
+          action: "cancellation.information_submitted",
+          entityType: "cancellation_request",
+          entityId: cancellation.reference,
+          outcome: "information_received",
+          metadata: { reviewMessageId: message.id },
+        },
+      });
+      return {
+        success: true,
+        cancellationId: cancellation.reference,
+        status: "information_received",
+        reviewMessageId: message.id,
       };
     },
   );

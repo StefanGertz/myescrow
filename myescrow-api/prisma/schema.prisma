@@ -29,6 +29,7 @@ model User {
   disputeEvidenceSubmissions   DisputeEvidenceSubmission[]
   cancellationRequestsMade     CancellationRequest[]       @relation("CancellationRequestedBy")
   cancellationRequestsAnswered CancellationRequest[]       @relation("CancellationRespondedBy")
+  cancellationReviewMessages   CancellationReviewMessage[]
   notifications                Notification[]
   timelineEvents               TimelineEvent[]
   walletTransactions           WalletTransaction[]
@@ -240,6 +241,7 @@ model Dispute {
   updatedAt                DateTime                      @updatedAt
   evidenceSubmissions      DisputeEvidenceSubmission[]
   allocations              DisputeResolutionAllocation[]
+  cancellationReferral     CancellationRequest?          @relation("CancellationReferral")
 
   @@index([escrowId, status])
   @@index([milestoneId, status])
@@ -291,28 +293,61 @@ model DisputeResolutionAllocation {
 }
 
 model CancellationRequest {
-  id                  Int                @id @default(autoincrement())
-  reference           String             @unique
-  escrowId            Int
-  escrow              Escrow             @relation(fields: [escrowId], references: [id], onDelete: Restrict)
-  requestedById       String
-  requestedBy         User               @relation("CancellationRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
-  respondedById       String?
-  respondedBy         User?              @relation("CancellationRespondedBy", fields: [respondedById], references: [id], onDelete: Restrict)
-  mode                String
-  reason              String
-  status              String
-  refundAmountCents   Int                @default(0)
-  refundLedgerEntryId Int?               @unique
-  refundLedgerEntry   EscrowLedgerEntry? @relation(fields: [refundLedgerEntryId], references: [id], onDelete: Restrict)
-  requestedAt         DateTime           @default(now())
-  respondedAt         DateTime?
-  escalatedAt         DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  id                       Int                         @id @default(autoincrement())
+  reference                String                      @unique
+  escrowId                 Int
+  escrow                   Escrow                      @relation(fields: [escrowId], references: [id], onDelete: Restrict)
+  requestedById            String
+  requestedBy              User                        @relation("CancellationRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  respondedById            String?
+  respondedBy              User?                       @relation("CancellationRespondedBy", fields: [respondedById], references: [id], onDelete: Restrict)
+  administrativeAction     String?
+  reviewNote               String?
+  proceduralReasonCode     String?
+  policyReference          String?
+  authorityType            String?
+  authorityReference       String?
+  authorityEffectiveAt     DateTime?
+  authorityDocumentSha256  String?
+  authorityVerifiedAt      DateTime?
+  authorizedRefundCents    Int?
+  lastReviewedAt           DateTime?
+  preReviewLifecycleStatus String?
+  preReviewStage           String?
+  preReviewDueDescription  String?
+  preReviewEscrowStatus    String?
+  referredDisputeId        Int?                        @unique
+  referredDispute          Dispute?                    @relation("CancellationReferral", fields: [referredDisputeId], references: [id], onDelete: Restrict)
+  reviewMessages           CancellationReviewMessage[]
+  mode                     String
+  reason                   String
+  status                   String
+  refundAmountCents        Int                         @default(0)
+  refundLedgerEntryId      Int?                        @unique
+  refundLedgerEntry        EscrowLedgerEntry?          @relation(fields: [refundLedgerEntryId], references: [id], onDelete: Restrict)
+  requestedAt              DateTime                    @default(now())
+  respondedAt              DateTime?
+  escalatedAt              DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
 
   @@index([escrowId, status])
   @@index([requestedById])
+}
+
+model CancellationReviewMessage {
+  id                    Int                 @id @default(autoincrement())
+  cancellationRequestId Int
+  cancellationRequest   CancellationRequest @relation(fields: [cancellationRequestId], references: [id], onDelete: Restrict)
+  authorId              String
+  author                User                @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  authorRole            String
+  kind                  String
+  body                  String              @db.Text
+  createdAt             DateTime            @default(now())
+
+  @@index([cancellationRequestId, createdAt, id])
+  @@index([authorId, createdAt])
 }
 
 model Notification {

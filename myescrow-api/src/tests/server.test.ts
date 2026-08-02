@@ -23,6 +23,7 @@ let secondMilestoneEscrowReference: string;
 let rejectedMilestoneId: number;
 let phaseFourDisputeReference: string;
 let phaseFourCancellationReference: string;
+let governedCancellationReference: string;
 let invitedSignupEscrowReference: string;
 let invitedCounterpartyToken: string;
 let proofStorageDir: string;
@@ -104,6 +105,7 @@ describe("MyEscrow API", () => {
         "agreement_funding_plan",
         "escrow_chat",
         "arbitration_reports",
+        "administrative_cancellation_review",
       ],
     });
   });
@@ -2389,15 +2391,16 @@ describe("MyEscrow API", () => {
         "Idempotency-Key": "create-unilateral-cancellation",
       },
       payload: {
-        title: "Governed cancellation escrow",
+        title: "Administrative cancellation escrow",
         counterpartyEmail: "nora@example.com",
         creatorRole: "buyer",
         amount: 100,
         signatureDataUrl: creatorSignature,
-        milestones: [{ title: "Governed work", amount: 100 }],
+        milestones: [{ title: "Reviewed work", amount: 100 }],
       },
     });
     const reference = create.json().reference;
+    governedCancellationReference = reference;
     await server.inject({
       method: "POST",
       url: `/api/dashboard/escrows/${reference}/approve`,
@@ -2419,7 +2422,7 @@ describe("MyEscrow API", () => {
       },
       payload: {
         mode: "unilateral",
-        reason: "The buyer is requesting a governed review because mutual agreement was not reached.",
+        reason: "The buyer is requesting administrative review because mutual agreement was not reached.",
       },
     });
     expect(request.statusCode).toBe(200);
@@ -2440,7 +2443,7 @@ describe("MyEscrow API", () => {
     expect(operationsHealth.counts.cancellationReviews).toBeGreaterThanOrEqual(1);
     expect(
       operationsHealth.alerts.some((alert) =>
-        alert.includes("request(s) awaiting governed review"),
+        alert.includes("request(s) awaiting administrative review"),
       ),
     ).toBe(true);
     expect(operationsHealth.details.cancellationReviews).toContainEqual(
@@ -2477,6 +2480,28 @@ describe("MyEscrow API", () => {
       where: { email: "scott@example.com" },
       data: { role: "support" },
     });
+    const operatorLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/operations-login",
+      payload: { email: "scott@example.com", password: "BetterPassword123!" },
+    });
+    expect(operatorLogin.statusCode).toBe(200);
+    expect(operatorLogin.json().user).toEqual(expect.objectContaining({ role: "support" }));
+
+    const operatorCustomerLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "scott@example.com", password: "BetterPassword123!" },
+    });
+    expect(operatorCustomerLogin.statusCode).toBe(403);
+
+    const operatorCustomerApi = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/overview",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(operatorCustomerApi.statusCode).toBe(403);
+
     const supportCannotGrant = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
@@ -2611,7 +2636,7 @@ describe("MyEscrow API", () => {
       method: "POST",
       url: `/api/dashboard/escrows/${secondMilestoneEscrowReference}/messages`,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${counterpartyToken}`,
         "Idempotency-Key": "arbitration-record-message",
       },
       payload: { body: arbitrationChatMessage },
@@ -2913,6 +2938,383 @@ describe("MyEscrow API", () => {
     });
     expect(staleHealth.json().worker.status).toBe("stale");
     expect(staleHealth.json().alerts).toContain("Operational recovery worker has not completed successfully within two minutes");
+  });
+
+  it("keeps administrative cancellation review separate from merits adjudication", async () => {
+    const createFundedCancellation = async (suffix: string) => {
+      const create = await server.inject({
+        method: "POST",
+        url: "/api/dashboard/escrows/create",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": `create-administrative-cancellation-${suffix}`,
+        },
+        payload: {
+          title: `Administrative cancellation ${suffix}`,
+          counterpartyEmail: "nora@example.com",
+          creatorRole: "buyer",
+          amount: 100,
+          signatureDataUrl: creatorSignature,
+          milestones: [{ title: `Work ${suffix}`, amount: 100 }],
+        },
+      });
+      expect(create.statusCode).toBe(201);
+      const escrowReference = create.json().reference as string;
+      expect((await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${escrowReference}/approve`,
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+        payload: { signatureDataUrl: counterpartySignature },
+      })).statusCode).toBe(200);
+      expect((await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${escrowReference}/fund`,
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `fund-${suffix}` },
+      })).statusCode).toBe(200);
+      const request = await server.inject({
+        method: "POST",
+        url: `/api/dashboard/escrows/${escrowReference}/cancellation/request`,
+        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `cancel-${suffix}` },
+        payload: {
+          mode: "unilateral",
+          reason: `Administrative cancellation requested for the ${suffix} workflow.`,
+        },
+      });
+      expect(request.statusCode).toBe(200);
+      const escrow = await server.prisma.escrow.findUniqueOrThrow({
+        where: { reference: escrowReference },
+        include: { milestones: true },
+      });
+      return {
+        escrowReference,
+        cancellationReference: request.json().cancellationId as string,
+        milestoneId: escrow.milestones[0]!.id,
+      };
+    };
+
+    const existingCancellation = await server.prisma.cancellationRequest.findFirstOrThrow({
+      where: { escrow: { reference: governedCancellationReference } },
+      include: { escrow: true },
+    });
+    const refundCountBefore = await server.prisma.escrowLedgerEntry.count({
+      where: { movementType: "refund" },
+    });
+
+    await server.prisma.user.update({
+      where: { email: "scott@example.com" },
+      data: { role: "support" },
+    });
+    const denied = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "support-admin-review-denied" },
+      payload: {
+        action: "request_information",
+        rationale: "Provide the objective notice record for this request.",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+    await server.prisma.user.update({
+      where: { email: "scott@example.com" },
+      data: { role: "admin" },
+    });
+
+    const informationKey = `request-information-${existingCancellation.reference}`;
+    const informationRequest = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": informationKey },
+      payload: {
+        action: "request_information",
+        rationale: "Provide the objective notice date and delivery reference.",
+      },
+    });
+    expect(informationRequest.statusCode).toBe(200);
+    expect(informationRequest.json()).toEqual(expect.objectContaining({
+      status: "information_requested",
+      refundedCents: 0,
+      lifecycleStatus: "cancellation_review",
+    }));
+    const informationReplay = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": informationKey },
+      payload: {
+        action: "request_information",
+        rationale: "Provide the objective notice date and delivery reference.",
+      },
+    });
+    expect(informationReplay.json()).toEqual(informationRequest.json());
+
+    const partyResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "cancellation-info-party-response" },
+      payload: { note: "Notice was received on July 30 under delivery record NOTICE-1842." },
+    });
+    expect(partyResponse.statusCode).toBe(200);
+    expect(partyResponse.json().status).toBe("information_received");
+    const reviewWithMessages = await server.prisma.cancellationRequest.findUniqueOrThrow({
+      where: { reference: existingCancellation.reference },
+      include: { reviewMessages: { orderBy: { id: "asc" } } },
+    });
+    expect(reviewWithMessages.reviewMessages).toEqual([
+      expect.objectContaining({ kind: "request_information", authorRole: "admin" }),
+      expect.objectContaining({ kind: "party_response", authorRole: "party" }),
+    ]);
+    const healthWithResponse = await server.inject({
+      method: "GET",
+      url: "/api/operations/health",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(healthWithResponse.json().details.cancellationReviews).toContainEqual(
+      expect.objectContaining({ reference: existingCancellation.reference, status: "information_received" }),
+    );
+
+    const missingProcedure = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "missing-procedural-fields" },
+      payload: {
+        action: "reject_ineligible",
+        rationale: "This request belongs in the duplicate-request procedure.",
+      },
+    });
+    expect(missingProcedure.statusCode).toBe(400);
+    const rejectionKey = `procedural-rejection-${existingCancellation.reference}`;
+    const rejection = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": rejectionKey },
+      payload: {
+        action: "reject_ineligible",
+        rationale: "This request duplicates the active cancellation record.",
+        reasonCode: "duplicate_request",
+        policyReference: "CANCEL-OPS-2.1",
+      },
+    });
+    expect(rejection.statusCode).toBe(200);
+    expect(rejection.json()).toEqual(expect.objectContaining({
+      status: "rejected_ineligible",
+      refundedCents: 0,
+      lifecycleStatus: existingCancellation.preReviewLifecycleStatus,
+    }));
+    const rejectedRecord = await server.prisma.cancellationRequest.findUniqueOrThrow({
+      where: { reference: existingCancellation.reference },
+      include: { escrow: true },
+    });
+    expect(rejectedRecord).toEqual(expect.objectContaining({
+      proceduralReasonCode: "duplicate_request",
+      policyReference: "CANCEL-OPS-2.1",
+      respondedById: expect.any(String),
+      respondedAt: expect.any(Date),
+    }));
+    expect(rejectedRecord.escrow).toEqual(expect.objectContaining({
+      lifecycleStatus: existingCancellation.preReviewLifecycleStatus,
+      stage: existingCancellation.preReviewStage,
+      dueDescription: existingCancellation.preReviewDueDescription,
+      status: existingCancellation.preReviewEscrowStatus,
+    }));
+    expect(await server.prisma.escrowLedgerEntry.count({ where: { movementType: "refund" } }))
+      .toBe(refundCountBefore);
+
+    const partialCreate = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Idempotency-Key": "create-partial-referral-guard",
+      },
+      payload: {
+        title: "Partial funding referral guard",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 100,
+        fundingMode: "milestone",
+        signatureDataUrl: creatorSignature,
+        milestones: [{ title: "Partially funded work", amount: 100 }],
+      },
+    });
+    const partialReference = partialCreate.json().reference as string;
+    expect((await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${partialReference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    })).statusCode).toBe(200);
+    const partialMilestone = await server.prisma.escrowMilestone.findFirstOrThrow({
+      where: { escrow: { reference: partialReference } },
+    });
+    expect((await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${partialReference}/milestones/${partialMilestone.id}/fund`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-funding" },
+      payload: { amount: 50 },
+    })).statusCode).toBe(200);
+    const partialCancellation = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${partialReference}/cancellation/request`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-cancellation" },
+      payload: {
+        mode: "unilateral",
+        reason: "The party requests review before the milestone is fully funded.",
+      },
+    });
+    const partialReferral = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${partialCancellation.json().cancellationId}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-denied" },
+      payload: {
+        action: "refer_to_dispute",
+        rationale: "Attempt to reserve the partially funded milestone amount.",
+        scope: "milestone",
+        milestoneId: partialMilestone.id,
+        resumeUnselectedFunds: true,
+      },
+    });
+    expect(partialReferral.statusCode).toBe(409);
+    expect(await server.prisma.dispute.count({ where: { milestoneId: partialMilestone.id } })).toBe(0);
+
+    const referral = await createFundedCancellation("formal-referral");
+    const referralAction = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${referral.cancellationReference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "formal-referral-action" },
+      payload: {
+        action: "refer_to_dispute",
+        rationale: "Contested entitlement requires evidence and party resolution.",
+        scope: "milestone",
+        milestoneId: referral.milestoneId,
+        resumeUnselectedFunds: true,
+      },
+    });
+    expect(referralAction.statusCode).toBe(200);
+    expect(referralAction.json()).toEqual(expect.objectContaining({
+      status: "referred_to_dispute",
+      refundedCents: 0,
+      disputedCents: 10_000,
+      disputeId: expect.stringMatching(/^DSP-/),
+    }));
+    const referredDisputeReference = referralAction.json().disputeId as string;
+    const referredRecord = await server.prisma.cancellationRequest.findUniqueOrThrow({
+      where: { reference: referral.cancellationReference },
+      include: { referredDispute: true, escrow: { include: { milestones: true } } },
+    });
+    expect(referredRecord.referredDispute).toEqual(expect.objectContaining({
+      reference: referredDisputeReference,
+      status: "open",
+      amountFrozenCents: 10_000,
+    }));
+    expect(referredRecord.escrow.milestones[0]?.status).toBe("disputed");
+    const formalEvidence = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${referredDisputeReference}/evidence`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "formal-referral-evidence" },
+      payload: { note: "The seller submits the delivery chronology for formal review." },
+    });
+    expect(formalEvidence.statusCode).toBe(200);
+    const arbitration = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/disputes/${referredDisputeReference}/arbitration`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "formal-referral-arbitration" },
+    });
+    expect(arbitration.statusCode).toBe(200);
+    expect(arbitration.json().status).toBe("arbitration_requested");
+
+    const execution = await createFundedCancellation("final-authority");
+    const authorityPayload = {
+      action: "execute_documented_full_refund",
+      rationale: "Execute the exact full refund directed by the retained final order.",
+      authorityType: "court_order",
+      authorityReference: "COURT-2026-1842",
+      authorityEffectiveAt: new Date(Date.now() - 86_400_000).toISOString(),
+      authorityDocumentSha256: "a".repeat(64),
+      authorizedRefundCents: 10_000,
+      authorityVerified: true,
+    };
+    const buyerBeforeExecution = await server.prisma.user.findUniqueOrThrow({
+      where: { email: "scott@example.com" },
+    });
+    const mismatchedAuthority = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "mismatched-final-authority" },
+      payload: { ...authorityPayload, authorizedRefundCents: 9_000 },
+    });
+    expect(mismatchedAuthority.statusCode).toBe(409);
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { businessReference: `documented-cancellation:${execution.cancellationReference}:full-refund` },
+    })).toBe(0);
+    const executionKey = `final-authority-${execution.cancellationReference}`;
+    const executed = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": executionKey },
+      payload: authorityPayload,
+    });
+    expect(executed.statusCode).toBe(200);
+    expect(executed.json()).toEqual(expect.objectContaining({
+      status: "executed_documented_full_refund",
+      refundedCents: 10_000,
+      disputedCents: 0,
+      lifecycleStatus: "cancelled",
+    }));
+    const executionReplay = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": executionKey },
+      payload: authorityPayload,
+    });
+    expect(executionReplay.json()).toEqual(executed.json());
+    const buyerAfterExecution = await server.prisma.user.findUniqueOrThrow({
+      where: { email: "scott@example.com" },
+    });
+    expect(buyerAfterExecution.walletBalanceCents).toBe(buyerBeforeExecution.walletBalanceCents + 10_000);
+    expect(await server.prisma.escrowLedgerEntry.count({
+      where: { businessReference: `documented-cancellation:${execution.cancellationReference}:full-refund` },
+    })).toBe(1);
+    const executedRecord = await server.prisma.cancellationRequest.findUniqueOrThrow({
+      where: { reference: execution.cancellationReference },
+      include: { escrow: { include: { milestones: true } }, reviewMessages: true },
+    });
+    expect(executedRecord).toEqual(expect.objectContaining({
+      status: "executed_documented_full_refund",
+      authorityType: "court_order",
+      authorityReference: "COURT-2026-1842",
+      authorityDocumentSha256: "a".repeat(64),
+      authorityVerifiedAt: expect.any(Date),
+      authorizedRefundCents: 10_000,
+    }));
+    expect(executedRecord.escrow.lifecycleStatus).toBe("cancelled");
+    expect(executedRecord.escrow.milestones).toEqual([
+      expect.objectContaining({ status: "cancelled" }),
+    ]);
+    expect(executedRecord.reviewMessages).toEqual([
+      expect.objectContaining({ kind: "execute_documented_full_refund", authorRole: "admin" }),
+    ]);
+    expect(await server.prisma.auditEvent.count({
+      where: {
+        action: "cancellation.administrative_review_action",
+        entityId: { in: [existingCancellation.reference, referral.cancellationReference, execution.cancellationReference] },
+      },
+    })).toBe(4);
+
+    const operationsEscrow = await server.inject({
+      method: "GET",
+      url: `/api/operations/escrows/${execution.escrowReference}`,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(operationsEscrow.statusCode).toBe(200);
+    expect(operationsEscrow.json()).toEqual(expect.objectContaining({
+      currentRole: "admin",
+      escrow: expect.objectContaining({
+        cancellation: expect.objectContaining({
+          status: "executed_documented_full_refund",
+          authorityReference: "COURT-2026-1842",
+          reviewMessages: [expect.objectContaining({ kind: "execute_documented_full_refund" })],
+        }),
+      }),
+    }));
   });
 
   it("reconciles every funded escrow against its immutable ledger", async () => {

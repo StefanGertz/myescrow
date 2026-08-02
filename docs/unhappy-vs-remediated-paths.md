@@ -74,17 +74,21 @@ A seller submission is now required before review begins. Each submission has a 
 
 ### The unhappy path, in everyday language
 
-Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being argued about, reconcile a settlement, or provide a governed escalation path when the parties could not agree.
+Disputes were separate records that did not control the escrow balance. The system could not reliably freeze only the money being argued about, reconcile a settlement, or provide a formal escalation path when the parties could not agree.
 
 **Example:** A buyer disputes a $2,000 milestone in a $10,000 escrow. The parties provide evidence but cannot agree on a proposed split. The dispute does not authoritatively reserve the $2,000 or offer a controlled route to arbitration, so safe resolution requires manual intervention and unrelated work may also become stuck.
 
 ### What was done to remediate it
 
-Either party can open one active dispute against an eligible milestone. The remaining balance for that milestone is frozen atomically while unrelated funds stay available according to policy. The parties may resolve it directly through an exact release, refund, or split. If at least one evidence submission exists and the dispute is still open or has an unaccepted resolution proposal, either party may instead request arbitration. That request assigns resolution authority to arbitration, clears the private proposal, keeps the disputed funds reserved, notifies the counterparty, and places the case in the operations review queue. Mutual cancellation still refunds only unreleased, undisputed funds; unilateral cancellation requests move into governed review without moving money.
+Either party can open one active dispute against an eligible milestone. The remaining balance for that milestone is frozen atomically while unrelated funds stay available according to policy. The parties may resolve it directly through an exact release, refund, or split. If at least one evidence submission exists and the dispute is still open or has an unaccepted resolution proposal, either party may instead request arbitration. That request assigns resolution authority to arbitration, clears the private proposal, keeps the disputed funds reserved, notifies the counterparty, and places the case in the operations review queue. Mutual cancellation still refunds only unreleased, undisputed funds.
+
+A unilateral cancellation request instead enters administrative review without moving money. This is a process gate, not informal arbitration: operations does not decide the contractual merits or choose who should receive the funds. An administrator may request information, close a procedurally ineligible request using an allowlisted reason code and policy reference, or refer one eligible milestone into the formal dispute process while unselected funds resume their prior workflow. Referral creates a real milestone dispute with the ordinary evidence, settlement, and arbitration path.
+
+The exceptional `execute_documented_full_refund` action executes, but does not make, an external decision. It accepts only an externally validated final court order or arbitration award and records its authority ID, effective date, document SHA-256, exact authorized amount, and administrator attestation. The amount must match the full refundable balance and active dispute reserves remain held.
 
 | Original unhappy path | Remediated path — all green |
 | --- | --- |
-| 🔴 Parties disagree → standalone dispute record is created → affected funds are not authoritatively reserved → the parties cannot agree → no governed arbitration request exists → money can remain stranded or be allocated manually | 🟢 Open one escrow-linked dispute and freeze the affected balance → submit evidence → agree to an exact release, refund, or split; **or**, while the dispute is open or its proposal is unaccepted, either party requests arbitration → keep funds reserved for arbitration review → record the eventual outcome through the ledger |
+| 🔴 Parties disagree → standalone dispute record is created → affected funds are not authoritatively reserved → the parties cannot agree → no formal arbitration request exists → money can remain stranded or be allocated manually | 🟢 Open one escrow-linked dispute and freeze the affected balance → submit evidence → agree to an exact release, refund, or split; **or**, while the dispute is open or its proposal is unaccepted, either party requests arbitration → keep funds reserved for arbitration review → record the eventual outcome through the ledger |
 
 ## 6. Deadlines, monitoring, and operational recovery
 
@@ -110,7 +114,7 @@ The remediated process is recoverable end to end:
 2. Both parties sign one immutable final agreement.
 3. Every money movement is atomic, idempotent, ledger-backed, and reconcilable.
 4. Milestone review is based on distinct submissions, reasons, evidence history, and deadlines.
-5. Disputed funds are precisely frozen and fully allocated through direct agreement or, after evidence is submitted, a governed arbitration request.
+5. Disputed funds are precisely frozen and fully allocated through direct agreement or, after evidence is submitted, a formal arbitration request.
 6. Waiting states, job failures, and reconciliation issues are visible, owned, and recoverable.
 
 The governing financial invariant is:

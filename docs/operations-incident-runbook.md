@@ -49,7 +49,9 @@ In the Docker deployment, `operations-worker` runs continuously from the same im
 2. Confirm ledger-held funds still cover the frozen amount.
 3. Evidence-window and cancellation-response jobs notify both parties and escalate overdue work without moving money.
 4. Retry a failed recovery job from `/operations`. A unilateral cancellation or expired evidence window never authorizes an automatic payout.
-5. Resolution must still allocate every frozen cent through the normal settlement command or an approved future staff-resolution command.
+5. Treat unilateral cancellation review as an administrative gate, not arbitration. Operations must not decide contractual entitlement or allocate funds based on its own view of the merits.
+6. An administrator may request information; close a procedurally ineligible request using an allowlisted reason code and policy reference, restoring its prior workflow; or refer one eligible milestone into the formal dispute process while unselected funds resume. Formal referral creates a dispute with the normal evidence, mutual-settlement, and arbitration path.
+7. Use `execute_documented_full_refund` only to execute an externally validated final court order or arbitration award. Record the authority ID, effective date, source-document SHA-256, exact authorized amount, and administrator attestation. The authorized amount must match the full refundable balance; active dispute reserves remain held for resolution through their linked disputes.
 
 ## Ownership and service targets
 
@@ -61,5 +63,5 @@ In the Docker deployment, `operations-worker` runs continuously from the same im
 | Milestone review | Buyer | 7 days | Reminder after 5 days; hold and escalate at deadline |
 | Dispute evidence | Both parties | 7 days | Reminder with 2 days left; close evidence window and escalate |
 | Mutual cancellation response | Counterparty | 3 days | Escalate without moving disputed funds |
-| Unilateral cancellation | Support/legal | 1 business day | Keep all eligible funds held pending governed review |
+| Unilateral cancellation | Administrator, with support/legal intake | 1 business day | Keep eligible funds held pending administrative review; request information, close on documented procedure, or refer one contested milestone to formal dispute while unselected funds resume |
 | Reconciliation exception | Operations | Same day | Notify operators and retain the exception report |

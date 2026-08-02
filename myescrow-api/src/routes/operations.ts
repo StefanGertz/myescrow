@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   getEscrowAuditTrail,
   getOperationsHealth,
+  administerCancellationReview,
   retryInvitationOutboxEvent,
   retryOperationalJob,
   supportExtendInvitation,
@@ -22,6 +23,39 @@ const arbitrationExhibitSchema = z.object({
   id: z.string().min(1),
   exhibitId: z.string().regex(/^(milestone|dispute)-[1-9]\d*$/),
 });
+const administrativeRationaleSchema = z.string().trim().min(10).max(2_000);
+const cancellationReviewActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("request_information"), rationale: administrativeRationaleSchema }),
+  z.object({
+    action: z.literal("reject_ineligible"),
+    rationale: administrativeRationaleSchema,
+    reasonCode: z.enum([
+      "duplicate_request",
+      "request_withdrawn",
+      "wrong_workflow",
+      "notice_requirement_unmet",
+      "no_eligible_funded_scope",
+    ]),
+    policyReference: z.string().trim().min(3).max(500),
+  }),
+  z.object({
+    action: z.literal("refer_to_dispute"),
+    rationale: administrativeRationaleSchema,
+    scope: z.literal("milestone"),
+    milestoneId: z.number().int().positive(),
+    resumeUnselectedFunds: z.literal(true),
+  }),
+  z.object({
+    action: z.literal("execute_documented_full_refund"),
+    rationale: administrativeRationaleSchema,
+    authorityType: z.enum(["arbitration_award", "court_order"]),
+    authorityReference: z.string().trim().min(3).max(500),
+    authorityEffectiveAt: z.string().datetime(),
+    authorityDocumentSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    authorizedRefundCents: z.number().int().positive(),
+    authorityVerified: z.literal(true),
+  }),
+]);
 
 function requireIdempotencyKey(request: FastifyRequest) {
   const value = request.headers["idempotency-key"];
@@ -100,9 +134,22 @@ export async function operationsRoutes(fastify: FastifyInstance) {
     });
 
     secured.get("/api/operations/escrows/:id", async (request) => {
-      await requireOperator(request);
+      const operator = await requireOperator(request);
       const { id } = escrowSchema.parse(request.params);
-      return { escrow: await getEscrowForOperations(secured.prisma, id) };
+      return { escrow: await getEscrowForOperations(secured.prisma, id), currentRole: operator.role };
+    });
+
+    secured.post("/api/operations/cancellations/:id/actions", async (request) => {
+      const admin = await requireAdmin(request);
+      const { id } = escrowSchema.parse(request.params);
+      const body = cancellationReviewActionSchema.parse(request.body);
+      return administerCancellationReview(
+        secured.prisma,
+        admin.id,
+        id,
+        body,
+        requireIdempotencyKey(request),
+      );
     });
 
     secured.get(

@@ -83,7 +83,7 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 ## API surface
 
 Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
-Escrow creation, chat messages, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
+Escrow creation, chat messages, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, cancellation-information responses, administrative cancellation actions, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -114,6 +114,7 @@ Escrow creation, chat messages, funding, milestone submission, milestone approva
 | POST | `/api/dashboard/escrows/:id/milestones/:milestoneId/dispute` | Open one active dispute and freeze that milestone's remaining held balance. |
 | POST | `/api/dashboard/escrows/:id/cancellation/request` | Request mutual funded cancellation or escalate a unilateral request without moving funds. |
 | POST | `/api/dashboard/cancellations/:id/accept` | Counterparty acceptance of mutual cancellation; refund only unreleased, undisputed funds. |
+| POST | `/api/dashboard/cancellations/:id/information` | Either party appends an immutable response to an administrator's information request; no money moves and the case returns to the administrative queue. |
 | GET | `/api/dashboard/disputes` | Active disputes. |
 | GET | `/api/dashboard/disputes/:id/arbitration-report` | Complete arbitration-only report for the linked buyer or seller, including the signed agreement, chat, managed-exhibit index, legacy evidence manifest, ledger, chronology, and integrity hash. |
 | POST | `/api/dashboard/disputes/:id/launch` | Mark a dispute workspace as launched. |
@@ -127,6 +128,8 @@ Escrow creation, chat messages, funding, milestone submission, milestone approva
 | GET | `/api/operations/health` | Support/admin health summary and active operational alerts. |
 | GET | `/api/operations/jobs` | Support/admin operational job list, optionally filtered by status. |
 | GET | `/api/operations/escrows/:id/audit` | Support/admin escrow audit history. |
+| GET | `/api/operations/escrows/:id` | Support/admin escrow inspection record and current operator role. |
+| POST | `/api/operations/cancellations/:id/actions` | Admin-only administrative gate for a unilateral cancellation. Actions may request information, close on an allowlisted procedural reason plus policy reference, or refer one eligible milestone to the formal dispute workflow while unselected funds resume. Operations does not adjudicate entitlement. The execution-only `execute_documented_full_refund` action requires an externally validated final court order or arbitration award plus authority ID, effective date, source-document SHA-256, exact authorized amount matching the full refundable balance, and administrator attestation; active dispute reserves remain held. |
 | GET | `/api/operations/disputes/:id/arbitration-report` | Support/admin arbitration-only report containing the signed agreement, parties, work/evidence records, complete chat, ledger, chronology, and integrity hash. |
 | GET | `/api/operations/disputes/:id/evidence` | Compatibility alias for the support/admin arbitration report. |
 | GET | `/api/arbitration/disputes/:id/exhibits/:exhibitId` | Download a verified managed exhibit after arbitration is requested; limited to the linked buyer/seller or a support/admin operator. |
@@ -217,7 +220,7 @@ For an explicit release:
 ```
 
 `docker-compose.staging.yml` accepts `API_IMAGE` so both runtime services always use the same
-immutable image. `GET /version` identifies the deployed Git SHA and advertised capabilities.
+immutable image. `GET /version` identifies the deployed Git SHA and advertised capabilities, including administrative cancellation review.
 
 ## Continuous integration
 

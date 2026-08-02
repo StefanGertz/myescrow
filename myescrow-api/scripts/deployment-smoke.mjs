@@ -30,6 +30,9 @@ if (!version.capabilities?.includes("escrow_chat")) {
 if (!version.capabilities?.includes("arbitration_reports")) {
   throw new Error("Deployed API does not advertise arbitration reports.");
 }
+if (!version.capabilities?.includes("administrative_cancellation_review")) {
+  throw new Error("Deployed API does not advertise administrative cancellation review.");
+}
 
 const routeProbe = await fetch(
   `${apiBase}/api/dashboard/escrows/DEPLOYMENT-PROBE/milestones/1/fund`,
@@ -62,6 +65,27 @@ if (arbitrationReportRouteProbe.status !== 401) {
   const body = await arbitrationReportRouteProbe.text();
   throw new Error(
     `Arbitration report route probe returned ${arbitrationReportRouteProbe.status}; expected 401. ${body}`,
+  );
+}
+
+const administrativeCancellationRouteProbe = await fetch(
+  `${apiBase}/api/operations/cancellations/DEPLOYMENT-PROBE/actions`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": "deployment-cancellation-probe",
+    },
+    body: JSON.stringify({
+      action: "request_information",
+      rationale: "Deployment probe must be rejected before authorization.",
+    }),
+  },
+);
+if (administrativeCancellationRouteProbe.status !== 401) {
+  const body = await administrativeCancellationRouteProbe.text();
+  throw new Error(
+    `Administrative cancellation route probe returned ${administrativeCancellationRouteProbe.status}; expected 401. ${body}`,
   );
 }
 
