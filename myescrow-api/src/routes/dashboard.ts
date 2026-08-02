@@ -205,8 +205,8 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
       if (!user) {
         throw new AppError("User not found.", 401);
       }
-      if (user.role !== "customer") {
-        throw new AppError("Customer portal access is not available to operator accounts.", 403);
+      if (request.user.portal !== "customer") {
+        throw new AppError("A customer portal session is required.", 403);
       }
       return user;
     };

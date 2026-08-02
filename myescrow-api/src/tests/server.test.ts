@@ -122,10 +122,11 @@ describe("MyEscrow API", () => {
     token = body.token;
     expect(token).toBeDefined();
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
-    const payload = server.jwt.decode<{ iat: number; exp: number }>(token);
+    const payload = server.jwt.decode<{ iat: number; exp: number; portal: string }>(token);
     expect(payload).not.toBeNull();
     if (!payload) throw new Error("Expected a decodable session token");
     expect(payload.exp - payload.iat).toBe(28_800);
+    expect(payload.portal).toBe("customer");
   });
 
   it("issues a password reset code and accepts a new password", async () => {
@@ -2478,7 +2479,7 @@ describe("MyEscrow API", () => {
 
     const operator = await server.prisma.user.update({
       where: { email: "scott@example.com" },
-      data: { role: "support" },
+      data: { operatorRole: "support" },
     });
     const operatorLogin = await server.inject({
       method: "POST",
@@ -2487,25 +2488,33 @@ describe("MyEscrow API", () => {
     });
     expect(operatorLogin.statusCode).toBe(200);
     expect(operatorLogin.json().user).toEqual(expect.objectContaining({ role: "support" }));
+    const operatorToken = operatorLogin.json().token as string;
+    expect(server.jwt.decode<{ portal: string }>(operatorToken)?.portal).toBe("operations");
 
     const operatorCustomerLogin = await server.inject({
       method: "POST",
       url: "/api/auth/login",
       payload: { email: "scott@example.com", password: "BetterPassword123!" },
     });
-    expect(operatorCustomerLogin.statusCode).toBe(403);
+    expect(operatorCustomerLogin.statusCode).toBe(200);
+    expect(operatorCustomerLogin.json().user).toEqual(expect.objectContaining({ role: "customer" }));
 
     const operatorCustomerApi = await server.inject({
       method: "GET",
       url: "/api/dashboard/overview",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${operatorToken}` },
     });
     expect(operatorCustomerApi.statusCode).toBe(403);
+    expect((await server.inject({
+      method: "GET",
+      url: "/api/dashboard/overview",
+      headers: { Authorization: `Bearer ${operatorCustomerLogin.json().token}` },
+    })).statusCode).toBe(200);
 
     const supportCannotGrant = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "support-cannot-grant-role" },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": "support-cannot-grant-role" },
       payload: { email: "scott@example.com", role: "admin" },
     });
     expect(supportCannotGrant.statusCode).toBe(403);
@@ -2514,11 +2523,18 @@ describe("MyEscrow API", () => {
     const firstAdmin = await bootstrapFirstAdmin(server.prisma, "nora@example.com");
     expect(firstAdmin).toEqual(expect.objectContaining({ role: "admin", changed: true }));
     await expect(bootstrapFirstAdmin(server.prisma, "scott@example.com")).rejects.toMatchObject({ statusCode: 409 });
+    const adminLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/operations-login",
+      payload: { email: "nora@example.com", password: "StrongerPassword456!" },
+    });
+    expect(adminLogin.statusCode).toBe(200);
+    const adminToken = adminLogin.json().token as string;
 
     const operators = await server.inject({
       method: "GET",
       url: "/api/operations/operators",
-      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      headers: { Authorization: `Bearer ${adminToken}` },
     });
     expect(operators.statusCode).toBe(200);
     expect(operators.json().operators).toHaveLength(2);
@@ -2527,28 +2543,28 @@ describe("MyEscrow API", () => {
     const grant = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
-      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": grantKey },
+      headers: { Authorization: `Bearer ${adminToken}`, "Idempotency-Key": grantKey },
       payload: { email: "scott@example.com", role: "admin" },
     });
     expect(grant.statusCode).toBe(200);
     const grantReplay = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
-      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": grantKey },
+      headers: { Authorization: `Bearer ${adminToken}`, "Idempotency-Key": grantKey },
       payload: { email: "scott@example.com", role: "admin" },
     });
     expect(grantReplay.json()).toEqual(grant.json());
     const demoteFirstAdmin = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "demote-first-admin" },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": "demote-first-admin" },
       payload: { email: "nora@example.com", role: "customer" },
     });
     expect(demoteFirstAdmin.statusCode).toBe(200);
     const demoteFinalAdmin = await server.inject({
       method: "POST",
       url: "/api/operations/operators/role",
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "protect-final-admin" },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": "protect-final-admin" },
       payload: { email: "scott@example.com", role: "customer" },
     });
     expect(demoteFinalAdmin.statusCode).toBe(409);
@@ -2561,14 +2577,14 @@ describe("MyEscrow API", () => {
     const extended = await server.inject({
       method: "POST",
       url: `/api/operations/invitations/${delivery.id}/extend`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": extendKey },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": extendKey },
       payload: { days: 5 },
     });
     expect(extended.statusCode).toBe(200);
     const extendedReplay = await server.inject({
       method: "POST",
       url: `/api/operations/invitations/${delivery.id}/extend`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": extendKey },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": extendKey },
       payload: { days: 5 },
     });
     expect(extendedReplay.json()).toEqual(extended.json());
@@ -2590,7 +2606,7 @@ describe("MyEscrow API", () => {
     const reopened = await server.inject({
       method: "POST",
       url: `/api/operations/invitations/${delivery.id}/extend`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": `support-reopen-${delivery.id}` },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": `support-reopen-${delivery.id}` },
       payload: { days: 7 },
     });
     expect(reopened.statusCode).toBe(200);
@@ -2618,7 +2634,7 @@ describe("MyEscrow API", () => {
     const retried = await server.inject({
       method: "POST",
       url: `/api/operations/jobs/${failedJob.id}/retry`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": retryKey },
+      headers: { Authorization: `Bearer ${operatorToken}`, "Idempotency-Key": retryKey },
     });
     expect(retried.statusCode).toBe(200);
     expect((await server.prisma.operationalJob.findUniqueOrThrow({ where: { id: failedJob.id } })).status).toBe("pending");
@@ -2670,7 +2686,7 @@ describe("MyEscrow API", () => {
     const evidence = await server.inject({
       method: "GET",
       url: `/api/operations/disputes/${phaseFourDisputeReference}/arbitration-report`,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${operatorToken}` },
     });
     expect(evidence.statusCode).toBe(200);
     expect(evidence.headers["cache-control"]).toBe("private, no-store");
@@ -2795,16 +2811,22 @@ describe("MyEscrow API", () => {
 
     await server.prisma.user.update({
       where: { email: "jamie.contractor@example.com" },
-      data: { role: "support" },
+      data: { operatorRole: "support" },
     });
+    const exhibitOperatorLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/operations-login",
+      payload: { email: "jamie.contractor@example.com", password: "InviteFlowPass123!" },
+    });
+    expect(exhibitOperatorLogin.statusCode).toBe(200);
     const operatorExhibit = await server.inject({
       method: "GET",
       url: `/api/arbitration/disputes/${phaseFourDisputeReference}/exhibits/${phaseFourDisputeExhibitId}`,
-      headers: { Authorization: `Bearer ${invitedCounterpartyToken}` },
+      headers: { Authorization: `Bearer ${exhibitOperatorLogin.json().token}` },
     });
     await server.prisma.user.update({
       where: { email: "jamie.contractor@example.com" },
-      data: { role: "customer" },
+      data: { operatorRole: null },
     });
 
     const expectedContentDisposition =
@@ -2899,7 +2921,7 @@ describe("MyEscrow API", () => {
     const health = await server.inject({
       method: "GET",
       url: "/api/operations/health",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${operatorToken}` },
     });
     expect(health.statusCode).toBe(200);
     expect(health.json().currentRole).toBe("admin");
@@ -2919,7 +2941,7 @@ describe("MyEscrow API", () => {
     const arbitrationHealth = await server.inject({
       method: "GET",
       url: "/api/operations/health",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${operatorToken}` },
     });
     expect(arbitrationHealth.json().counts.arbitrationRequested).toBe(1);
     expect(arbitrationHealth.json().alerts).toContain("Arbitration: 1 dispute(s) awaiting review");
@@ -2934,7 +2956,7 @@ describe("MyEscrow API", () => {
     const staleHealth = await server.inject({
       method: "GET",
       url: "/api/operations/health",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${operatorToken}` },
     });
     expect(staleHealth.json().worker.status).toBe("stale");
     expect(staleHealth.json().alerts).toContain("Operational recovery worker has not completed successfully within two minutes");
@@ -3009,12 +3031,19 @@ describe("MyEscrow API", () => {
 
     await server.prisma.user.update({
       where: { email: "scott@example.com" },
-      data: { role: "support" },
+      data: { operatorRole: "support" },
     });
+    const administrativeOperatorLogin = await server.inject({
+      method: "POST",
+      url: "/api/auth/operations-login",
+      payload: { email: "scott@example.com", password: "BetterPassword123!" },
+    });
+    expect(administrativeOperatorLogin.statusCode).toBe(200);
+    const administrativeOperatorToken = administrativeOperatorLogin.json().token as string;
     const denied = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "support-admin-review-denied" },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": "support-admin-review-denied" },
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice record for this request.",
@@ -3023,14 +3052,14 @@ describe("MyEscrow API", () => {
     expect(denied.statusCode).toBe(403);
     await server.prisma.user.update({
       where: { email: "scott@example.com" },
-      data: { role: "admin" },
+      data: { operatorRole: "admin" },
     });
 
     const informationKey = `request-information-${existingCancellation.reference}`;
     const informationRequest = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": informationKey },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": informationKey },
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice date and delivery reference.",
@@ -3045,7 +3074,7 @@ describe("MyEscrow API", () => {
     const informationReplay = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": informationKey },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": informationKey },
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice date and delivery reference.",
@@ -3072,7 +3101,7 @@ describe("MyEscrow API", () => {
     const healthWithResponse = await server.inject({
       method: "GET",
       url: "/api/operations/health",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}` },
     });
     expect(healthWithResponse.json().details.cancellationReviews).toContainEqual(
       expect.objectContaining({ reference: existingCancellation.reference, status: "information_received" }),
@@ -3081,7 +3110,7 @@ describe("MyEscrow API", () => {
     const missingProcedure = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "missing-procedural-fields" },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": "missing-procedural-fields" },
       payload: {
         action: "reject_ineligible",
         rationale: "This request belongs in the duplicate-request procedure.",
@@ -3092,7 +3121,7 @@ describe("MyEscrow API", () => {
     const rejection = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": rejectionKey },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": rejectionKey },
       payload: {
         action: "reject_ineligible",
         rationale: "This request duplicates the active cancellation record.",
@@ -3177,7 +3206,7 @@ describe("MyEscrow API", () => {
     const partialReferral = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${partialCancellation.json().cancellationId}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "partial-referral-denied" },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": "partial-referral-denied" },
       payload: {
         action: "refer_to_dispute",
         rationale: "Attempt to reserve the partially funded milestone amount.",
@@ -3193,7 +3222,7 @@ describe("MyEscrow API", () => {
     const referralAction = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${referral.cancellationReference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "formal-referral-action" },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": "formal-referral-action" },
       payload: {
         action: "refer_to_dispute",
         rationale: "Contested entitlement requires evidence and party resolution.",
@@ -3252,7 +3281,7 @@ describe("MyEscrow API", () => {
     const mismatchedAuthority = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "mismatched-final-authority" },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": "mismatched-final-authority" },
       payload: { ...authorityPayload, authorizedRefundCents: 9_000 },
     });
     expect(mismatchedAuthority.statusCode).toBe(409);
@@ -3263,7 +3292,7 @@ describe("MyEscrow API", () => {
     const executed = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": executionKey },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": executionKey },
       payload: authorityPayload,
     });
     expect(executed.statusCode).toBe(200);
@@ -3276,7 +3305,7 @@ describe("MyEscrow API", () => {
     const executionReplay = await server.inject({
       method: "POST",
       url: `/api/operations/cancellations/${execution.cancellationReference}/actions`,
-      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": executionKey },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}`, "Idempotency-Key": executionKey },
       payload: authorityPayload,
     });
     expect(executionReplay.json()).toEqual(executed.json());
@@ -3316,7 +3345,7 @@ describe("MyEscrow API", () => {
     const operationsEscrow = await server.inject({
       method: "GET",
       url: `/api/operations/escrows/${execution.escrowReference}`,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${administrativeOperatorToken}` },
     });
     expect(operationsEscrow.statusCode).toBe(200);
     expect(operationsEscrow.json()).toEqual(expect.objectContaining({

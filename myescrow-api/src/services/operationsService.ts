@@ -207,7 +207,7 @@ async function runRecordedReconciliation(prisma: PrismaClient, now: Date) {
   const report = await reconcileEscrowLedger(prisma);
   const hasExceptions = report.exceptions.length > 0;
   const operators = hasExceptions
-    ? await prisma.user.findMany({ where: { role: { in: ["support", "admin"] } }, select: { id: true } })
+    ? await prisma.user.findMany({ where: { operatorRole: { in: ["support", "admin"] } }, select: { id: true } })
     : [];
   await prisma.$transaction(async (tx) => {
     await tx.reconciliationRun.update({
@@ -884,8 +884,8 @@ export async function administerCancellationReview(
         : {}),
     },
   }, async (tx) => {
-    const admin = await tx.user.findUnique({ where: { id: adminId }, select: { role: true } });
-    if (!admin || admin.role !== "admin") {
+    const admin = await tx.user.findUnique({ where: { id: adminId }, select: { operatorRole: true } });
+    if (!admin || admin.operatorRole !== "admin") {
       throw new AppError("Administrator access is required.", 403);
     }
 

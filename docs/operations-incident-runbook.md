@@ -7,7 +7,7 @@ cd myescrow-api
 npm run operations:run
 ```
 
-Run it at least once per minute. Jobs are stored before execution, claimed conditionally, retried with backoff, and recover stale worker locks after ten minutes. Operators use `/operations` for health and failed-job retries. Support APIs require a `support` or `admin` role, an authenticated session, and an idempotency key for every mutation.
+Run it at least once per minute. Jobs are stored before execution, claimed conditionally, retried with backoff, and recover stale worker locks after ten minutes. Operators use `/operations` for health and failed-job retries. Support APIs require a granted `support` or `admin` operator role, an operations-portal session, and an idempotency key for every mutation. Operator access is additive: the same verified identity and email retains normal customer access through a separately issued customer-portal session.
 
 In the Docker deployment, `operations-worker` runs continuously from the same image as the API. Its database heartbeat must show a successful cycle within the last two minutes. External cron platforms may run `npm run operations:once` every minute instead.
 

@@ -11,6 +11,7 @@ declare module "fastify" {
     user: {
       userId: string;
       email: string;
+      portal: "customer" | "operations";
     };
   }
 }

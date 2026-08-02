@@ -17,6 +17,7 @@ model User {
   emailVerified                Boolean                     @default(false)
   walletBalanceCents           Int                         @default(0)
   role                         String                      @default("customer")
+  operatorRole                 String?
   createdAt                    DateTime                    @default(now())
   updatedAt                    DateTime                    @updatedAt
   escrows                      Escrow[]                    @relation("EscrowOwner")

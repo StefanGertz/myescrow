@@ -82,13 +82,14 @@ Signups now return `verificationRequired: true` until the user enters a 6-digit 
 
 ## API surface
 
-Authenticated routes expect a `Bearer` token from `/api/auth/login` or `/api/auth/signup`.
+Authenticated customer routes expect a customer-portal `Bearer` token from `/api/auth/login` or `/api/auth/signup`; operations routes require an operations-portal token from `/api/auth/operations-login`. Operator access is an additional permission on a verified customer identity, so the same email can sign in to both portals. The portal claim on each token prevents either session from being reused across the boundary.
 Escrow creation, chat messages, funding, milestone submission, milestone approval, dispute opening/evidence/proposal/acceptance, funded cancellation requests/acceptance, cancellation-information responses, administrative cancellation actions, wallet top-up, and wallet withdrawal also require an `Idempotency-Key` header (8-200 characters). Replaying the same command and payload returns its original successful response; reusing the key for different input returns `409`.
 
 | Method | Route | Description |
 | --- | --- | --- |
 | POST | `/api/auth/signup` | Create an account (name, email, password). |
 | POST | `/api/auth/login` | Authenticate and receive a JWT. |
+| POST | `/api/auth/operations-login` | Authenticate the same identity for Operations when support or admin access has been granted. |
 | POST | `/api/auth/verify-email` | Submit the 6-digit code emailed during signup. |
 | POST | `/api/auth/resend-verification` | Send another verification email if the previous code expired. |
 | GET | `/api/dashboard/overview` | Summary metrics and timeline. |

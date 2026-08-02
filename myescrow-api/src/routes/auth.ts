@@ -29,19 +29,23 @@ type SessionUser = {
   name: string;
   email: string;
   role: string;
+  operatorRole: string | null;
 };
 
-const issueSession = (fastify: FastifyInstance, user: SessionUser) => {
+type SessionPortal = "customer" | "operations";
+
+const issueSession = (fastify: FastifyInstance, user: SessionUser, portal: SessionPortal) => {
   const issuedAtSeconds = Math.floor(Date.now() / 1000);
   const token = fastify.jwt.sign(
-    { userId: user.id, email: user.email },
+    { userId: user.id, email: user.email, portal },
     { expiresIn: env.authSessionTtlSeconds },
   );
+  const role = portal === "operations" ? user.operatorRole : "customer";
 
   return {
     token,
     expiresAt: new Date((issuedAtSeconds + env.authSessionTtlSeconds) * 1000).toISOString(),
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: { id: user.id, name: user.name, email: user.email, role },
   };
 };
 
@@ -128,11 +132,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
     }
     await verifyPassword(user, body.password);
-    if (user.role !== "customer") {
-      throw new AppError("Use the Operations sign-in for operator accounts.", 403);
-    }
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
-    return issueSession(fastify, user);
+    return issueSession(fastify, user, "customer");
   });
 
   fastify.post("/api/auth/operations-login", async (request) => {
@@ -145,10 +146,10 @@ export async function authRoutes(fastify: FastifyInstance) {
       throw new AppError("Email not verified. Check your inbox to complete signup.", 403);
     }
     await verifyPassword(user, body.password);
-    if (!["support", "admin"].includes(user.role)) {
+    if (!user.operatorRole || !["support", "admin"].includes(user.operatorRole)) {
       throw new AppError("An authorized operator account is required.", 403);
     }
-    return issueSession(fastify, user);
+    return issueSession(fastify, user, "operations");
   });
 
   fastify.post(
@@ -187,7 +188,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     if (!requireVerification) {
       reply.code(201);
-      return issueSession(fastify, user);
+      return issueSession(fastify, user, "customer");
     }
 
     const verification = await issueEmailVerification(fastify.prisma, user);
@@ -210,7 +211,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     const body = verifyEmailSchema.parse(request.body);
     const user = await confirmEmailVerificationCode(fastify.prisma, body.email, body.code);
     await claimPendingEscrowsForUser(fastify.prisma, user.id);
-    return issueSession(fastify, user);
+    return issueSession(fastify, user, "customer");
   });
 
   fastify.post("/api/auth/resend-verification", async (request) => {

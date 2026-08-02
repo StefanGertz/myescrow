@@ -489,7 +489,7 @@ export async function openArbitrationExhibit(
   prisma: PrismaClient,
   reference: string,
   exhibitId: string,
-  actor: { id: string; role: string },
+  actor: { id: string; operatorRole: string | null },
 ) {
   const dispute = await prisma.dispute.findUnique({
     where: { reference },
@@ -510,7 +510,7 @@ export async function openArbitrationExhibit(
   if (!dispute.escrow) {
     throw new AppError("This arbitration does not have a linked escrow agreement.", 409);
   }
-  const isOperator = actor.role === "support" || actor.role === "admin";
+  const isOperator = actor.operatorRole === "support" || actor.operatorRole === "admin";
   const isAffectedParty =
     dispute.escrow.buyerId === actor.id
     || dispute.escrow.sellerId === actor.id;

@@ -79,7 +79,7 @@ export async function operationsRoutes(fastify: FastifyInstance) {
 
     const requireOperator = async (request: FastifyRequest) => {
       const user = await requireUser(request);
-      if (!["support", "admin"].includes(user.role)) {
+      if (request.user.portal !== "operations" || !user.operatorRole || !["support", "admin"].includes(user.operatorRole)) {
         throw new AppError("Support access is required.", 403);
       }
       return user;
@@ -87,7 +87,9 @@ export async function operationsRoutes(fastify: FastifyInstance) {
 
     const requireAdmin = async (request: FastifyRequest) => {
       const user = await requireUser(request);
-      if (user.role !== "admin") throw new AppError("Administrator access is required.", 403);
+      if (request.user.portal !== "operations" || user.operatorRole !== "admin") {
+        throw new AppError("Administrator access is required.", 403);
+      }
       return user;
     };
 
@@ -99,7 +101,7 @@ export async function operationsRoutes(fastify: FastifyInstance) {
 
     secured.get("/api/operations/health", async (request) => {
       const operator = await requireOperator(request);
-      return { ...(await getOperationsHealth(secured.prisma)), currentRole: operator.role };
+      return { ...(await getOperationsHealth(secured.prisma)), currentRole: operator.operatorRole };
     });
 
     secured.get("/api/operations/operators", async (request) => {
@@ -136,7 +138,7 @@ export async function operationsRoutes(fastify: FastifyInstance) {
     secured.get("/api/operations/escrows/:id", async (request) => {
       const operator = await requireOperator(request);
       const { id } = escrowSchema.parse(request.params);
-      return { escrow: await getEscrowForOperations(secured.prisma, id), currentRole: operator.role };
+      return { escrow: await getEscrowForOperations(secured.prisma, id), currentRole: operator.operatorRole };
     });
 
     secured.post("/api/operations/cancellations/:id/actions", async (request) => {
@@ -161,7 +163,10 @@ export async function operationsRoutes(fastify: FastifyInstance) {
           secured.prisma,
           id,
           exhibitId,
-          user,
+          {
+            id: user.id,
+            operatorRole: request.user.portal === "operations" ? user.operatorRole : null,
+          },
         );
         reply
           .header("Cache-Control", "private, no-store")

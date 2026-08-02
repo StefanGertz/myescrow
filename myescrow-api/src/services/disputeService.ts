@@ -842,7 +842,7 @@ export async function submitCancellationInformation(
         },
       });
       const admins = await tx.user.findMany({
-        where: { role: "admin" },
+        where: { operatorRole: "admin" },
         select: { id: true },
       });
       for (const admin of admins) {
