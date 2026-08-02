@@ -79,7 +79,7 @@ The web operations console implements health/alert views, administrative cancell
 ```text
 Browser
   |
-  | same-origin /api requests
+  | same-origin /api requests (normal JSON traffic)
   v
 Next.js application on Vercel
   |-- mock route handlers when NEXT_PUBLIC_USE_MOCKS=true
@@ -98,9 +98,12 @@ Operations worker ----> Resend email API
   `-- outbox, deadlines, retries, reconciliation, heartbeat
 ```
 
+Managed evidence uploads and binary evidence downloads are an intentional exception to the proxy path: in live mode the browser sends them directly to the configured Fastify API. This preserves the documented 25 MB per-file evidence limit without crossing Vercel Functions' smaller request/response payload ceiling. Mock-mode file traffic remains same-origin.
+
 Important boundaries:
 
 - The browser normally calls Next.js route handlers under `/api/*`; those handlers either serve mocks or forward the request to Fastify. This avoids browser CORS issues.
+- Live managed-evidence uploads and downloads call Fastify directly because they can exceed the Next.js hosting function's payload limit. Fastify applies authorization, multipart limits, hashing, and storage rules at that boundary.
 - Authentication is a bearer JWT. The frontend keeps it in `sessionStorage`, restores it on refresh, and clears it at expiration or logout.
 - Fastify is the domain and persistence boundary. Next.js route handlers should remain thin proxies/mocks.
 - The API and worker use the same image and database but run as separate processes.
@@ -315,7 +318,7 @@ The same codebase contains three meaningful combinations:
 
 - React Query hooks live in `src/hooks/useAuthApi.ts` and `src/hooks/useDashboardData.ts`.
 - `src/lib/apiClient.ts` adds the runtime bearer token.
-- Browser requests to `/api/*` remain same-origin.
+- Browser requests to `/api/*` remain same-origin except for live managed-evidence uploads and binary downloads, which use the public API origin directly.
 - Every Next.js route handler either returns mock data or uses `src/lib/serverProxy.ts` to forward method, headers, and body to Fastify.
 - Mock fixtures and many shared response types live in `src/lib/mockDashboard.ts`.
 
