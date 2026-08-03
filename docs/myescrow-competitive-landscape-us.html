@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyEscrow Competitive Landscape — U.S. Operating Footprint</title>
+    <style>
+      :root {
+        --brand: #0f4c81;
+        --brand-dark: #0a2d49;
+        --ink: #0f172a;
+        --muted: #5b6b7a;
+        --surface: #f6f9fc;
+        --border: #dfe7ef;
+        --accent: #2f8fdb;
+        --accent-soft: #e7f3ff;
+        --teal: #1c8f8b;
+        --teal-soft: #eef8f7;
+        --amber: #9a6700;
+        --amber-soft: #fff7e6;
+        --slate-soft: #eef3f7;
+      }
+
+      @page {
+        size: A4 landscape;
+        margin: 0;
+      }
+
+      * { box-sizing: border-box; }
+
+      html {
+        background: #edf3f7;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #edf3f7;
+        font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+        line-height: 1.3;
+      }
+
+      .page {
+        display: flex;
+        flex-direction: column;
+        width: 297mm;
+        height: 210mm;
+        margin: 24px auto;
+        padding: 8mm 12mm;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 20px 50px rgba(15, 76, 129, 0.10);
+      }
+
+      .page:last-child { page-break-after: auto; }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 2.2fr) minmax(62mm, .8fr);
+        gap: 8mm;
+        margin-bottom: 3mm;
+        padding-bottom: 4mm;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 1.8mm 3mm;
+        color: var(--brand);
+        background: var(--accent-soft);
+        border-radius: 999px;
+        font-size: 7pt;
+        font-weight: 800;
+        letter-spacing: .14em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 2.7mm 0 1.8mm;
+        color: var(--brand-dark);
+        font-size: 25pt;
+        line-height: 1.05;
+        letter-spacing: -.025em;
+      }
+
+      .lead {
+        max-width: 190mm;
+        margin: 0;
+        color: var(--muted);
+        font-size: 9.4pt;
+        line-height: 1.32;
+      }
+
+      .hero-panel {
+        align-self: stretch;
+        padding: 4mm;
+        background: linear-gradient(145deg, #f8fbff, #eef5fb);
+        border: 1px solid var(--border);
+        border-radius: 5mm;
+      }
+
+      .eyebrow,
+      .section-label,
+      .fact-label,
+      .implication-label,
+      .legend strong {
+        color: var(--brand);
+        font-size: 6.8pt;
+        font-weight: 800;
+        letter-spacing: .12em;
+        line-height: 1.1;
+        text-transform: uppercase;
+      }
+
+      .hero-panel h2 {
+        margin: 2.2mm 0 1.4mm;
+        color: var(--brand-dark);
+        font-size: 12.4pt;
+        line-height: 1.08;
+      }
+
+      .hero-panel p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 7.8pt;
+        line-height: 1.25;
+      }
+
+      .section-label {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+        margin-bottom: 2.6mm;
+        color: var(--brand-dark);
+      }
+
+      .section-label::after {
+        content: "";
+        height: 1px;
+        flex: 1;
+        background: var(--border);
+      }
+
+      .competitor-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        flex: 1;
+        gap: 3.4mm;
+        min-height: 0;
+      }
+
+      .competitor {
+        display: grid;
+        grid-template-columns: 36mm minmax(0, 1fr);
+        min-height: 0;
+        padding: 3.6mm;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4mm;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      .competitor.emerging {
+        background: var(--teal-soft);
+        border-color: #cce7e4;
+      }
+
+      .competitor.caution {
+        background: var(--amber-soft);
+        border-color: #eed5a2;
+      }
+
+      .identity {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        padding-right: 3.5mm;
+        border-right: 1px solid var(--border);
+      }
+
+      .emerging .identity { border-color: #cce7e4; }
+      .caution .identity { border-color: #eed5a2; }
+
+      .company {
+        margin: 0;
+        color: var(--brand-dark);
+        font-size: 14pt;
+        line-height: 1.05;
+        letter-spacing: -.01em;
+      }
+
+      .company-domain,
+      .company-note {
+        margin-top: 1mm;
+        color: var(--teal);
+        font-size: 6.4pt;
+        font-weight: 800;
+        letter-spacing: .04em;
+        line-height: 1.15;
+      }
+
+      .company-note {
+        text-transform: uppercase;
+        letter-spacing: .08em;
+      }
+
+      .meta {
+        display: grid;
+        gap: 1.6mm;
+        margin-top: auto;
+      }
+
+      .pill {
+        display: block;
+        padding: 1.6mm 1.8mm;
+        color: var(--brand);
+        background: rgba(255, 255, 255, .90);
+        border-radius: 999px;
+        font-size: 6.3pt;
+        font-weight: 800;
+        line-height: 1.05;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      .status {
+        color: var(--brand);
+        background: var(--accent-soft);
+      }
+
+      .status.confirmed { color: var(--teal); background: #def1ef; }
+      .status.limited,
+      .status.unverified { color: var(--amber); background: #fff0d7; }
+      .status.neutral { color: #52697a; background: var(--slate-soft); }
+
+      .details {
+        display: grid;
+        grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+        grid-template-rows: auto auto 1fr;
+        gap: 2.2mm 3.5mm;
+        min-width: 0;
+        min-height: 0;
+        padding-left: 3.8mm;
+      }
+
+      .fact {
+        min-width: 0;
+      }
+
+      .fact p {
+        margin: .9mm 0 0;
+        color: #4d6575;
+        font-size: 7.8pt;
+        line-height: 1.23;
+      }
+
+      .regulatory {
+        grid-column: 1 / -1;
+        align-self: end;
+        padding-top: 2mm;
+        border-top: 1px solid var(--border);
+      }
+
+      .emerging .regulatory { border-color: #cce7e4; }
+      .caution .regulatory { border-color: #eed5a2; }
+
+      .regulatory p {
+        font-size: 7.3pt;
+        line-height: 1.2;
+      }
+
+      .legend {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.28fr 1.2fr;
+        gap: 4mm;
+        margin-top: 3mm;
+        padding: 2.6mm 0 3.5mm;
+        border-top: 1px solid var(--border);
+      }
+
+      .legend div {
+        color: #6a7e8c;
+        font-size: 6.35pt;
+        line-height: 1.22;
+      }
+
+      .legend strong {
+        display: block;
+        margin-bottom: 1mm;
+        color: var(--brand-dark);
+      }
+
+      .page-number {
+        align-self: end;
+        margin-left: auto;
+        color: #718697;
+        font-size: 6.2pt;
+      }
+
+      .legend .page-number {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+      }
+
+      .implications {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 3.4mm;
+        margin-top: 3.4mm;
+      }
+
+      .implication {
+        padding: 3.2mm 4mm;
+        background: var(--teal-soft);
+        border: 1px solid #cce7e4;
+        border-radius: 4mm;
+      }
+
+      .implication.branding {
+        background: var(--amber-soft);
+        border-color: #eed5a2;
+      }
+
+      .implication.branding .implication-label { color: var(--amber); }
+      .implication-label { color: var(--teal); }
+
+      .implication p {
+        margin: 1.2mm 0 0;
+        color: var(--brand-dark);
+        font-size: 7.3pt;
+        font-weight: 700;
+        line-height: 1.23;
+      }
+
+      .source-line {
+        display: flex;
+        align-items: flex-end;
+        gap: 4mm;
+        margin-top: 2.4mm;
+        padding-top: 2.2mm;
+        color: #6a7e8c;
+        border-top: 1px solid var(--border);
+        font-size: 6.1pt;
+        line-height: 1.2;
+      }
+
+      .source-line .page-number { white-space: nowrap; }
+
+      @media print {
+        html, body { background: #fff; }
+        .page {
+          margin: 0;
+          box-shadow: none;
+          page-break-after: always;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="page">
+      <header class="hero">
+        <div>
+          <div class="badge">Market research · revised August 2026</div>
+          <h1>U.S. Competitive Landscape</h1>
+          <p class="lead">Confirmed U.S. operators and internationally based providers with documented U.S. availability or regulatory footing.</p>
+        </div>
+        <aside class="hero-panel">
+          <div class="eyebrow">The simple rule</div>
+          <h2>Website access is not authorization</h2>
+          <p>A U.S.-accessible website or app does not establish nationwide licensing, escrow authority or broad customer eligibility.</p>
+        </aside>
+      </header>
+
+      <div class="section-label">Confirmed U.S. presence</div>
+
+      <main class="competitor-grid">
+        <article class="competitor">
+          <div class="identity">
+            <h2 class="company">Escrow.com</h2>
+            <div class="meta">
+              <span class="pill">Release: 1999</span>
+              <span class="pill status">Confirmed · broad</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Traditional online escrow</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Long operating history, strong brand recognition and an extensive licensing footprint.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>Domains, vehicles, business assets and other formal transactions</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>A formal, web-led process that is less intuitive than a consumer payment application.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>U.S.-based provider. Internet Escrow Services, Inc. maintains escrow or money-transmitter licences across most states; official materials also identify states where a licence is not required.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor">
+          <div class="identity">
+            <h2 class="company">Trustap</h2>
+            <div class="meta">
+              <span class="pill">Release: 2016</span>
+              <span class="pill status">Confirmed · supported</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Marketplace payment infrastructure and protected transactions</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Mature API, shipping integrations and established marketplace relationships.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>P2P marketplaces, ecommerce, ticketing and specialist verticals</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Increasingly oriented toward B2B infrastructure rather than a stand-alone consumer escrow brand.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>Ireland-incorporated company. Official country documentation lists the United States as a supported seller and registration country and supports U.S.-dollar transactions.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor emerging">
+          <div class="identity">
+            <h2 class="company">TRUST Escrow</h2>
+            <div class="company-note">New / emerging</div>
+            <div class="meta">
+              <span class="pill">Release: 2025</span>
+              <span class="pill status confirmed">Confirmed · U.S.</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Licensed digital escrow for goods and services</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>California escrow licence, mobile application and segregated trust-account model.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>U.S. consumers and businesses transacting in goods or services</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>A new entrant with limited visible adoption and a shorter operating history.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>California-headquartered, licensed and bonded under CA DFPI Licence No. 96DBO-188147. Its terms state that the platform is provided for users residing in the United States or its territories.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor">
+          <div class="identity">
+            <h2 class="company">Tazapay</h2>
+            <div class="meta">
+              <span class="pill">Release: 2020</span>
+              <span class="pill status limited">Confirmed · limited</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Cross-border payments, collections and escrow-style workflows</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Global payment rails, API infrastructure and multiple regulatory registrations.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>International B2B ecommerce, SaaS providers and platforms</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Enterprise and cross-border orientation rather than straightforward consumer P2P escrow.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>Tazapay US Corp. is FinCEN-registered and lists money-transmitter licences in Arizona, Arkansas, Illinois, Iowa, Michigan, Missouri and South Carolina; coverage is not nationwide.</p>
+            </div>
+          </div>
+        </article>
+      </main>
+
+      <footer class="legend">
+        <div><strong>U.S. status</strong>Availability or regulatory evidence found in official materials.</div>
+        <div><strong>Release date</strong>Founding, entity formation or first public app availability.</div>
+        <div><strong>Evidence basis</strong>Official licensing, legal terms, country support and app-store materials.</div>
+        <div><strong>Legal note</strong>Strategic market research, not legal or regulatory advice.</div>
+        <span class="page-number">1 / 2</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <header class="hero">
+        <div>
+          <div class="badge">Market research · revised August 2026</div>
+          <h1>Regional and Unverified Platforms</h1>
+          <p class="lead">International benchmarks, early-stage entrants and platforms whose U.S. operating status could not be established from reliable official sources.</p>
+        </div>
+        <aside class="hero-panel">
+          <div class="eyebrow">Branding watch</div>
+          <h2>The name conflict is commercially relevant</h2>
+          <p>The myeskrow.com platform may create naming, search and trademark risk even if its U.S. regulatory status remains unverified.</p>
+        </aside>
+      </header>
+
+      <div class="section-label">Regional, non-U.S. and unverified platforms</div>
+
+      <main class="competitor-grid">
+        <article class="competitor caution">
+          <div class="identity">
+            <h2 class="company">MyEscrow</h2>
+            <div class="company-domain">myeskrow.com</div>
+            <div class="meta">
+              <span class="pill">Release: 2026</span>
+              <span class="pill status unverified">Unverified</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Consumer digital escrow</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Direct category positioning and a name closely aligned with the proposed MyEscrow brand.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>Online buyers and sellers</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Creates naming, search-engine discoverability and potential trademark risk.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>No reliable official information was located confirming a U.S. legal entity, U.S. customer eligibility, state escrow licences or money-transmission authority. Website presence alone does not establish regulated U.S. operations.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor">
+          <div class="identity">
+            <h2 class="company">Truzo</h2>
+            <div class="meta">
+              <span class="pill">Release: 2016</span>
+              <span class="pill status neutral">U.S. not confirmed</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Digital escrow, wallets and protected payments</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Regulated South African operation and a U.K. payment-services relationship.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>South African and U.K.-linked businesses and consumers</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Regional regulatory footprint limits direct relevance to a U.S. launch.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>Official materials identify operations and regulated entities in South Africa and the United Kingdom. No official U.S. operating entity, customer programme or U.S. licensing footprint was identified.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor caution">
+          <div class="identity">
+            <h2 class="company">ShieldEscrow</h2>
+            <div class="meta">
+              <span class="pill">Release: not verified</span>
+              <span class="pill status unverified">Unverified</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Previously identified as consumer escrow</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>Consumer-protection positioning, if the platform is active as previously described.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>Previously described as online buyers and sellers</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Insufficient public evidence to assess product maturity, adoption or regulatory standing.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>No reliable official platform, operating entity or U.S. licensing information was located under this name. It should remain outside the confirmed U.S. competitor set unless independently validated.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="competitor">
+          <div class="identity">
+            <h2 class="company">Getscrow</h2>
+            <div class="meta">
+              <span class="pill">Release: 2024</span>
+              <span class="pill status neutral">No U.S. operation verified</span>
+            </div>
+          </div>
+          <div class="details">
+            <div class="fact">
+              <div class="fact-label">Primary focus</div>
+              <p>Mobile-first consumer escrow</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Strengths</div>
+              <p>A simple consumer proposition and mobile availability.</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Target market</div>
+              <p>Social-media, offline and everyday transactions</p>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Weakness / opportunity</div>
+              <p>Limited public traction and a primarily Nigerian market position.</p>
+            </div>
+            <div class="fact regulatory">
+              <div class="fact-label">U.S. footprint / regulatory basis</div>
+              <p>The official website describes Getscrow as a Nigerian escrow platform. U.S. App Store availability does not demonstrate a U.S. operating entity, state licensing or regulated financial activity in the United States.</p>
+            </div>
+          </div>
+        </article>
+      </main>
+
+      <div class="implications">
+        <aside class="implication">
+          <div class="implication-label">Market implication</div>
+          <p>The confirmed U.S. set remains small and differentiated: no competitor combines broad U.S. coverage, simple consumer onboarding and a clearly mobile-first everyday escrow proposition.</p>
+        </aside>
+        <aside class="implication branding">
+          <div class="implication-label">Branding implication</div>
+          <p>Before investing in the MyEscrow name, complete formal trademark clearance and assess the discoverability impact of the similarly named myeskrow.com platform.</p>
+        </aside>
+      </div>
+
+      <footer class="source-line">
+        <span>Verification basis: official licensing, legal-terms, country-support and app-store materials. Strategic market research only; not legal or regulatory advice.</span>
+        <span class="page-number">2 / 2</span>
+      </footer>
+    </section>
+  </body>
+</html>
