@@ -1100,17 +1100,431 @@ describe("MyEscrow API", () => {
     );
   });
 
+  it("lets the creator counter requested agreement terms and requires fresh signatures", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-agreement-counterproposal" },
+      payload: {
+        title: "Counterproposal escrow",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 1000,
+        signatureDataUrl: creatorSignature,
+        milestones: [
+          { title: "Research", amount: 400, description: "Original research scope" },
+          { title: "Delivery", amount: 600, description: "Original delivery scope" },
+        ],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+
+    const counterpartyEscrows = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const counterpartyEscrow = counterpartyEscrows.json().escrows.find((item: any) => item.id === reference);
+    const firstMilestoneId = counterpartyEscrow.milestones[0]?.id;
+    const secondMilestoneId = counterpartyEscrow.milestones[1]?.id;
+    if (!firstMilestoneId || !secondMilestoneId) {
+      throw new Error("Expected two milestones for the counterproposal test.");
+    }
+
+    const requestResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        milestones: [
+          { milestoneId: firstMilestoneId, title: "Requested research", amount: 350 },
+          { milestoneId: secondMilestoneId, title: "Requested delivery", amount: 650 },
+        ],
+        note: "Please shift more of the agreement value to delivery.",
+      },
+    });
+    expect(requestResponse.statusCode).toBe(200);
+
+    const missingMilestonesResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { decision: "counter" },
+    });
+    expect(missingMilestonesResponse.statusCode).toBe(400);
+    expect(missingMilestonesResponse.json()).toEqual(expect.objectContaining({
+      error: "Invalid request payload.",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          path: "milestones",
+          message: "A counterproposal must include milestone terms.",
+        }),
+      ]),
+    }));
+
+    const incompleteCounterResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "counter",
+        milestones: [
+          { milestoneId: firstMilestoneId, title: "Creator research counter", amount: 1000 },
+        ],
+      },
+    });
+    expect(incompleteCounterResponse.statusCode).toBe(400);
+    expect(incompleteCounterResponse.json().error).toBe(
+      "A counterproposal must include each requested milestone exactly once.",
+    );
+
+    const unchangedCounterResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "counter",
+        milestones: [
+          { milestoneId: firstMilestoneId, title: "Requested research", amount: 350 },
+          { milestoneId: secondMilestoneId, title: "Requested delivery", amount: 650 },
+        ],
+      },
+    });
+    expect(unchangedCounterResponse.statusCode).toBe(400);
+    expect(unchangedCounterResponse.json().error).toBe(
+      "A counterproposal must differ from the requested agreement terms.",
+    );
+
+    const counterResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "counter",
+        milestones: [
+          {
+            milestoneId: firstMilestoneId,
+            title: "Creator research counter",
+            description: "Creator-adjusted research scope",
+            amount: 425,
+          },
+          {
+            milestoneId: secondMilestoneId,
+            title: "Creator delivery counter",
+            description: "Creator-adjusted delivery scope",
+            amount: 575,
+          },
+        ],
+      },
+    });
+    expect(counterResponse.statusCode).toBe(200);
+
+    const counterpartyAfterCounter = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const counteredEscrow = counterpartyAfterCounter.json().escrows.find((item: any) => item.id === reference);
+    expect(counteredEscrow.lifecycleStatus).toBe("creator_signature_required");
+    expect(counteredEscrow.milestones).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: firstMilestoneId,
+        title: "Creator research counter",
+        description: "Creator-adjusted research scope",
+        amount: "$425.00",
+      }),
+      expect.objectContaining({
+        id: secondMilestoneId,
+        title: "Creator delivery counter",
+        description: "Creator-adjusted delivery scope",
+        amount: "$575.00",
+      }),
+    ]));
+    expect(counteredEscrow.agreement).toEqual(expect.objectContaining({
+      version: 2,
+      status: "current",
+      creatorSigned: false,
+      counterpartySigned: false,
+    }));
+
+    const agreementVersions = await server.prisma.agreementVersion.findMany({
+      where: { escrow: { reference } },
+      orderBy: { versionNumber: "asc" },
+      include: { signatures: true },
+    });
+    expect(agreementVersions).toHaveLength(2);
+    expect(agreementVersions[0]).toEqual(expect.objectContaining({ status: "superseded" }));
+    expect(agreementVersions[0]?.signatures).toHaveLength(1);
+    expect(agreementVersions[1]).toEqual(expect.objectContaining({ status: "current" }));
+    expect(agreementVersions[1]?.signatures).toHaveLength(0);
+
+    const notificationsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(notificationsResponse.statusCode).toBe(200);
+    const notificationsBeforeCreatorSignature = notificationsResponse.json().notifications.filter(
+      (notification: any) => notification.txId === counteredEscrow.escrowId,
+    );
+    expect(notificationsBeforeCreatorSignature).not.toContainEqual(expect.objectContaining({
+      label: "Updated agreement ready for review",
+    }));
+
+    const approvalBeforeCreatorSignature = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    });
+    expect(approvalBeforeCreatorSignature.statusCode).toBe(400);
+    expect(approvalBeforeCreatorSignature.json().error).toBe("This escrow is not awaiting approval.");
+
+    const creatorSignResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/agreement/sign`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { signatureDataUrl: creatorSignature },
+    });
+    expect(creatorSignResponse.statusCode).toBe(200);
+
+    const afterCreatorSignature = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const readyForCounterparty = afterCreatorSignature.json().escrows.find((item: any) => item.id === reference);
+    expect(readyForCounterparty.lifecycleStatus).toBe("pending_approval");
+    expect(readyForCounterparty.agreement).toEqual(expect.objectContaining({
+      version: 2,
+      creatorSigned: true,
+      counterpartySigned: false,
+    }));
+    const readyNotificationsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(readyNotificationsResponse.json().notifications).toContainEqual(expect.objectContaining({
+      txId: readyForCounterparty.escrowId,
+      label: "Updated agreement ready for review",
+      detail: "Scott signed the updated agreement. Review it to approve, request further changes, or reject it.",
+    }));
+
+    const furtherChangesResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        milestones: [
+          { milestoneId: firstMilestoneId, title: "Second-round requested research", amount: 450 },
+          { milestoneId: secondMilestoneId, title: "Second-round requested delivery", amount: 550 },
+        ],
+        note: "Please consider one more allocation change.",
+      },
+    });
+    expect(furtherChangesResponse.statusCode).toBe(200);
+
+    const secondCounterResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "counter",
+        milestones: [
+          { milestoneId: firstMilestoneId, title: "Final research counter", amount: 400 },
+          { title: "Creator-added support", description: "A new support milestone from the creator", amount: 100 },
+          { milestoneId: secondMilestoneId, title: "Final delivery counter", amount: 500 },
+        ],
+      },
+    });
+    expect(secondCounterResponse.statusCode).toBe(200);
+
+    const secondCreatorSignResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/agreement/sign`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { signatureDataUrl: creatorSignature },
+    });
+    expect(secondCreatorSignResponse.statusCode).toBe(200);
+
+    const counterpartyApproveResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/approve`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: { signatureDataUrl: counterpartySignature },
+    });
+    expect(counterpartyApproveResponse.statusCode).toBe(200);
+
+    const lockedEscrowsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const lockedEscrow = lockedEscrowsResponse.json().escrows.find((item: any) => item.id === reference);
+    expect(lockedEscrow.lifecycleStatus).toBe("funding_pending");
+    expect(lockedEscrow.agreement).toEqual(expect.objectContaining({
+      version: 3,
+      status: "locked",
+      creatorSigned: true,
+      counterpartySigned: true,
+    }));
+    expect(lockedEscrow.milestones.map((milestone: any) => milestone.title)).toEqual([
+      "Final research counter",
+      "Creator-added support",
+      "Final delivery counter",
+    ]);
+    expect(lockedEscrow.milestones).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstMilestoneId, title: "Final research counter", amount: "$400.00" }),
+      expect.objectContaining({
+        title: "Creator-added support",
+        description: "A new support milestone from the creator",
+        amount: "$100.00",
+      }),
+      expect.objectContaining({ id: secondMilestoneId, title: "Final delivery counter", amount: "$500.00" }),
+    ]));
+    const lockedVersion = await server.prisma.agreementVersion.findFirstOrThrow({
+      where: { escrow: { reference }, versionNumber: 3 },
+      include: { signatures: true },
+    });
+    expect(lockedVersion.status).toBe("locked");
+    expect(lockedVersion.lockedAt).not.toBeNull();
+    expect(lockedVersion.signatures).toHaveLength(2);
+    expect(lockedVersion.milestones).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: "Creator-added support", amountCents: 10000, orderIndex: 1 }),
+    ]));
+  });
+
+  it("infers an edited legacy accept payload as a counterproposal", async () => {
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/api/dashboard/escrows/create",
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "create-legacy-agreement-counterproposal" },
+      payload: {
+        title: "Legacy counterproposal escrow",
+        counterpartyEmail: "nora@example.com",
+        creatorRole: "buyer",
+        amount: 1000,
+        signatureDataUrl: creatorSignature,
+        milestones: [{ title: "Original legacy scope", amount: 1000 }],
+      },
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const reference = createResponse.json().reference;
+
+    const counterpartyEscrows = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const counterpartyEscrow = counterpartyEscrows.json().escrows.find((item: any) => item.id === reference);
+    const milestoneId = counterpartyEscrow.milestones[0]?.id;
+    if (!milestoneId) throw new Error("Expected a milestone for the legacy counterproposal test.");
+
+    const requestResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/request-changes`,
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+      payload: {
+        milestones: [{
+          milestoneId,
+          title: "Counterparty requested legacy scope",
+          description: "The counterparty's requested terms",
+          amount: 1000,
+        }],
+      },
+    });
+    expect(requestResponse.statusCode).toBe(200);
+
+    const legacyAcceptResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/apply-changes`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        decision: "accept",
+        milestones: [{
+          milestoneId,
+          title: "Creator legacy counter",
+          description: "The creator's counterproposal terms",
+          amount: 1000,
+        }],
+      },
+    });
+    expect(legacyAcceptResponse.statusCode).toBe(200);
+
+    const counterpartyAfterReview = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/escrows",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const inferredCounter = counterpartyAfterReview.json().escrows.find((item: any) => item.id === reference);
+    expect(inferredCounter.lifecycleStatus).toBe("creator_signature_required");
+    expect(inferredCounter.milestones[0]).toEqual(expect.objectContaining({
+      id: milestoneId,
+      title: "Creator legacy counter",
+      description: "The creator's counterproposal terms",
+      amount: "$1,000.00",
+    }));
+    expect(inferredCounter.agreement).toEqual(expect.objectContaining({
+      version: 2,
+      creatorSigned: false,
+      counterpartySigned: false,
+    }));
+
+    const notificationsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    const notificationsBeforeCreatorSignature = notificationsResponse.json().notifications.filter(
+      (notification: any) => notification.txId === inferredCounter.escrowId,
+    );
+    expect(notificationsBeforeCreatorSignature).not.toContainEqual(expect.objectContaining({
+      label: "Updated agreement ready for review",
+    }));
+
+    const creatorSignResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/escrows/${reference}/agreement/sign`,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { signatureDataUrl: creatorSignature },
+    });
+    expect(creatorSignResponse.statusCode).toBe(200);
+
+    const readyNotificationsResponse = await server.inject({
+      method: "GET",
+      url: "/api/dashboard/notifications",
+      headers: { Authorization: `Bearer ${counterpartyToken}` },
+    });
+    expect(readyNotificationsResponse.json().notifications).toContainEqual(expect.objectContaining({
+      txId: inferredCounter.escrowId,
+      label: "Updated agreement ready for review",
+      detail: "Scott signed the updated agreement. Review it to approve, request further changes, or reject it.",
+    }));
+  });
+
   const agreementFundingGateScenarios = [
     {
       name: "existing milestone terms change",
       title: "Milestone edit approval gate",
-      expectedMilestone: { title: "Design revision", amount: "$650.00" },
+      expectedMilestone: {
+        title: "Design revision",
+        description: "Counterparty design scope",
+        amount: "$650.00",
+        deadline: "2026-10-15T00:00:00.000Z",
+      },
       kind: "edit",
     },
     {
       name: "new milestone is added",
       title: "Milestone addition approval gate",
-      expectedMilestone: { title: "Launch support", amount: "$300.00" },
+      expectedMilestone: {
+        title: "Launch support",
+        description: "Counterparty launch support scope",
+        amount: "$300.00",
+        deadline: "2026-11-01T00:00:00.000Z",
+      },
       kind: "add",
     },
   ] as const;
@@ -1154,7 +1568,9 @@ describe("MyEscrow API", () => {
             {
               milestoneId: firstMilestoneId,
               title: "Design revision",
+              description: "Counterparty design scope",
               amount: 650,
+              deadline: "2026-10-15T00:00:00.000Z",
             },
             {
               milestoneId: secondMilestoneId,
@@ -1175,7 +1591,9 @@ describe("MyEscrow API", () => {
             },
             {
               title: "Launch support",
+              description: "Counterparty launch support scope",
               amount: 300,
+              deadline: "2026-11-01T00:00:00.000Z",
             },
           ];
 
@@ -1193,9 +1611,23 @@ describe("MyEscrow API", () => {
         method: "POST",
         url: `/api/dashboard/escrows/${reference}/apply-changes`,
         headers: { Authorization: `Bearer ${token}` },
-        payload: { decision: "accept" },
+        payload: scenario.kind === "edit"
+          ? { decision: "accept", milestones: requestedMilestones }
+          : { decision: "accept" },
       });
       expect(acceptResponse.statusCode).toBe(200);
+
+      const reviewNotificationsResponse = await server.inject({
+        method: "GET",
+        url: "/api/dashboard/notifications",
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      });
+      const escrowReviewNotifications = reviewNotificationsResponse.json().notifications.filter(
+        (notification: any) => notification.txId === counterpartyEscrow.escrowId,
+      );
+      expect(escrowReviewNotifications).not.toContainEqual(expect.objectContaining({
+        label: "Updated agreement ready for review",
+      }));
 
       const pendingApprovalEscrows = await server.inject({
         method: "GET",
@@ -1255,6 +1687,16 @@ describe("MyEscrow API", () => {
         version: 2,
         creatorSigned: true,
         counterpartySigned: false,
+      }));
+      const readyNotificationsResponse = await server.inject({
+        method: "GET",
+        url: "/api/dashboard/notifications",
+        headers: { Authorization: `Bearer ${counterpartyToken}` },
+      });
+      expect(readyNotificationsResponse.json().notifications).toContainEqual(expect.objectContaining({
+        txId: counterpartyEscrow.escrowId,
+        label: "Updated agreement ready for review",
+        detail: "Scott signed the updated agreement. Review it to approve, request further changes, or reject it.",
       }));
 
       const approveResponse = await server.inject({

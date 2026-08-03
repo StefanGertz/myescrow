@@ -350,7 +350,7 @@ type AgreementChangeRequestInput = {
 };
 
 type AgreementChangeReviewInput = {
-  decision: "accept" | "reject";
+  decision: "accept" | "counter" | "reject";
   milestones?: AgreementMilestoneChangeInput[] | undefined;
 };
 
@@ -1565,6 +1565,7 @@ export async function signCurrentAgreement(
       signatureDataUrl,
     });
     const isCreator = escrow.ownerId === userId;
+    const makesUpdatedAgreementReviewable = isCreator && escrow.lifecycleStatus === "creator_signature_required";
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
@@ -1581,6 +1582,26 @@ export async function signCurrentAgreement(
       },
       include: includeEscrowRelations,
     });
+    if (makesUpdatedAgreementReviewable) {
+      const counterpartyId = escrow.ownerId === escrow.buyerId ? escrow.sellerId : escrow.buyerId;
+      if (counterpartyId) {
+        await createTimeline(
+          tx,
+          counterpartyId,
+          `${updated.reference} updated agreement ready for review`,
+          "The creator signed the updated agreement",
+          "attention",
+        );
+        await createNotification(
+          tx,
+          counterpartyId,
+          "Updated agreement ready for review",
+          `${updated.owner.name} signed the updated agreement. Review it to approve, request further changes, or reject it.`,
+          "Just now",
+          updated.id,
+        );
+      }
+    }
     return { escrow: updated, signature };
   });
 }
@@ -1772,6 +1793,66 @@ function assertAgreementMilestoneTotal(amountCents: number | bigint, milestones:
   }
 }
 
+function requestedAgreementMilestoneTerms(
+  milestones: EscrowWithRelations["milestones"],
+): AgreementMilestoneChangeInput[] {
+  return milestones.map((milestone) => ({
+    milestoneId: milestone.id,
+    title: milestone.requestedTitle ?? milestone.title,
+    description: milestone.requestedDescription ?? milestone.description ?? undefined,
+    amount: centsToNumber(milestone.requestedAmountCents ?? milestone.amountCents) / 100,
+    ...(milestone.requestedDeadline ? { deadline: milestone.requestedDeadline.toISOString() } : {}),
+  }));
+}
+
+function assertAgreementReviewCoversRequestedRows(
+  requestedMilestones: EscrowWithRelations["milestones"],
+  reviewMilestones: AgreementMilestoneChangeInput[],
+  errorMessage: string,
+) {
+  const requestedMilestoneIds = new Set(requestedMilestones.map((milestone) => milestone.id));
+  const reviewedMilestoneIds = reviewMilestones
+    .map((milestone) => milestone.milestoneId)
+    .filter((milestoneId): milestoneId is number => milestoneId !== undefined);
+  const uniqueReviewedMilestoneIds = new Set(reviewedMilestoneIds);
+  if (
+    uniqueReviewedMilestoneIds.size !== reviewedMilestoneIds.length
+    || uniqueReviewedMilestoneIds.size !== requestedMilestoneIds.size
+    || [...uniqueReviewedMilestoneIds].some((milestoneId) => !requestedMilestoneIds.has(milestoneId))
+  ) {
+    throw new AppError(errorMessage, 400);
+  }
+}
+
+function normalizeAgreementMilestoneTerms(milestone: AgreementMilestoneChangeInput) {
+  return {
+    title: milestone.title.trim(),
+    description: milestone.description?.trim() || null,
+    amountCents: dollarsToCents(milestone.amount),
+    deadline: milestone.deadline ? new Date(milestone.deadline).getTime() : null,
+  };
+}
+
+function agreementReviewMateriallyDiffers(
+  requestedTerms: AgreementMilestoneChangeInput[],
+  reviewMilestones: AgreementMilestoneChangeInput[],
+) {
+  const requestedTermsById = new Map(
+    requestedTerms.map((milestone) => [milestone.milestoneId, normalizeAgreementMilestoneTerms(milestone)]),
+  );
+  if (requestedTerms.length !== reviewMilestones.length) return true;
+  return reviewMilestones.some((milestone, index) => {
+    if (milestone.milestoneId !== requestedTerms[index]?.milestoneId) return true;
+    const requested = requestedTermsById.get(milestone.milestoneId);
+    const reviewed = normalizeAgreementMilestoneTerms(milestone);
+    return !requested
+      || requested.title !== reviewed.title
+      || requested.description !== reviewed.description
+      || requested.amountCents !== reviewed.amountCents
+      || requested.deadline !== reviewed.deadline;
+  });
+}
+
 export async function requestAgreementChanges(
   prisma: PrismaClient,
   userId: string,
@@ -1897,21 +1978,38 @@ export async function applyAgreementChanges(
   if (requestedMilestones.length === 0) {
     throw new AppError("This escrow has no requested changes.", 400);
   }
-  const acceptsChanges = data.decision === "accept";
-  const reviewMilestones = data.milestones ?? requestedMilestones.map((milestone) => ({
-    milestoneId: milestone.id,
-    title: milestone.requestedTitle ?? milestone.title,
-    description: milestone.requestedDescription ?? milestone.description ?? undefined,
-    amount: centsToNumber(milestone.requestedAmountCents ?? milestone.amountCents) / 100,
-    ...(milestone.requestedDeadline ? { deadline: milestone.requestedDeadline.toISOString() } : {}),
-  }));
+  if (data.decision === "counter" && !data.milestones?.length) {
+    throw new AppError("A counterproposal must include milestone terms.", 400);
+  }
+  const requestedTerms = requestedAgreementMilestoneTerms(requestedMilestones);
+  let effectiveDecision = data.decision;
+  if (data.decision !== "reject" && data.milestones) {
+    assertAgreementReviewCoversRequestedRows(
+      requestedMilestones,
+      data.milestones,
+      data.decision === "counter"
+        ? "A counterproposal must include each requested milestone exactly once."
+        : "Agreement review terms must include each requested milestone exactly once.",
+    );
+    const materiallyDiffers = agreementReviewMateriallyDiffers(requestedTerms, data.milestones);
+    if (data.decision === "counter" && !materiallyDiffers) {
+      throw new AppError("A counterproposal must differ from the requested agreement terms.", 400);
+    }
+    if (data.decision === "accept" && materiallyDiffers) {
+      effectiveDecision = "counter";
+    }
+  }
 
-  if (acceptsChanges) {
+  const updatesAgreement = effectiveDecision !== "reject";
+  const isCounterproposal = effectiveDecision === "counter";
+  const reviewMilestones = isCounterproposal ? data.milestones! : requestedTerms;
+
+  if (updatesAgreement) {
     assertAgreementMilestoneTotal(escrow.amountCents, reviewMilestones);
   }
 
   return prisma.$transaction(async (tx) => {
-    if (!acceptsChanges) {
+    if (!updatesAgreement) {
       await tx.escrowMilestone.deleteMany({
         where: {
           escrowId: escrow.id,
@@ -1932,42 +2030,56 @@ export async function applyAgreementChanges(
         },
       });
     } else {
-      for (const milestone of reviewMilestones) {
-        if (!milestone.milestoneId) continue;
-        const original = requestedMilestones.find((item) => item.id === milestone.milestoneId);
-        if (!original) {
-          throw new AppError("Requested milestone not found.", 400);
+      for (const [orderIndex, milestone] of reviewMilestones.entries()) {
+        if (milestone.milestoneId !== undefined) {
+          const original = requestedMilestones.find((item) => item.id === milestone.milestoneId);
+          if (!original) {
+            throw new AppError("Requested milestone not found.", 400);
+          }
+          await tx.escrowMilestone.update({
+            where: { id: milestone.milestoneId },
+            data: {
+              title: milestone.title.trim(),
+              description: milestone.description?.trim() || null,
+              amountCents: dollarsToCents(milestone.amount),
+              deadline: milestone.deadline ? new Date(milestone.deadline) : null,
+              orderIndex,
+              requestedTitle: null,
+              requestedDescription: null,
+              requestedAmountCents: null,
+              requestedDeadline: null,
+              changeRequestNote: null,
+              changeRequestedAt: null,
+            },
+          });
+        } else {
+          await tx.escrowMilestone.create({
+            data: {
+              escrowId: escrow.id,
+              orderIndex,
+              status: "not_started",
+              title: milestone.title.trim(),
+              description: milestone.description?.trim() || null,
+              amountCents: dollarsToCents(milestone.amount),
+              deadline: milestone.deadline ? new Date(milestone.deadline) : null,
+            },
+          });
         }
-        await tx.escrowMilestone.update({
-          where: { id: milestone.milestoneId },
-          data: {
-            title: milestone.title.trim(),
-            description: milestone.description?.trim() || null,
-            amountCents: dollarsToCents(milestone.amount),
-            deadline: milestone.deadline ? new Date(milestone.deadline) : null,
-            requestedTitle: null,
-            requestedDescription: null,
-            requestedAmountCents: null,
-            requestedDeadline: null,
-            changeRequestNote: null,
-            changeRequestedAt: null,
-          },
-        });
       }
     }
 
     const updated = await tx.escrow.update({
       where: { id: escrow.id },
       data: {
-        lifecycleStatus: acceptsChanges ? "creator_signature_required" : "pending_approval",
-        stage: acceptsChanges ? "Creator signature required" : "Approval pending",
-        dueDescription: acceptsChanges
+        lifecycleStatus: updatesAgreement ? "creator_signature_required" : "pending_approval",
+        stage: updatesAgreement ? "Creator signature required" : "Approval pending",
+        dueDescription: updatesAgreement
           ? "Sign the updated agreement before resending"
           : `Waiting for ${escrow.counterpart} to approve`,
       },
       include: includeEscrowRelations,
     });
-    if (acceptsChanges) {
+    if (updatesAgreement) {
       await createAgreementVersion(tx, {
         escrowId: updated.id,
         createdById: userId,
@@ -1980,17 +2092,23 @@ export async function applyAgreementChanges(
         tx,
         counterpartyId,
         `${updated.reference} agreement review completed`,
-        acceptsChanges ? "The creator accepted the requested agreement changes" : "The creator kept the original agreement",
+        effectiveDecision === "accept"
+          ? "The creator accepted the requested changes and must sign the updated agreement"
+          : isCounterproposal
+            ? "The creator prepared a counterproposal and must sign it before review"
+            : "The creator kept the original agreement",
         "attention",
       );
-      await createNotification(
-        tx,
-        counterpartyId,
-        acceptsChanges ? "Requested agreement updated" : "Original agreement retained",
-        acceptsChanges ? `${updated.owner.name} accepted your requested agreement changes.` : `${updated.owner.name} kept the original agreement terms.`,
-        "Just now",
-        updated.id,
-      );
+      if (!updatesAgreement) {
+        await createNotification(
+          tx,
+          counterpartyId,
+          "Original agreement retained",
+          `${updated.owner.name} kept the original agreement terms.`,
+          "Just now",
+          updated.id,
+        );
+      }
     }
     await dismissOpenNotificationsForEscrow(tx, userId, escrow.id, { label: "Agreement changes requested" });
     return updated;

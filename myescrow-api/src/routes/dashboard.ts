@@ -258,8 +258,16 @@ const agreementChangeRequestSchema = z.object({
 });
 
 const agreementChangeReviewSchema = z.object({
-  decision: z.enum(["accept", "reject"]).default("accept"),
+  decision: z.enum(["accept", "counter", "reject"]).default("accept"),
   milestones: z.array(agreementMilestoneChangeSchema).optional(),
+}).superRefine((review, context) => {
+  if (review.decision === "counter" && !review.milestones?.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["milestones"],
+      message: "A counterproposal must include milestone terms.",
+    });
+  }
 });
 
 export async function dashboardRoutes(fastify: FastifyInstance) {
@@ -659,6 +667,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
           escrowTitle: escrow.title,
           escrowReference: escrow.reference,
           milestoneTitle: "the agreement",
+          agreementLevel: true,
           ...(body.note ? { note: body.note } : {}),
           logger: request.log,
         });

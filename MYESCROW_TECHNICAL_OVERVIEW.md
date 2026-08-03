@@ -46,7 +46,7 @@ The frontend repository advanced to `d839e77` after the API release at root `0f9
 3. The creator chooses whether they are the buyer or seller, defines the counterparty, amount, description, funding plan, and milestones, signs, and creates an escrow. The funding plan is part of the agreement rather than a choice made after signing.
 4. Creation atomically stores the escrow, agreement version, signature, invitation delivery, and outbox event. The email provider can fail without losing the escrow.
 5. An existing counterparty receives the escrow immediately. A new or unverified counterparty claims pending escrows after signup/verification.
-6. The counterparty can sign/approve, reject, or request agreement/milestone changes. Material changes create a new agreement version and invalidate earlier consent.
+6. The counterparty can sign/approve, reject, or request agreement/milestone changes. The creator can accept a change request as proposed, counter with revised terms, or retain the original agreement. A counterproposal returns to the counterparty for another review, so negotiation can continue until the parties agree or reject the escrow. Material changes create a new agreement version and invalidate earlier consent.
 7. Both buyer and seller must sign the current locked agreement before funding.
 8. The buyer funds using the signed agreement's plan. Full funding deposits the entire agreement amount; staged funding accepts any positive deposit up to the remaining agreement total.
 9. Each staged deposit creates one ledger and wallet transaction. Cumulative staged funds are allocated across milestones in agreement order, so one deposit may fully secure several milestones and partially secure the next.

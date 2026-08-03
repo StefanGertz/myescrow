@@ -83,6 +83,7 @@ type MilestoneChangeRequestEmailPayload = {
   escrowTitle: string;
   escrowReference: string;
   milestoneTitle: string;
+  agreementLevel?: boolean | undefined;
   note?: string | undefined;
   logger: FastifyBaseLogger;
 };
@@ -327,6 +328,7 @@ export async function sendMilestoneChangeRequestEmail({
   escrowTitle,
   escrowReference,
   milestoneTitle,
+  agreementLevel = false,
   note,
   logger,
 }: MilestoneChangeRequestEmailPayload): Promise<"sent" | "skipped"> {
@@ -353,16 +355,24 @@ export async function sendMilestoneChangeRequestEmail({
     subject: `${requesterName} requested changes to ${escrowReference}`,
     html: `
       <p>Hi ${safeRecipientName},</p>
-      <p><strong>${safeRequesterName}</strong> requested changes to the milestone <strong>${safeMilestoneTitle}</strong> in <strong>${safeEscrowTitle}</strong> (${safeEscrowReference}).</p>
+      <p>${agreementLevel
+        ? `<strong>${safeRequesterName}</strong> requested changes to the agreement <strong>${safeEscrowTitle}</strong> (${safeEscrowReference}).`
+        : `<strong>${safeRequesterName}</strong> requested changes to the milestone <strong>${safeMilestoneTitle}</strong> in <strong>${safeEscrowTitle}</strong> (${safeEscrowReference}).`}</p>
       ${safeNote ? `<p><strong>Note:</strong> ${safeNote}</p>` : ""}
-      <p>Review the original and proposed terms, edit them if needed, then accept the changes or keep the original milestone.</p>
+      <p>${agreementLevel
+        ? "Review the original and proposed terms, then accept the proposal, counter with different terms, or keep the original agreement."
+        : "Review the original and proposed milestone terms, then respond in MyEscrow."}</p>
       <p><a href="${transactionLink}">Review requested changes</a></p>
     `,
     text: [
       `Hi ${recipientName},`,
-      `${requesterName} requested changes to the milestone "${milestoneTitle}" in "${escrowTitle}" (${escrowReference}).`,
+      agreementLevel
+        ? `${requesterName} requested changes to the agreement "${escrowTitle}" (${escrowReference}).`
+        : `${requesterName} requested changes to the milestone "${milestoneTitle}" in "${escrowTitle}" (${escrowReference}).`,
       ...(note ? [`Note: ${note}`] : []),
-      "Review the original and proposed terms, edit them if needed, then accept the changes or keep the original milestone.",
+      agreementLevel
+        ? "Review the original and proposed terms, then accept the proposal, counter with different terms, or keep the original agreement."
+        : "Review the original and proposed milestone terms, then respond in MyEscrow.",
       `Review requested changes: ${transactionLink}`,
     ].join("\n\n"),
     category: "milestone_change_request",
