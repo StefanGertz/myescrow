@@ -794,6 +794,7 @@ export async function submitCancellationInformation(
   prisma: PrismaClient,
   userId: string,
   reference: string,
+  requestMessageId: number,
   noteInput: string,
   idempotencyKey: string,
 ) {
@@ -807,7 +808,7 @@ export async function submitCancellationInformation(
       userId,
       key: idempotencyKey,
       command: "submit_cancellation_information",
-      payload: { reference, note },
+      payload: { reference, requestMessageId, note },
     },
     async (tx) => {
       const cancellation = await tx.cancellationRequest.findUnique({
@@ -822,12 +823,34 @@ export async function submitCancellationInformation(
       ) {
         throw new AppError("This cancellation review is not accepting administrative information.", 409);
       }
-      const transition = await tx.cancellationRequest.updateMany({
-        where: { id: cancellation.id, status: cancellation.status },
-        data: { status: "information_received" },
+      const respondingParty = cancellation.escrow.buyerId === userId
+        ? "buyer"
+        : cancellation.escrow.sellerId === userId
+          ? "seller"
+          : null;
+      if (!respondingParty) throw new AppError("Only an escrow party may answer this request.", 403);
+
+      const informationRequest = await tx.cancellationReviewMessage.findFirst({
+        where: {
+          id: requestMessageId,
+          cancellationRequestId: cancellation.id,
+          kind: "request_information",
+        },
       });
-      if (transition.count !== 1) {
-        throw new AppError("The cancellation review changed before this information was submitted.", 409);
+      if (!informationRequest) throw new AppError("Administrative information request not found.", 404);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "CancellationReviewMessage" WHERE "id" = ${informationRequest.id} FOR UPDATE`,
+      );
+      const requestRecipient = informationRequest.requestRecipient ?? "both";
+      if (requestRecipient !== "both" && requestRecipient !== respondingParty) {
+        throw new AppError(`This information request is addressed to the ${requestRecipient}.`, 403);
+      }
+      const existingResponse = await tx.cancellationReviewMessage.findFirst({
+        where: { inResponseToId: informationRequest.id, respondingParty },
+        select: { id: true },
+      });
+      if (existingResponse) {
+        throw new AppError("You already responded to this information request.", 409);
       }
       const message = await tx.cancellationReviewMessage.create({
         data: {
@@ -836,14 +859,64 @@ export async function submitCancellationInformation(
           authorRole: "party",
           kind: "party_response",
           body: note,
+          respondingParty,
+          inResponseToId: informationRequest.id,
         },
       });
+      const reviewMessages = await tx.cancellationReviewMessage.findMany({
+        where: {
+          cancellationRequestId: cancellation.id,
+          kind: { in: ["request_information", "party_response"] },
+        },
+        select: {
+          id: true,
+          kind: true,
+          requestRecipient: true,
+          respondingParty: true,
+          inResponseToId: true,
+        },
+      });
+      const requests = reviewMessages.filter((reviewMessage) => reviewMessage.kind === "request_information");
+      const allResponses = reviewMessages.filter((reviewMessage) => reviewMessage.kind === "party_response");
+      const pendingPartySet = new Set<"buyer" | "seller">();
+      for (const request of requests) {
+        const recipient = request.requestRecipient === "buyer" || request.requestRecipient === "seller"
+          ? request.requestRecipient
+          : "both";
+        const expectedParties: Array<"buyer" | "seller"> = recipient === "both"
+          ? [
+              ...(cancellation.escrow.buyerId ? (["buyer"] as const) : []),
+              ...(cancellation.escrow.sellerId ? (["seller"] as const) : []),
+            ]
+          : [recipient];
+        const respondedParties = new Set(
+          allResponses
+            .filter((response) => response.inResponseToId === request.id)
+            .map((response) => response.respondingParty),
+        );
+        for (const party of expectedParties) {
+          if (!respondedParties.has(party)) pendingPartySet.add(party);
+        }
+      }
+      const pendingParties = [...pendingPartySet];
+      const nextStatus = pendingParties.length === 0 ? "information_received" : "information_requested";
+      const transition = await tx.cancellationRequest.updateMany({
+        where: { id: cancellation.id, status: cancellation.status },
+        data: { status: nextStatus },
+      });
+      if (transition.count !== 1) {
+        throw new AppError("The cancellation review changed before this information was submitted.", 409);
+      }
       await tx.escrow.update({
         where: { id: cancellation.escrow.id },
         data: {
           lifecycleStatus: "cancellation_review",
-          stage: "Cancellation information received",
-          dueDescription: "Administrative review pending",
+          stage: pendingParties.length === 0
+            ? "Cancellation information received"
+            : "Cancellation information partially received",
+          dueDescription: pendingParties.length === 0
+            ? "Administrative review pending"
+            : `${pendingParties.map((party) => party[0]!.toUpperCase() + party.slice(1)).join(" and ")} response pending`,
           status: "warning",
         },
       });
@@ -876,15 +949,23 @@ export async function submitCancellationInformation(
           action: "cancellation.information_submitted",
           entityType: "cancellation_request",
           entityId: cancellation.reference,
-          outcome: "information_received",
-          metadata: { reviewMessageId: message.id },
+          outcome: nextStatus,
+          metadata: {
+            reviewMessageId: message.id,
+            requestMessageId: informationRequest.id,
+            respondingParty,
+            pendingParties,
+          },
         },
       });
       return {
         success: true,
         cancellationId: cancellation.reference,
-        status: "information_received",
+        status: nextStatus,
         reviewMessageId: message.id,
+        requestMessageId: informationRequest.id,
+        respondingParty,
+        pendingParties,
       };
     },
   );

@@ -25,7 +25,11 @@ const arbitrationExhibitSchema = z.object({
 });
 const administrativeRationaleSchema = z.string().trim().min(10).max(2_000);
 const cancellationReviewActionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("request_information"), rationale: administrativeRationaleSchema }),
+  z.object({
+    action: z.literal("request_information"),
+    rationale: administrativeRationaleSchema,
+    recipient: z.enum(["buyer", "seller", "both"]),
+  }),
   z.object({
     action: z.literal("reject_ineligible"),
     rationale: administrativeRationaleSchema,

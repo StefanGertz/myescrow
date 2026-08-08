@@ -12,7 +12,7 @@ Think of the admin as a **traffic controller, not a judge**. The admin checks th
 
 | Admin action | What it means | Example |
 | --- | --- | --- |
-| **Ask for information** | Request missing facts or documents while the funds remain held. | “Please provide the delivery date and the cancellation notice.” |
+| **Ask for information** | Request missing facts or documents from the buyer, seller, or both while the funds remain held. Each selected party’s response is tracked separately. | “Buyer: provide the follow-up messages. Seller: provide the delivery link and timestamp.” |
 | **Close for a procedural reason** | Close a request that cannot be processed under the rules. This does not declare a winner. | The same cancellation request was submitted twice, so the admin selects **Duplicate request** and records the applicable policy. |
 | **Refer a milestone to a formal dispute** | Move a genuine disagreement into the evidence, settlement, and arbitration process. Only the selected funded milestone is reserved. | The parties disagree about a **Website homepage design · $500** milestone. That $500 is placed in dispute while unrelated website milestones continue normally. |
 | **Execute a final refund decision** | Carry out an existing final court order or arbitration award. The admin is implementing the decision, not making it. | A final arbitration award orders the exact $500 held for the agreement to be refunded to the buyer. |
@@ -20,6 +20,7 @@ Think of the admin as a **traffic controller, not a judge**. The admin checks th
 ## What do the fields mean?
 
 - **Administrative rationale or information request:** A plain-language explanation of what the admin needs or why an action is being taken. It becomes part of the permanent audit record.
+- **Request information from:** Selects the buyer, seller, or both. Only selected parties can answer that request, and the review shows who has responded and who is still outstanding.
 - **Reason code and policy reference:** The rule that allows a request to be closed for a procedural reason, such as a duplicate or ineligible request.
 - **Fully funded milestone:** The specific milestone that will enter the formal dispute process. Other funds are not pulled into that dispute.
 - **Authority type and reference:** Identifies the final court order or arbitration award that authorizes a refund.
@@ -32,7 +33,7 @@ Think of the admin as a **traffic controller, not a judge**. The admin checks th
 A buyer hired a designer for a website project with several milestones. The buyer asks to cancel the funded **Website homepage design · $500** milestone, saying the agreed design was not delivered. The designer says the completed files were delivered as promised.
 
 1. The $500 remains protected while the request is reviewed.
-2. If important information is missing, the admin asks for it.
+2. If important information is missing, the admin asks the buyer, seller, or both for the facts each can reasonably provide. A missing response is recorded but is not automatically treated as proof that a party lost.
 3. If the request is a duplicate or otherwise procedurally invalid, the admin closes the request without deciding who is right.
 4. If the parties genuinely disagree about delivery, the admin refers only the $500 homepage-design milestone to the formal dispute process. Other website milestones continue normally.
 5. If a court or arbitrator later issues a final decision, the admin records the authority and carries out the exact result it requires.

@@ -200,6 +200,7 @@ const fundedCancellationSchema = z.object({
   reason: z.string().trim().min(10).max(5_000),
 });
 const cancellationInformationSchema = z.object({
+  requestMessageId: z.number().int().positive(),
   note: z.string().trim().min(10).max(5_000),
 });
 
@@ -528,11 +529,12 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
     secured.post("/api/dashboard/cancellations/:id/information", async (request) => {
       const user = await requireUser(request);
       const { id } = idParamsSchema.parse(request.params);
-      const { note } = cancellationInformationSchema.parse(request.body);
+      const { requestMessageId, note } = cancellationInformationSchema.parse(request.body);
       return submitCancellationInformation(
         secured.prisma,
         user.id,
         id,
+        requestMessageId,
         note,
         requireIdempotencyKey(request),
       );

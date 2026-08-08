@@ -787,7 +787,11 @@ export async function supportExtendInvitation(
 }
 
 export type AdministrativeCancellationReviewInput =
-  | { action: "request_information"; rationale: string }
+  | {
+      action: "request_information";
+      rationale: string;
+      recipient: "buyer" | "seller" | "both";
+    }
   | {
       action: "reject_ineligible";
       rationale: string;
@@ -866,6 +870,9 @@ export async function administerCancellationReview(
       ...(input.action === "reject_ineligible"
         ? { reasonCode: input.reasonCode, policyReference }
         : {}),
+      ...(input.action === "request_information"
+        ? { recipient: input.recipient }
+        : {}),
       ...(input.action === "refer_to_dispute"
         ? {
             scope: input.scope,
@@ -911,6 +918,15 @@ export async function administerCancellationReview(
       throw new AppError("This administrative cancellation review is no longer awaiting action.", 409);
     }
 
+    if (input.action === "request_information") {
+      if ((input.recipient === "buyer" || input.recipient === "both") && !cancellation.escrow.buyerId) {
+        throw new AppError("This escrow does not have a buyer to receive the information request.", 409);
+      }
+      if ((input.recipient === "seller" || input.recipient === "both") && !cancellation.escrow.sellerId) {
+        throw new AppError("This escrow does not have a seller to receive the information request.", 409);
+      }
+    }
+
     const transition = await tx.cancellationRequest.updateMany({
       where: { id: cancellation.id, mode: "unilateral", status: cancellation.status },
       data: { status: "processing" },
@@ -936,10 +952,15 @@ export async function administerCancellationReview(
 
     if (input.action === "request_information") {
       cancellationStatus = "information_requested";
+      const recipientLabel = input.recipient === "both"
+        ? "Both parties"
+        : input.recipient === "buyer"
+          ? "Buyer"
+          : "Seller";
       escrowState = {
         lifecycleStatus: "cancellation_review",
         stage: "Cancellation information requested",
-        dueDescription: "Parties must respond in the cancellation review",
+        dueDescription: `${recipientLabel} must respond in the cancellation review`,
         status: "warning",
       };
       notificationLabel = "Cancellation information requested";
@@ -1089,6 +1110,7 @@ export async function administerCancellationReview(
         authorRole: "admin",
         kind: input.action,
         body: rationale,
+        requestRecipient: input.action === "request_information" ? input.recipient : null,
       },
     });
 
@@ -1121,8 +1143,17 @@ export async function administerCancellationReview(
     });
     await tx.escrow.update({ where: { id: cancellation.escrow.id }, data: escrowState });
 
-    const partyIds = [cancellation.escrow.buyerId, cancellation.escrow.sellerId]
-      .filter((partyId): partyId is string => Boolean(partyId));
+    const partyIds = input.action === "request_information"
+      ? [
+          ...(input.recipient === "buyer" || input.recipient === "both"
+            ? [cancellation.escrow.buyerId]
+            : []),
+          ...(input.recipient === "seller" || input.recipient === "both"
+            ? [cancellation.escrow.sellerId]
+            : []),
+        ].filter((partyId): partyId is string => Boolean(partyId))
+      : [cancellation.escrow.buyerId, cancellation.escrow.sellerId]
+        .filter((partyId): partyId is string => Boolean(partyId));
     for (const partyId of new Set(partyIds)) {
       await createNotification(tx, partyId, notificationLabel, notificationDetail, cancellation.escrow.id);
     }
@@ -1143,6 +1174,9 @@ export async function administerCancellationReview(
         disputedCents: finalBalances.disputedCents,
         ...(input.action === "reject_ineligible"
           ? { proceduralReasonCode: input.reasonCode, policyReference }
+          : {}),
+        ...(input.action === "request_information"
+          ? { recipient: input.recipient }
           : {}),
         ...(input.action === "refer_to_dispute"
           ? { scope: input.scope, resumeUnselectedFunds: input.resumeUnselectedFunds }

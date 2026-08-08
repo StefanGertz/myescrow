@@ -349,18 +349,24 @@ model CancellationRequest {
 }
 
 model CancellationReviewMessage {
-  id                    Int                 @id @default(autoincrement())
+  id                    Int                         @id @default(autoincrement())
   cancellationRequestId Int
-  cancellationRequest   CancellationRequest @relation(fields: [cancellationRequestId], references: [id], onDelete: Restrict)
+  cancellationRequest   CancellationRequest         @relation(fields: [cancellationRequestId], references: [id], onDelete: Restrict)
   authorId              String
-  author                User                @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  author                User                        @relation(fields: [authorId], references: [id], onDelete: Restrict)
   authorRole            String
   kind                  String
-  body                  String              @db.Text
-  createdAt             DateTime            @default(now())
+  body                  String                      @db.Text
+  requestRecipient      String?
+  respondingParty       String?
+  inResponseToId        Int?
+  inResponseTo          CancellationReviewMessage?  @relation("CancellationReviewResponse", fields: [inResponseToId], references: [id], onDelete: Restrict)
+  responses             CancellationReviewMessage[] @relation("CancellationReviewResponse")
+  createdAt             DateTime                    @default(now())
 
   @@index([cancellationRequestId, createdAt, id])
   @@index([authorId, createdAt])
+  @@index([inResponseToId, respondingParty])
 }
 
 model Notification {

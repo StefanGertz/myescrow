@@ -156,6 +156,9 @@ export type EscrowResponse = {
       kind: string;
       body: string;
       authorRole: string;
+      requestRecipient?: "buyer" | "seller" | "both";
+      respondingParty?: "buyer" | "seller";
+      inResponseToMessageId?: number;
       createdAt: string;
       author: { id: string; name: string; email: string };
     }>;
@@ -748,6 +751,15 @@ function mapEscrow(record: EscrowWithRelations, userId: string): EscrowResponse 
             kind: message.kind,
             body: message.body,
             authorRole: message.authorRole,
+            ...(message.requestRecipient
+              ? { requestRecipient: message.requestRecipient as "buyer" | "seller" | "both" }
+              : {}),
+            ...(message.respondingParty
+              ? { respondingParty: message.respondingParty as "buyer" | "seller" }
+              : {}),
+            ...(message.inResponseToId
+              ? { inResponseToMessageId: message.inResponseToId }
+              : {}),
             createdAt: message.createdAt.toISOString(),
             author: message.author,
           })),

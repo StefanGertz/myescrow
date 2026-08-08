@@ -3959,6 +3959,7 @@ describe("MyEscrow API", () => {
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice record for this request.",
+        recipient: "both",
       },
     });
     expect(denied.statusCode).toBe(403);
@@ -3975,6 +3976,7 @@ describe("MyEscrow API", () => {
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice date and delivery reference.",
+        recipient: "both",
       },
     });
     expect(informationRequest.statusCode).toBe(200);
@@ -3990,26 +3992,219 @@ describe("MyEscrow API", () => {
       payload: {
         action: "request_information",
         rationale: "Provide the objective notice date and delivery reference.",
+        recipient: "both",
       },
     });
     expect(informationReplay.json()).toEqual(informationRequest.json());
 
-    const partyResponse = await server.inject({
+    const informationRequestMessage = await server.prisma.cancellationReviewMessage.findFirstOrThrow({
+      where: {
+        cancellationRequestId: existingCancellation.id,
+        kind: "request_information",
+      },
+      orderBy: { id: "desc" },
+    });
+    expect(informationRequestMessage.requestRecipient).toBe("both");
+
+    const sellerResponse = await server.inject({
       method: "POST",
       url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
       headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "cancellation-info-party-response" },
-      payload: { note: "Notice was received on July 30 under delivery record NOTICE-1842." },
+      payload: {
+        requestMessageId: informationRequestMessage.id,
+        note: "Notice was received on July 30 under delivery record NOTICE-1842.",
+      },
     });
-    expect(partyResponse.statusCode).toBe(200);
-    expect(partyResponse.json().status).toBe("information_received");
+    expect(sellerResponse.statusCode).toBe(200);
+    expect(sellerResponse.json()).toEqual(expect.objectContaining({
+      status: "information_requested",
+      respondingParty: "seller",
+      pendingParties: ["buyer"],
+    }));
+
+    const buyerResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "cancellation-info-buyer-response" },
+      payload: {
+        requestMessageId: informationRequestMessage.id,
+        note: "I requested the delivery record on July 31 and received no files or working link.",
+      },
+    });
+    expect(buyerResponse.statusCode).toBe(200);
+    expect(buyerResponse.json()).toEqual(expect.objectContaining({
+      status: "information_received",
+      respondingParty: "buyer",
+      pendingParties: [],
+    }));
     const reviewWithMessages = await server.prisma.cancellationRequest.findUniqueOrThrow({
       where: { reference: existingCancellation.reference },
       include: { reviewMessages: { orderBy: { id: "asc" } } },
     });
     expect(reviewWithMessages.reviewMessages).toEqual([
-      expect.objectContaining({ kind: "request_information", authorRole: "admin" }),
-      expect.objectContaining({ kind: "party_response", authorRole: "party" }),
+      expect.objectContaining({
+        kind: "request_information",
+        authorRole: "admin",
+        requestRecipient: "both",
+      }),
+      expect.objectContaining({
+        kind: "party_response",
+        authorRole: "party",
+        respondingParty: "seller",
+        inResponseToId: informationRequestMessage.id,
+      }),
+      expect.objectContaining({
+        kind: "party_response",
+        authorRole: "party",
+        respondingParty: "buyer",
+        inResponseToId: informationRequestMessage.id,
+      }),
     ]);
+
+    const targetedRequest = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: {
+        Authorization: `Bearer ${administrativeOperatorToken}`,
+        "Idempotency-Key": "seller-only-information-request",
+      },
+      payload: {
+        action: "request_information",
+        rationale: "Seller: provide the delivery link and timestamp for the disputed work.",
+        recipient: "seller",
+      },
+    });
+    expect(targetedRequest.statusCode).toBe(200);
+    const targetedRequestMessage = await server.prisma.cancellationReviewMessage.findFirstOrThrow({
+      where: {
+        cancellationRequestId: existingCancellation.id,
+        kind: "request_information",
+        requestRecipient: "seller",
+      },
+      orderBy: { id: "desc" },
+    });
+    const wrongPartyResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "buyer-cannot-answer-seller-request" },
+      payload: {
+        requestMessageId: targetedRequestMessage.id,
+        note: "I am the buyer and should not be able to answer the seller-only request.",
+      },
+    });
+    expect(wrongPartyResponse.statusCode).toBe(403);
+    expect(wrongPartyResponse.json().error).toBe("This information request is addressed to the seller.");
+    const targetedSellerResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "seller-targeted-response" },
+      payload: {
+        requestMessageId: targetedRequestMessage.id,
+        note: "The delivery link was sent on July 30 at 4:00 PM under record DELIVERY-19.",
+      },
+    });
+    expect(targetedSellerResponse.statusCode).toBe(200);
+    expect(targetedSellerResponse.json()).toEqual(expect.objectContaining({
+      status: "information_received",
+      respondingParty: "seller",
+      pendingParties: [],
+    }));
+    const duplicateTargetedResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "seller-targeted-response-duplicate" },
+      payload: {
+        requestMessageId: targetedRequestMessage.id,
+        note: "This second answer must not create another response for the same request.",
+      },
+    });
+    expect(duplicateTargetedResponse.statusCode).toBe(409);
+    expect(duplicateTargetedResponse.json().error).toBe("You already responded to this information request.");
+
+    const overlappingSharedRequest = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: {
+        Authorization: `Bearer ${administrativeOperatorToken}`,
+        "Idempotency-Key": "overlapping-shared-information-request",
+      },
+      payload: {
+        action: "request_information",
+        rationale: "Both parties: confirm whether the delivery link could be opened.",
+        recipient: "both",
+      },
+    });
+    expect(overlappingSharedRequest.statusCode).toBe(200);
+    const overlappingSharedMessage = await server.prisma.cancellationReviewMessage.findFirstOrThrow({
+      where: {
+        cancellationRequestId: existingCancellation.id,
+        kind: "request_information",
+        body: "Both parties: confirm whether the delivery link could be opened.",
+      },
+    });
+    const overlappingSellerResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "overlapping-shared-seller-response" },
+      payload: {
+        requestMessageId: overlappingSharedMessage.id,
+        note: "The delivery link opened from the seller account on July 30.",
+      },
+    });
+    expect(overlappingSellerResponse.json()).toEqual(expect.objectContaining({
+      status: "information_requested",
+      pendingParties: ["buyer"],
+    }));
+
+    const overlappingSellerRequest = await server.inject({
+      method: "POST",
+      url: `/api/operations/cancellations/${existingCancellation.reference}/actions`,
+      headers: {
+        Authorization: `Bearer ${administrativeOperatorToken}`,
+        "Idempotency-Key": "overlapping-seller-information-request",
+      },
+      payload: {
+        action: "request_information",
+        rationale: "Seller: identify the account used to verify the delivery link.",
+        recipient: "seller",
+      },
+    });
+    expect(overlappingSellerRequest.statusCode).toBe(200);
+    const overlappingSellerMessage = await server.prisma.cancellationReviewMessage.findFirstOrThrow({
+      where: {
+        cancellationRequestId: existingCancellation.id,
+        kind: "request_information",
+        body: "Seller: identify the account used to verify the delivery link.",
+      },
+    });
+    const overlappingTargetedResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${counterpartyToken}`, "Idempotency-Key": "overlapping-targeted-seller-response" },
+      payload: {
+        requestMessageId: overlappingSellerMessage.id,
+        note: "The link was checked using the seller account associated with this escrow.",
+      },
+    });
+    expect(overlappingTargetedResponse.json()).toEqual(expect.objectContaining({
+      status: "information_requested",
+      pendingParties: ["buyer"],
+    }));
+
+    const overlappingBuyerResponse = await server.inject({
+      method: "POST",
+      url: `/api/dashboard/cancellations/${existingCancellation.reference}/information`,
+      headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": "overlapping-shared-buyer-response" },
+      payload: {
+        requestMessageId: overlappingSharedMessage.id,
+        note: "The delivery link did not open from the buyer account on July 31.",
+      },
+    });
+    expect(overlappingBuyerResponse.json()).toEqual(expect.objectContaining({
+      status: "information_received",
+      pendingParties: [],
+    }));
+
     const healthWithResponse = await server.inject({
       method: "GET",
       url: "/api/operations/health",
@@ -4252,7 +4447,7 @@ describe("MyEscrow API", () => {
         action: "cancellation.administrative_review_action",
         entityId: { in: [existingCancellation.reference, referral.cancellationReference, execution.cancellationReference] },
       },
-    })).toBe(4);
+    })).toBe(7);
 
     const operationsEscrow = await server.inject({
       method: "GET",
